@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
+import '../services/theme_service.dart';
+import '../widgets/liquid_glass_card.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   const AnalyticsScreen({super.key});
@@ -102,6 +105,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildWeatherCard() {
+    final theme = ThemeService().currentTheme;
     final temp = EnergyService.parseDouble(_weather['temp'], 32.0);
     final humidity = EnergyService.parseInt(_weather['humidity'], 70);
     final desc = _weather['description'] ?? 'trời nắng';
@@ -109,30 +113,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final suggestion = _weather['suggestion'] ?? '';
     final windSpeed = EnergyService.parseDouble(_weather['wind_speed'], 3.0);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1E3A5F), Color(0xFF0F172A)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.3)),
-      ),
+    return LiquidGlassCard(
+      borderColor: const Color(0xFFFBBF24).withOpacity(0.3),
+      glowColor: const Color(0xFFFBBF24).withOpacity(0.08),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.wb_sunny, color: Color(0xFFFBBF24), size: 28),
+          const Icon(Icons.wb_sunny_rounded, color: Color(0xFFFBBF24), size: 26),
           const SizedBox(width: 10),
           Text("THỜI TIẾT $city".toUpperCase(),
-              style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
+              style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold, fontSize: 11.5, letterSpacing: 1)),
         ]),
         const SizedBox(height: 12),
         Row(children: [
           Text("${temp.toStringAsFixed(0)}°C",
-              style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold)),
+              style: const TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.bold, fontFeatures: [FontFeature.tabularFigures()])),
           const SizedBox(width: 16),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(desc, style: const TextStyle(color: Color(0xFFA5B4FC), fontSize: 14)),
+            Text(desc, style: TextStyle(color: theme.primary, fontSize: 14, fontWeight: FontWeight.w600)),
             Text("Độ ẩm: $humidity% · Gió: ${windSpeed.toStringAsFixed(1)} m/s",
                 style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
           ])),
@@ -142,14 +139,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
-              borderRadius: BorderRadius.circular(8),
+              color: theme.surface.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: Row(children: [
-              const Text("💡", style: TextStyle(fontSize: 16)),
+              const Icon(Icons.lightbulb_outline_rounded, color: Color(0xFF38BDF8), size: 16),
               const SizedBox(width: 8),
               Expanded(child: Text(suggestion,
-                  style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 12, fontStyle: FontStyle.italic))),
+                  style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11.5, fontStyle: FontStyle.italic))),
             ]),
           ),
         ],
@@ -158,25 +155,21 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildChartCard(String title, String key, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF334155)),
-      ),
+    return LiquidGlassCard(
+      borderColor: color.withOpacity(0.3),
+      glowColor: color.withOpacity(0.08),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 0.5)),
+          Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold, fontSize: 11.5, letterSpacing: 0.5)),
           if (_analytics.isNotEmpty)
             Text("Avg: ${_getAvg(key).toStringAsFixed(1)} · Max: ${_getMax(key).toStringAsFixed(1)}",
-                style: TextStyle(color: color.withOpacity(0.7), fontSize: 10)),
+                style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.bold, fontFeatures: const [FontFeature.tabularFigures()])),
         ]),
         const SizedBox(height: 10),
         SizedBox(
           height: 80,
           child: _analytics.isEmpty
-              ? const Center(child: Text("Đang thu thập...", style: TextStyle(color: Color(0xFF64748B), fontSize: 12)))
+              ? const Center(child: Text("Đang thu thập dữ liệu...", style: TextStyle(color: Color(0xFF64748B), fontSize: 12)))
               : CustomPaint(
                   size: const Size(double.infinity, 80),
                   painter: _ChartPainter(_analytics, key, color),
@@ -193,7 +186,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 2.0,
       children: [
         _statCard("Avg Power", "${_getAvg('power').toStringAsFixed(1)} W", const Color(0xFFF97316)),
-        _statCard("Max Power", "${_getMax('power').toStringAsFixed(1)} W", Colors.redAccent),
+        _statCard("Max Power", "${_getMax('power').toStringAsFixed(1)} W", const Color(0xFFEF4444)),
         _statCard("Avg Voltage", "${_getAvg('voltage').toStringAsFixed(1)} V", const Color(0xFF06B6D4)),
         _statCard("Min Voltage", "${_getMin('voltage').toStringAsFixed(1)} V", const Color(0xFFF59E0B)),
       ],
@@ -201,22 +194,16 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _statCard(String label, String value, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.25)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-          const SizedBox(height: 4),
-          Text(value, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold)),
-        ],
-      ),
+    return LiquidGlassCard(
+      padding: const EdgeInsets.all(10),
+      borderRadius: 14,
+      borderColor: color.withOpacity(0.25),
+      glowColor: color.withOpacity(0.06),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+        Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold, fontFeatures: const [FontFeature.tabularFigures()])),
+      ]),
     );
   }
 }
