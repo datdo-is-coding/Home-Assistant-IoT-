@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
 import '../services/notification_service.dart';
+import '../services/theme_service.dart';
+import '../services/weather_state.dart';
+import '../widgets/liquid_glass_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -170,28 +174,18 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     ]);
   }
 
-  // === HERO METRIC (Power - echo-nightly Glassmorphism) ===
+  // === HERO METRIC (Power - Liquid Glassmorphism) ===
   Widget _heroMetric() {
-    return Container(
-      width: double.infinity,
+    final theme = ThemeService().currentTheme;
+    return LiquidGlassCard(
+      borderColor: theme.primary.withOpacity(0.4),
+      glowColor: theme.primary.withOpacity(0.12),
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF131B2E).withOpacity(0.7),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.35), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00F2FE).withOpacity(0.08),
-            blurRadius: 24,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
       child: Column(children: [
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Container(
             width: 8, height: 8,
-            decoration: const BoxDecoration(color: Color(0xFF00F2FE), shape: BoxShape.circle),
+            decoration: BoxDecoration(color: theme.primary, shape: BoxShape.circle),
           ),
           const SizedBox(width: 8),
           const Text("CÔNG SUẤT TIÊU THỤ THỜI GIAN THỰC",
@@ -199,22 +193,27 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         ]),
         const SizedBox(height: 10),
         ShaderMask(
-          shaderCallback: (bounds) => const LinearGradient(
-            colors: [Color(0xFFFFFFFF), Color(0xFF38BDF8)],
+          shaderCallback: (bounds) => LinearGradient(
+            colors: [Colors.white, theme.primary],
             begin: Alignment.topCenter, end: Alignment.bottomCenter,
           ).createShader(bounds),
-          child: Text(_power.toStringAsFixed(0),
-              style: const TextStyle(color: Colors.white, fontSize: 56, fontWeight: FontWeight.w900, height: 1.0)),
+          child: Text(
+            _power.toStringAsFixed(0),
+            style: const TextStyle(
+              color: Colors.white, fontSize: 58, fontWeight: FontWeight.w900, height: 1.0,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFF00F2FE).withOpacity(0.1),
+            color: theme.primary.withOpacity(0.12),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.4)),
+            border: Border.all(color: theme.primary.withOpacity(0.4)),
           ),
-          child: const Text("WATT (W)", style: TextStyle(color: Color(0xFF00F2FE), fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold)),
+          child: Text("WATT (W)", style: TextStyle(color: theme.primary, fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold)),
         ),
       ]),
     );
@@ -225,33 +224,36 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     return GridView.count(
       crossAxisCount: 2, shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.5,
+      crossAxisSpacing: 10, mainAxisSpacing: 10, childAspectRatio: 1.45,
       children: [
-        _metricCard("VOLTAGE", "${_voltage.toStringAsFixed(1)} V", Icons.electric_meter, const Color(0xFF06B6D4)),
-        _metricCard("CURRENT", "${_current.toStringAsFixed(2)} A", Icons.compress, const Color(0xFFF59E0B)),
-        _metricCard("ENERGY", "${_energy.toStringAsFixed(2)} kWh", Icons.battery_charging_full, const Color(0xFF22C55E)),
-        _metricCard("PF / FREQ", "${_pf.toStringAsFixed(2)} · ${_frequency.toStringAsFixed(0)}Hz", Icons.speed, const Color(0xFFA78BFA)),
+        _metricCard("VOLTAGE", "${_voltage.toStringAsFixed(1)} V", Icons.electric_meter_rounded, const Color(0xFF06B6D4)),
+        _metricCard("CURRENT", "${_current.toStringAsFixed(2)} A", Icons.compress_rounded, const Color(0xFFF59E0B)),
+        _metricCard("ENERGY", "${_energy.toStringAsFixed(2)} kWh", Icons.battery_charging_full_rounded, const Color(0xFF10B981)),
+        _metricCard("PF / FREQ", "${_pf.toStringAsFixed(2)} · ${_frequency.toStringAsFixed(0)}Hz", Icons.speed_rounded, const Color(0xFFA78BFA)),
       ],
     );
   }
 
   Widget _metricCard(String title, String value, IconData icon, Color color) {
-    return Container(
+    return LiquidGlassCard(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.25)),
-        boxShadow: [BoxShadow(color: color.withOpacity(0.05), blurRadius: 10)],
-      ),
+      borderRadius: 16,
+      borderColor: color.withOpacity(0.3),
+      glowColor: color.withOpacity(0.08),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
         Row(children: [
           Icon(icon, color: color, size: 16),
           const SizedBox(width: 6),
-          Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10, fontWeight: FontWeight.bold)),
+          Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10.5, fontWeight: FontWeight.bold)),
         ]),
         const SizedBox(height: 8),
-        Text(value, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text(
+          value,
+          style: TextStyle(
+            color: color, fontSize: 17.5, fontWeight: FontWeight.bold,
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
       ]),
     );
   }
@@ -262,26 +264,76 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     final desc = _weather['description'] ?? 'trời nắng';
     final suggestion = _weather['suggestion'] ?? '';
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1E3A5F), Color(0xFF0F172A)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.2)),
+    // Auto-update weather effect from API
+    WeatherState().updateFromApi(desc);
+
+    return LiquidGlassCard(
+      borderColor: const Color(0xFFFBBF24).withOpacity(0.35),
+      glowColor: const Color(0xFFFBBF24).withOpacity(0.1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.wb_sunny_rounded, color: Color(0xFFFBBF24), size: 26),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text("Hà Nội · ${temp.toStringAsFixed(0)}°C · $desc",
+                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+              if (suggestion.isNotEmpty)
+                Text(suggestion, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ])),
+          ]),
+          const SizedBox(height: 10),
+
+          // Dynamic Weather Effect Selector Chips
+          ValueListenableBuilder<WeatherMode>(
+            valueListenable: WeatherState().currentMode,
+            builder: (context, currentMode, _) {
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _weatherChip(WeatherMode.sunny, "☀️ Nắng", currentMode),
+                    const SizedBox(width: 6),
+                    _weatherChip(WeatherMode.rainy, "🌧️ Mưa Kính", currentMode),
+                    const SizedBox(width: 6),
+                    _weatherChip(WeatherMode.stormy, "⛈️ Sấm Dông", currentMode),
+                    const SizedBox(width: 6),
+                    _weatherChip(WeatherMode.cloudy, "☁️ Mây U Ám", currentMode),
+                    const SizedBox(width: 6),
+                    _weatherChip(WeatherMode.auto, "🔄 Tự Động", currentMode),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
       ),
-      child: Row(children: [
-        const Icon(Icons.wb_sunny, color: Color(0xFFFBBF24), size: 28),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text("Hà Nội · ${temp.toStringAsFixed(0)}°C · $desc",
-              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-          if (suggestion.isNotEmpty)
-            Text(suggestion, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
-        ])),
-      ]),
+    );
+  }
+
+  Widget _weatherChip(WeatherMode mode, String label, WeatherMode currentMode) {
+    final isSelected = currentMode == mode;
+    final theme = ThemeService().currentTheme;
+    return GestureDetector(
+      onTap: () => WeatherState().setMode(mode),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? theme.primary.withOpacity(0.25) : theme.bg.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? theme.primary : const Color(0xFF334155)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? theme.primary : const Color(0xFF94A3B8),
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
     );
   }
 

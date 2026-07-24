@@ -7,6 +7,7 @@ import 'screens/settings_screen.dart';
 import 'services/energy_service.dart';
 import 'services/notification_service.dart';
 import 'services/theme_service.dart';
+import 'widgets/weather_glass_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -68,9 +69,11 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
     final theme = ThemeService().currentTheme;
     return Scaffold(
       backgroundColor: theme.bg,
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
+      body: WeatherGlassOverlay(
+        child: IndexedStack(
+          index: _currentIndex,
+          children: _screens,
+        ),
       ),
       bottomNavigationBar: Container(
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 16),

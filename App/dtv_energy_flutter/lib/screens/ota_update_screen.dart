@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:ota_update/ota_update.dart';
 import '../services/energy_service.dart';
+import '../services/theme_service.dart';
+import '../widgets/liquid_glass_card.dart';
 
 class OTAUpdateScreen extends StatefulWidget {
   const OTAUpdateScreen({super.key});
@@ -25,7 +27,7 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
   bool _isSuccess = false;
 
   // Android App OTA state
-  String _currentAppVersion = "1.0.8";
+  String _currentAppVersion = "1.0.10";
   String _serverAppVersion = "1.0.0";
   String _serverApkUrl = "";
   String _appChangelog = "";
@@ -210,14 +212,42 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
     }
   }
 
+  Widget _targetChip(int index, String label, String ip) {
+    final theme = ThemeService().currentTheme;
+    bool isSelected = _selectedTargetIndex == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedTargetIndex = index),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? theme.primary.withOpacity(0.2) : theme.bg,
+            border: Border.all(color: isSelected ? theme.primary : const Color(0xFF334155)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(children: [
+            Text(label, style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(ip, style: TextStyle(color: const Color(0xFF94A3B8), fontSize: 10)),
+          ]),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = ThemeService().currentTheme;
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: theme.bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E293B),
-        title: const Text("🚀 QUẢN LÝ NẠP OTA FIRMWARE",
-            style: TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 16)),
+        backgroundColor: theme.surface.withOpacity(0.9),
+        elevation: 0,
+        title: Row(children: [
+          Icon(Icons.system_update_rounded, color: theme.primary, size: 20),
+          const SizedBox(width: 8),
+          Text("QUẢN LÝ NẠP OTA FIRMWARE",
+              style: TextStyle(color: theme.primary, fontWeight: FontWeight.bold, fontSize: 15, letterSpacing: 1)),
+        ]),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -228,14 +258,14 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                const Icon(Icons.android, color: Color(0xFF22C55E), size: 28),
+                const Icon(Icons.android_rounded, color: Color(0xFF10B981), size: 28),
                 const SizedBox(width: 10),
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text("Phiên bản hiện tại: v$_currentAppVersion",
                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   Text("Bản mới trên Server: v$_serverAppVersion",
                       style: TextStyle(
-                        color: _serverAppVersion != _currentAppVersion ? const Color(0xFF38BDF8) : const Color(0xFF94A3B8),
+                        color: _serverAppVersion != _currentAppVersion ? theme.primary : const Color(0xFF94A3B8),
                         fontWeight: FontWeight.w600, fontSize: 12,
                       )),
                 ])),
@@ -243,13 +273,13 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
                   onPressed: _isCheckingApp ? null : _checkAppVersion,
                   icon: _isCheckingApp
                       ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.refresh, size: 16),
-                  label: const Text("Kiểm tra"),
+                      : Icon(Icons.refresh_rounded, size: 16, color: theme.primary),
+                  label: Text("Kiểm tra", style: TextStyle(color: theme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E293B),
-                    foregroundColor: const Color(0xFF38BDF8),
-                    side: const BorderSide(color: Color(0xFF38BDF8)),
+                    backgroundColor: theme.surface,
+                    side: BorderSide(color: theme.primary.withOpacity(0.5)),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
               ]),
@@ -258,8 +288,8 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A),
-                    borderRadius: BorderRadius.circular(8),
+                    color: theme.bg.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(_appChangelog, style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 11.5, height: 1.3)),
                 ),
@@ -270,8 +300,8 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
                 const SizedBox(height: 10),
                 LinearProgressIndicator(
                   value: _appProgressPercentage / 100.0,
-                  backgroundColor: const Color(0xFF0F172A),
-                  color: const Color(0xFF22C55E),
+                  backgroundColor: theme.bg,
+                  color: const Color(0xFF10B981),
                   minHeight: 6,
                 ),
               ],
@@ -279,131 +309,132 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _isAppUpdating ? null : _triggerAndroidAppSelfUpdate,
-                  icon: const Icon(Icons.system_update, size: 18),
-                  label: Text(_isAppUpdating ? "Đang tải APK ($_appProgressPercentage%)..." : "📥 Tải & Nạp OTA App Android Tự Động"),
+                  onPressed: (_isAppUpdating || _serverAppVersion == _currentAppVersion)
+                      ? null
+                      : _triggerAndroidAppSelfUpdate,
+                  icon: const Icon(Icons.cloud_download_rounded, size: 18),
+                  label: Text(
+                    _serverAppVersion != _currentAppVersion
+                        ? "📥 Tải & Nạp OTA App Android Tự Động (v$_serverAppVersion)"
+                        : "App Đang Ở Phiên Bản Mới Nhất",
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF22C55E),
+                    backgroundColor: theme.primary,
                     foregroundColor: Colors.black,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
               ),
             ],
           )),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
 
-          // ── SECTION 2: HARDWARE FIRMWARE OTA ────────
-          _section("⚡ 2. CHỌN THIẾT BỊ PHẦN CỨNG NẠP FIRMWARE", child: Column(children: [
-            DropdownButton<int>(
-              value: _selectedTargetIndex,
-              isExpanded: true,
-              dropdownColor: const Color(0xFF1E293B),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-              items: [
-                DropdownMenuItem(value: 0, child: Text("🎙️ Node 1: ESP32-S3 ($_s3Ip)")),
-                DropdownMenuItem(value: 1, child: Text("⚡ Node 2: WROOM ($_wroomIp)")),
-                const DropdownMenuItem(value: 2, child: Text("🌐 IP tùy chỉnh...")),
-              ],
-              onChanged: (v) { if (v != null) setState(() => _selectedTargetIndex = v); },
-            ),
-            if (_selectedTargetIndex == 2) ...[
+          // ── SECTION 2: HARDWARE FIRMWARE OTA ──────────
+          _section("⚡ 2. NẠP FIRMWARE OTA PHẦN CỨNG (ESP32)", child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+
+              // Target Node selector
+              const Text("CHỌN THIẾT BỊ NẠP:",
+                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+              const SizedBox(height: 6),
+              Row(children: [
+                _targetChip(0, "🎙️ ESP32-S3 Master", _s3Ip),
+                const SizedBox(width: 8),
+                _targetChip(1, "⚡ WROOM Slave", _wroomIp),
+              ]),
               const SizedBox(height: 8),
-              TextField(
-                controller: _customIpController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: "192.168.11.x", hintStyle: const TextStyle(color: Color(0xFF64748B)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF38BDF8))),
-                  filled: true, fillColor: const Color(0xFF0F172A),
-                ),
-              ),
-            ],
-          ])),
-          const SizedBox(height: 14),
-
-          // ── SECTION 3: FILE .BIN ────────────────────
-          _section("📁 3. CHỌN FILE FIRMWARE (.BIN)",
-            borderColor: _selectedFile != null ? const Color(0xFF22C55E).withOpacity(0.5) : null,
-            child: Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_selectedFile?.name ?? "Chưa chọn file",
-                    style: TextStyle(color: _selectedFile != null ? const Color(0xFF22C55E) : Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                if (_selectedFile != null)
-                  Text("${(_selectedFile!.size / 1024).toStringAsFixed(1)} KB",
-                      style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-              ])),
-              ElevatedButton.icon(
-                onPressed: _isUploading ? null : _pickFirmwareFile,
-                icon: const Icon(Icons.folder_open, size: 16),
-                label: const Text("Chọn File"),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7), foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 18),
-
-          // ── UPLOAD AREA ─────────────────────────────
-          Container(
-            padding: const EdgeInsets.all(20), width: double.infinity,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: _isSuccess ? const Color(0xFF22C55E) : _isUploading ? const Color(0xFF38BDF8) : const Color(0xFF334155),
-                width: 2,
-              ),
-            ),
-            child: Column(children: [
-              Icon(
-                _isSuccess ? Icons.check_circle_outline : _isUploading ? Icons.cloud_upload : Icons.sd_storage_outlined,
-                size: 44,
-                color: _isSuccess ? const Color(0xFF22C55E) : _isUploading ? const Color(0xFF38BDF8) : const Color(0xFF64748B),
-              ),
-              const SizedBox(height: 10),
-              Text(_statusMessage, textAlign: TextAlign.center,
-                  style: TextStyle(color: _isSuccess ? const Color(0xFF22C55E) : _statusMessage.contains("❌") ? Colors.redAccent : Colors.white, fontSize: 13, height: 1.4)),
-              if (_isUploading) ...[
-                const SizedBox(height: 14),
-                LinearProgressIndicator(value: _uploadProgress, backgroundColor: const Color(0xFF1E293B), color: const Color(0xFF38BDF8), minHeight: 6),
-                const SizedBox(height: 6),
-                Text("${(_uploadProgress * 100).toInt()}%", style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold)),
-              ],
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isUploading ? null : _startOtaUpload,
-                  icon: const Icon(Icons.upload_file),
-                  label: Text(_isUploading ? "Đang truyền..." : "🚀 Nạp Firmware OTA (.bin)"),
+              // Pick file button & selected file info
+              Row(children: [
+                ElevatedButton.icon(
+                  onPressed: _isUploading ? null : _pickFirmwareFile,
+                  icon: const Icon(Icons.folder_open_rounded, size: 16),
+                  label: const Text("Chọn file .bin"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _isUploading ? const Color(0xFF334155) : const Color(0xFF0284C7),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    backgroundColor: theme.surface,
+                    foregroundColor: theme.primary,
+                    side: BorderSide(color: theme.primary.withOpacity(0.5)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _selectedFile != null ? "${_selectedFile!.name} (${(_selectedFile!.size / 1024).toStringAsFixed(1)} KB)" : "Chưa chọn file",
+                    style: TextStyle(
+                      color: _selectedFile != null ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                      fontSize: 12, fontWeight: _selectedFile != null ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+
+              // Progress bar
+              if (_isUploading) ...[
+                LinearProgressIndicator(
+                  value: _uploadProgress,
+                  backgroundColor: theme.bg,
+                  color: theme.primary,
+                  minHeight: 8,
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // Status message box
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _isSuccess
+                      ? const Color(0xFF10B981).withOpacity(0.12)
+                      : theme.bg.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _isSuccess ? const Color(0xFF10B981) : const Color(0xFF334155),
+                  ),
+                ),
+                child: Text(
+                  _statusMessage,
+                  style: TextStyle(
+                    color: _isSuccess ? const Color(0xFF10B981) : const Color(0xFFCBD5E1),
+                    fontSize: 11.5, height: 1.3,
+                  ),
+                ),
               ),
-            ]),
-          ),
+              const SizedBox(height: 14),
+
+              // Start Upload Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: (_isUploading || _selectedFile == null) ? null : _startOtaUpload,
+                  icon: _isUploading
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.cloud_upload_rounded),
+                  label: Text(_isUploading ? "ĐANG NẠP OTA..." : "🚀 NẠP FIRMWARE OTA (.BIN)"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.secondary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ),
+            ],
+          )),
         ]),
       ),
     );
   }
 
   Widget _section(String title, {required Widget child, Color? borderColor}) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor ?? const Color(0xFF334155)),
-      ),
+    return LiquidGlassCard(
+      borderColor: borderColor,
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(title, style: const TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 1)),
         const SizedBox(height: 10),

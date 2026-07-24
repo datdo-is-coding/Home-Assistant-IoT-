@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
 import '../services/notification_service.dart';
 import '../services/theme_service.dart';
+import '../widgets/liquid_glass_card.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -276,18 +277,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool isConnected,
     required Widget child,
   }) {
-    return Container(
+    final theme = ThemeService().currentTheme;
+    final color = isConnected ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
+    return LiquidGlassCard(
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isConnected ? const Color(0xFF22C55E).withOpacity(0.4) : const Color(0xFFF97316).withOpacity(0.4),
-        ),
-      ),
+      borderColor: color.withOpacity(0.35),
+      glowColor: color.withOpacity(0.08),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(icon, color: const Color(0xFF38BDF8), size: 20),
+          Icon(icon, color: theme.primary, size: 20),
           const SizedBox(width: 8),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
