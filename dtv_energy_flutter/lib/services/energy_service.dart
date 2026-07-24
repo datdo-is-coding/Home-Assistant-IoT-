@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
@@ -165,25 +166,39 @@ class EnergyService {
     required Function(double progress) onProgress,
   }) async {
     try {
-      final uri = Uri.parse('http://$targetIp/update');
-      final request = http.MultipartRequest('POST', uri);
-
-      if (file.bytes != null) {
-        request.files.add(http.MultipartFile.fromBytes(
-          'update', file.bytes!, filename: file.name,
-        ));
-      } else if (file.path != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'update', file.path!, filename: file.name,
-        ));
-      } else {
-        return false;
+      List<int>? bytes = file.bytes;
+      if (bytes == null && file.path != null) {
+        bytes = await File(file.path!).readAsBytes();
       }
+      if (bytes == null || bytes.isEmpty) return false;
 
-      onProgress(0.1);
-      final response = await request.send().timeout(const Duration(seconds: 120));
+      final uri = Uri.parse('http://$targetIp/update');
+      onProgress(0.2);
+
+      // Attempt 1: Raw Binary HTTP POST (compatible with ESP32-S3 ESP-IDF Web OTA handler)
+      try {
+        final rawRes = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/octet-stream'},
+          body: bytes,
+        ).timeout(const Duration(seconds: 120));
+
+        if (rawRes.statusCode == 200) {
+          onProgress(1.0);
+          return true;
+        }
+      } catch (_) {}
+
+      // Attempt 2: Multipart Form-Data POST (compatible with ESP32 WROOM Arduino WebServer)
+      onProgress(0.5);
+      final request = http.MultipartRequest('POST', uri);
+      request.files.add(http.MultipartFile.fromBytes(
+        'update', bytes, filename: file.name,
+      ));
+
+      final streamedRes = await request.send().timeout(const Duration(seconds: 120));
       onProgress(1.0);
-      return response.statusCode == 200;
+      return streamedRes.statusCode == 200;
     } catch (_) {}
     return false;
   }
