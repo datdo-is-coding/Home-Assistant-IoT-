@@ -388,7 +388,7 @@ static esp_err_t api_config_get_handler(httpd_req_t *req)
 static esp_err_t api_app_version_get_handler(httpd_req_t *req)
 {
     add_cors_headers(req);
-    const char *json_resp = "{\"version\":\"1.0.5\",\"build_number\":5,\"apk_url\":\"http://192.168.11.51:8080/downloads/app-debug.apk\",\"changelog\":\"🔥 Bản nâng cấp v1.0.5: Tích hợp server trực tiếp trên ESP32-S3 Voice Master!\"}";
+    const char *json_resp = "{\"version\":\"1.0.6\",\"build_number\":6,\"apk_url\":\"http://192.168.11.51:8080/downloads/app-debug.apk\",\"changelog\":\"🔥 Bản nâng cấp v1.0.6: Tích hợp mô hình TinyML AI On-Device suy luận tại chỗ trên ESP32-S3!\"}";
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
 }
