@@ -37,18 +37,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
 
   double _getMax(String key) {
     if (_analytics.isEmpty) return 1.0;
-    return _analytics.map((d) => (d[key] as num?)?.toDouble() ?? 0.0).reduce(max);
+    return _analytics.map((d) => EnergyService.parseDouble(d[key])).reduce(max);
   }
 
   double _getAvg(String key) {
     if (_analytics.isEmpty) return 0.0;
-    final sum = _analytics.map((d) => (d[key] as num?)?.toDouble() ?? 0.0).reduce((a, b) => a + b);
+    final sum = _analytics.map((d) => EnergyService.parseDouble(d[key])).reduce((a, b) => a + b);
     return sum / _analytics.length;
   }
 
   double _getMin(String key) {
     if (_analytics.isEmpty) return 0.0;
-    return _analytics.map((d) => (d[key] as num?)?.toDouble() ?? 0.0).reduce(min);
+    return _analytics.map((d) => EnergyService.parseDouble(d[key])).reduce(min);
   }
 
   @override
@@ -102,12 +102,12 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _buildWeatherCard() {
-    final temp = (_weather['temp'] as num?)?.toDouble() ?? 32.0;
-    final humidity = (_weather['humidity'] as num?)?.toInt() ?? 70;
+    final temp = EnergyService.parseDouble(_weather['temp'], 32.0);
+    final humidity = EnergyService.parseInt(_weather['humidity'], 70);
     final desc = _weather['description'] ?? 'trời nắng';
     final city = _weather['city'] ?? 'Hà Nội';
     final suggestion = _weather['suggestion'] ?? '';
-    final windSpeed = (_weather['wind_speed'] as num?)?.toDouble() ?? 3.0;
+    final windSpeed = EnergyService.parseDouble(_weather['wind_speed'], 3.0);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -230,7 +230,7 @@ class _ChartPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (data.isEmpty) return;
-    final values = data.map((d) => (d[key] as num?)?.toDouble() ?? 0.0).toList();
+    final values = data.map((d) => EnergyService.parseDouble(d[key])).toList();
     final maxVal = values.reduce(max);
     final minVal = values.reduce(min);
     final range = maxVal - minVal;

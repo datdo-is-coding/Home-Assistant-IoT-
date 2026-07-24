@@ -19,6 +19,26 @@ class EnergyService {
 
   String get serverUrl => _serverUrl;
 
+  static double parseDouble(dynamic val, [double defaultVal = 0.0]) {
+    if (val == null) return defaultVal;
+    if (val is num) return val.toDouble();
+    if (val is String) {
+      final cleaned = val.replaceAll(RegExp(r'[^0-9.-]'), '');
+      return double.tryParse(cleaned) ?? defaultVal;
+    }
+    return defaultVal;
+  }
+
+  static int parseInt(dynamic val, [int defaultVal = 0]) {
+    if (val == null) return defaultVal;
+    if (val is num) return val.toInt();
+    if (val is String) {
+      final cleaned = val.replaceAll(RegExp(r'[^0-9-]'), '');
+      return int.tryParse(cleaned) ?? defaultVal;
+    }
+    return defaultVal;
+  }
+
   // ── Init ──────────────────────────────────────────────
 
   Future<void> loadSettings() async {

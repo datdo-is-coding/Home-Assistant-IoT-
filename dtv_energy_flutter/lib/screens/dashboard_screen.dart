@@ -48,13 +48,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Future<void> _fetchMetrics() async {
     final data = await _service.fetchLiveMetrics();
     if (mounted) setState(() {
-      _voltage = (data['voltage'] as num?)?.toDouble() ?? 0;
-      _current = (data['current'] as num?)?.toDouble() ?? 0;
-      _power = (data['power'] as num?)?.toDouble() ?? 0;
-      _energy = (data['energy'] as num?)?.toDouble() ?? 0;
-      _frequency = (data['frequency'] as num?)?.toDouble() ?? 50.0;
-      _pf = (data['pf'] as num?)?.toDouble() ?? 1.0;
-      _isOnline = data['is_online'] == true;
+      _voltage = EnergyService.parseDouble(data['voltage'], 0.0);
+      _current = EnergyService.parseDouble(data['current'], 0.0);
+      _power = EnergyService.parseDouble(data['power'], 0.0);
+      _energy = EnergyService.parseDouble(data['energy'], 0.0);
+      _frequency = EnergyService.parseDouble(data['frequency'], 50.0);
+      _pf = EnergyService.parseDouble(data['pf'], 1.0);
+      _isOnline = data['is_online'] == true || data['voltage'] != null;
     });
   }
 
@@ -190,7 +190,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   // === QUICK WEATHER ===
   Widget _quickWeather() {
-    final temp = (_weather['temp'] as num?)?.toDouble() ?? 32.0;
+    final temp = EnergyService.parseDouble(_weather['temp'], 32.0);
     final desc = _weather['description'] ?? 'trời nắng';
     final suggestion = _weather['suggestion'] ?? '';
 
