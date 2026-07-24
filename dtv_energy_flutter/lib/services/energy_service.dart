@@ -139,6 +139,7 @@ class EnergyService {
       return OtaUpdate().execute(
         url,
         destinationFilename: 'dtv_energy_latest.apk',
+        androidProviderAuthority: 'com.example.dtv_energy_flutter.ota_update_provider',
       );
     } catch (_) {
       return null;
