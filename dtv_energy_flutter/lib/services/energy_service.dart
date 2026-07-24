@@ -164,6 +164,7 @@ class EnergyService {
     required String targetIp,
     required PlatformFile file,
     required Function(double progress) onProgress,
+    bool isS3Master = false,
   }) async {
     try {
       List<int>? bytes = file.bytes;

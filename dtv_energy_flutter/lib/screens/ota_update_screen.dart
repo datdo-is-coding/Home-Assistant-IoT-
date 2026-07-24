@@ -111,6 +111,7 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
     final ok = await _service.uploadOtaFirmware(
       targetIp: _targetIp,
       file: _selectedFile!,
+      isS3Master: _selectedTargetIndex == 0,
       onProgress: (p) { if (mounted) setState(() => _uploadProgress = p); },
     );
 
