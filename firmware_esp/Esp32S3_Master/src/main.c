@@ -325,6 +325,16 @@ static esp_err_t update_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t data_get_handler(httpd_req_t *req)
+{
+    char json_resp[384];
+    snprintf(json_resp, sizeof(json_resp),
+             "{\"voltage\":\"%.2f\",\"current\":\"%.3f\",\"power\":\"%.2f\",\"energy\":\"%.3f\",\"frequency\":\"%.1f\",\"pf\":\"%.2f\",\"today\":\"0.00\",\"yesterday\":\"0.00\",\"month\":\"0.00\",\"lastmonth\":\"0.00\",\"money\":\"0\",\"lastmoney\":\"0\"}",
+             live_voltage, live_current, live_power, live_energy, live_freq, live_pf);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
 static httpd_handle_t start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -337,6 +347,9 @@ static httpd_handle_t start_web_server(void)
 
         httpd_uri_t api_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = api_status_get_handler };
         httpd_register_uri_handler(server, &api_uri);
+
+        httpd_uri_t data_uri = { .uri = "/data", .method = HTTP_GET, .handler = data_get_handler };
+        httpd_register_uri_handler(server, &data_uri);
 
         httpd_uri_t update_uri = { .uri = "/update", .method = HTTP_POST, .handler = update_post_handler };
         httpd_register_uri_handler(server, &update_uri);
@@ -359,20 +372,65 @@ static void esp_now_send_callback(const uint8_t *mac_addr, esp_now_send_status_t
     }
 }
 
+static void wifi_event_handler(void* arg, esp_event_base_t event_base,
+                               int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        ESP_LOGI(TAG, "Wi-Fi STA Started, connecting to 'XIAOMI'...");
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_event_sta_disconnected_t *dis = (wifi_event_sta_disconnected_t*) event_data;
+        ESP_LOGW(TAG, "Wi-Fi disconnected (reason: %d), retrying connection to 'XIAOMI'...", dis->reason);
+        esp_wifi_connect();
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "=================================================");
+        ESP_LOGI(TAG, "🌐 ESP32-S3 CONNECTED TO WIFI 'XIAOMI'!");
+        ESP_LOGI(TAG, "📌 GOT IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "=================================================");
+    }
+}
+
 /**
  * @brief Initialize Wi-Fi in STA mode & ESP-NOW protocol
  */
+
 static esp_err_t init_esp_now_master(void)
 {
-    ESP_LOGI(TAG, "Initializing ESP-NOW Wireless Communication (STA Mode, Channel 11)...");
+    ESP_LOGI(TAG, "Initializing ESP-NOW & Wi-Fi STA Mode (Connecting to 'XIAOMI')...");
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &wifi_event_handler,
+                                                        NULL,
+                                                        NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &wifi_event_handler,
+                                                        NULL,
+                                                        NULL));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = "XIAOMI",
+            .password = "1234567890",
+            .scan_method = WIFI_ALL_CHANNEL_SCAN,
+            .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
+            .threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK,
+        },
+    };
+
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_ERROR_CHECK(esp_wifi_set_channel(11, WIFI_SECOND_CHAN_NONE));
+    esp_wifi_connect();
 
     uint8_t s3_mac[6];
     esp_wifi_get_mac(WIFI_IF_STA, s3_mac);
@@ -575,6 +633,26 @@ static void audio_detect_task(void *arg)
     vTaskDelete(NULL);
 }
 
+
+/**
+ * @brief Continuous Telemetry Polling Task: Polls WROOM Slave every 5s for live power data
+ */
+static void telemetry_poll_task(void *arg)
+{
+    ESP_LOGI(TAG, "📊 Continuous Telemetry Polling Task Started (5s interval)...");
+    vTaskDelay(pdMS_TO_TICKS(3000)); // Wait for system init
+
+    while (1) {
+        // Brief yellow flash to indicate polling
+        set_rgb_led_color(80, 80, 0);
+        send_esp_now_request_power();
+        vTaskDelay(pdMS_TO_TICKS(200));
+        // Return to dim blue idle state
+        set_rgb_led_color(0, 0, 30);
+        vTaskDelay(pdMS_TO_TICKS(4800)); // Total cycle = 5s
+    }
+}
+
 void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(1000)); // Allow serial monitor to connect
@@ -601,6 +679,10 @@ void app_main(void)
     // 2. Initialize ESP-NOW Master Protocol & HTTP Web Server with Web OTA
     init_esp_now_master();
     start_web_server();
+
+    // 2b. Start continuous telemetry polling task (5s interval)
+    xTaskCreate(telemetry_poll_task, "telemetry_poll", 3072, NULL, 4, NULL);
+
 
 
 
