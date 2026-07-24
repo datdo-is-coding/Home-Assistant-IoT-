@@ -496,10 +496,10 @@ struct AppVersionResponse {
 /// GET /api/app-version — returns latest Android App version info
 async fn handle_app_version() -> impl IntoResponse {
     Json(AppVersionResponse {
-        version: "1.0.2".to_string(),
-        build_number: 3,
+        version: "1.0.5".to_string(),
+        build_number: 5,
         apk_url: "/downloads/app-debug.apk".to_string(),
-        changelog: "🔥 Nâng cấp v1.0.2: Thêm công cụ Tính Tiền Điện EVN Bậc Thang 2026, tính toán tiết kiệm điện & giao diện cải tiến!".to_string(),
+        changelog: "🔥 Nâng cấp v1.0.5: Tích hợp công cụ Tính Tiền Điện EVN Bậc Thang 2026, tối ưu kết nối Rust Gateway & Nạp App OTA!".to_string(),
     })
 }
 
