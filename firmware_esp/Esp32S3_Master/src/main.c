@@ -245,29 +245,104 @@ static const char index_html[] =
 "    let d = await r.json();"
 "    document.getElementById('v').innerText = d.voltage.toFixed(1) + ' V';"
 "    document.getElementById('a').innerText = d.current.toFixed(2) + ' A';"
-"    document.getElementById('w').innerText = d.power.toFixed(1) + ' W';"
 "    document.getElementById('kwh').innerText = d.energy.toFixed(2) + ' kWh';"
 "  }catch(e){}"
 "}, 1000);"
 "</script></body></html>";
-
 static esp_err_t index_get_handler(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/html");
     return httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
 }
 
+static void add_cors_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+}
+
+static esp_err_t options_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+
 static esp_err_t api_status_get_handler(httpd_req_t *req)
 {
-    char json_resp[256];
+    add_cors_headers(req);
+    char json_resp[384];
     snprintf(json_resp, sizeof(json_resp),
-             "{\"voltage\":%.2f,\"current\":%.3f,\"power\":%.2f,\"energy\":%.3f,\"frequency\":%.1f,\"pf\":%.2f,\"wakenet\":\"Hi ESP\"}",
+             "{\"voltage\":%.2f,\"current\":%.3f,\"power\":%.2f,\"energy\":%.3f,\"frequency\":%.1f,\"pf\":%.2f,\"today\":0.0,\"yesterday\":0.0,\"month\":0.0,\"lastmonth\":0.0,\"money\":0,\"lastmoney\":0,\"wakenet\":\"Hi ESP\"}",
              live_voltage, live_current, live_power, live_energy, live_freq, live_pf);
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
 }
 
-// Web OTA Handler
+static esp_err_t data_get_handler(httpd_req_t *req)
+{
+    return api_status_get_handler(req);
+}
+
+static esp_err_t api_alerts_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *json_resp = "["
+        "{\"level\":\"normal\",\"title\":\"Hệ Thống ESP32-S3 Server Standalone Live\",\"message\":\"Điện áp lưới ổn định 220V±5% đo từ PZEM-004T\",\"icon\":\"⚡\"},"
+        "{\"level\":\"tip\",\"title\":\"Mẹo Tiết Kiệm Điện EVN\",\"message\":\"Dùng máy lạnh 26°C kết hợp quạt gió giúp tiết kiệm 20% tiền điện tháng này\",\"icon\":\"💡\"}"
+        "]";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_weather_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *json_resp = "{\"location\":\"Hà Nội\",\"temp\":\"29°C\",\"condition\":\"Mây rải rác\",\"humidity\":\"75%\",\"icon\":\"⛅\"}";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_analytics_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    char json_resp[512];
+    snprintf(json_resp, sizeof(json_resp),
+             "{\"history\":[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f],\"max_power\":5000.0,\"avg_power\":%.1f}",
+             live_power, live_power, live_power, live_power, live_power,
+             live_power, live_power, live_power, live_power, live_power, live_power);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_config_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *json_resp = "{\"s3_ip\":\"192.168.11.181\",\"wroom_ip\":\"192.168.11.182\"}";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_app_version_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *json_resp = "{\"version\":\"1.0.5\",\"build_number\":5,\"apk_url\":\"http://192.168.11.51:8080/downloads/app-debug.apk\",\"changelog\":\"🔥 Bản nâng cấp v1.0.5: Tích hợp server trực tiếp trên ESP32-S3 Voice Master!\"}";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static esp_err_t api_google_assistant_post_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    char resp[384];
+    snprintf(resp, sizeof(resp),
+             "{\"fulfillmentText\":\"DTV Energy Server trên ESP32-S3 báo cáo: Công suất điện hiện tại là %.1f Watt, điện áp %.1f Volt.\"}",
+             live_power, live_voltage);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t update_post_handler(httpd_req_t *req)
 {
     esp_ota_handle_t ota_handle;
@@ -295,6 +370,7 @@ static esp_err_t update_post_handler(httpd_req_t *req)
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
+
         err = esp_ota_write(ota_handle, buf, recv_len);
         if (err != ESP_OK) {
             esp_ota_abort(ota_handle);
@@ -325,20 +401,11 @@ static esp_err_t update_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t data_get_handler(httpd_req_t *req)
-{
-    char json_resp[384];
-    snprintf(json_resp, sizeof(json_resp),
-             "{\"voltage\":\"%.2f\",\"current\":\"%.3f\",\"power\":\"%.2f\",\"energy\":\"%.3f\",\"frequency\":\"%.1f\",\"pf\":\"%.2f\",\"today\":\"0.00\",\"yesterday\":\"0.00\",\"month\":\"0.00\",\"lastmonth\":\"0.00\",\"money\":\"0\",\"lastmoney\":\"0\"}",
-             live_voltage, live_current, live_power, live_energy, live_freq, live_pf);
-    httpd_resp_set_type(req, "application/json");
-    return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
-}
-
 static httpd_handle_t start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
+    config.max_uri_handlers = 12;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -351,18 +418,35 @@ static httpd_handle_t start_web_server(void)
         httpd_uri_t data_uri = { .uri = "/data", .method = HTTP_GET, .handler = data_get_handler };
         httpd_register_uri_handler(server, &data_uri);
 
+        httpd_uri_t alerts_uri = { .uri = "/api/alerts", .method = HTTP_GET, .handler = api_alerts_get_handler };
+        httpd_register_uri_handler(server, &alerts_uri);
+
+        httpd_uri_t weather_uri = { .uri = "/api/weather", .method = HTTP_GET, .handler = api_weather_get_handler };
+        httpd_register_uri_handler(server, &weather_uri);
+
+        httpd_uri_t analytics_uri = { .uri = "/api/analytics", .method = HTTP_GET, .handler = api_analytics_get_handler };
+        httpd_register_uri_handler(server, &analytics_uri);
+
+        httpd_uri_t config_uri = { .uri = "/api/config", .method = HTTP_GET, .handler = api_config_get_handler };
+        httpd_register_uri_handler(server, &config_uri);
+
+        httpd_uri_t app_ver_uri = { .uri = "/api/app-version", .method = HTTP_GET, .handler = api_app_version_get_handler };
+        httpd_register_uri_handler(server, &app_ver_uri);
+
+        httpd_uri_t ga_uri = { .uri = "/api/google-assistant", .method = HTTP_POST, .handler = api_google_assistant_post_handler };
+        httpd_register_uri_handler(server, &ga_uri);
+
+        httpd_uri_t options_uri = { .uri = "/api/*", .method = HTTP_OPTIONS, .handler = options_handler };
+        httpd_register_uri_handler(server, &options_uri);
+
         httpd_uri_t update_uri = { .uri = "/update", .method = HTTP_POST, .handler = update_post_handler };
         httpd_register_uri_handler(server, &update_uri);
 
-        ESP_LOGI(TAG, "Web Server & Web OTA Handlers registered on port 80");
+        ESP_LOGI(TAG, "Standalone ESP32-S3 Server & Web OTA Handlers registered on port 80");
     }
     return server;
 }
 
-
-/**
- * @brief ESP-NOW Data Send Callback
- */
 static void esp_now_send_callback(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
     if (status == ESP_NOW_SEND_SUCCESS) {

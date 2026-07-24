@@ -9,7 +9,7 @@ import 'package:ota_update/ota_update.dart';
 /// Flutter NEVER calls ESP32 directly for data (only for OTA uploads).
 class EnergyService {
   static const String _serverUrlKey = 'rust_server_url';
-  static const String _defaultServerUrl = 'http://192.168.11.51:8080';
+  static const String _defaultServerUrl = 'http://192.168.11.181';
 
   String _serverUrl = _defaultServerUrl;
 
