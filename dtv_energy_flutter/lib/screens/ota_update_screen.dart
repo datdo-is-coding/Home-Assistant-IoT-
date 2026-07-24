@@ -136,6 +136,7 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
       setState(() {
         _isCheckingApp = false;
         _serverAppVersion = appVer['version'] ?? "1.0.0";
+        _serverApkUrl = appVer['apk_url'];
         _appChangelog = appVer['changelog'] ?? "";
         if (_serverAppVersion != _currentAppVersion) {
           _appStatusMessage = "🎉 Có bản cập nhật App mới v$_serverAppVersion!";

@@ -47,6 +47,33 @@ class EnergyService {
     };
   }
 
+  /// Fetch latest Android App version info from Rust Server
+  Future<Map<String, dynamic>> fetchAppVersion() async {
+    try {
+      final res = await http.get(Uri.parse('$_serverUrl/api/app-version'))
+          .timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        String apkUrl = data['apk_url'] ?? '';
+        if (apkUrl.startsWith('/')) {
+          apkUrl = '$_serverUrl$apkUrl';
+        }
+        return {
+          "version": data['version'] ?? "1.0.0",
+          "build_number": data['build_number'] ?? 1,
+          "apk_url": apkUrl.isNotEmpty ? apkUrl : 'http://192.168.11.51:8080/downloads/app-debug.apk',
+          "changelog": data['changelog'] ?? "Bản mới nhất",
+        };
+      }
+    } catch (_) {}
+    return {
+      "version": "1.0.0",
+      "build_number": 1,
+      "apk_url": "http://192.168.11.51:8080/downloads/app-debug.apk",
+      "changelog": "Bản hiện tại",
+    };
+  }
+
   /// Smart alerts
   Future<List<dynamic>> fetchAlerts() async {
     try {
@@ -107,29 +134,6 @@ class EnergyService {
   }
 
   // ── ANDROID APP OTA SELF-UPDATE ───────────────────────
-
-  /// Fetch latest Android App version info from Rust Server
-  Future<Map<String, dynamic>> fetchAppVersion() async {
-    try {
-      final res = await http.get(Uri.parse('$_serverUrl/api/app-version'))
-          .timeout(const Duration(seconds: 3));
-      if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(res.body);
-        String url = data['apk_url'] ?? '';
-        if (url.startsWith('/')) {
-          url = '$_serverUrl$url';
-        }
-        data['apk_url'] = url;
-        return data;
-      }
-    } catch (_) {}
-    return {
-      "version": "1.0.0",
-      "build_number": 1,
-      "apk_url": "$_serverUrl/downloads/app-debug.apk",
-      "changelog": "Bản hiện tại",
-    };
-  }
 
   /// Download and trigger Android App self-install via OTA
   Stream<OtaEvent>? triggerAppOtaUpdate({String? customApkUrl}) {
