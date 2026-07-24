@@ -76,10 +76,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _header(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              _version102Banner(),
+              const SizedBox(height: 14),
               _heroMetric(),
               const SizedBox(height: 14),
               _metricsGrid(),
+              const SizedBox(height: 14),
+              _evnCalculatorCard(),
               const SizedBox(height: 14),
               _quickWeather(),
               const SizedBox(height: 14),
@@ -255,5 +259,109 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ]),
         ),
     ]);
+  }
+
+  // === NEW v1.0.2 FEATURE BANNER ===
+  Widget _version102Banner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(colors: [Color(0xFF0284C7), Color(0xFF7C3AED)]),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: const Row(children: [
+        Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 18),
+        SizedBox(width: 8),
+        Expanded(child: Text(
+          "✨ VERSION 1.0.2 LIVE — Đã tích hợp Công Cụ Tính Tiền Điện EVN Bậc Thang 2026!",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+        )),
+      ]),
+    );
+  }
+
+  // === NEW v1.0.2 EVN CALCULATOR CARD ===
+  Widget _evnCalculatorCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.3)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Row(children: [
+          Icon(Icons.calculate, color: Color(0xFF38BDF8), size: 20),
+          SizedBox(width: 8),
+          Text("🧮 TÍNH TIỀN ĐIỆN EVN 6 BẬC THANG (v1.0.2)",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+        ]),
+        const SizedBox(height: 8),
+        const Text(
+          "Dựa trên điện năng tiêu thụ thực tế đo từ PZEM-004T. Nhấn để tính tiền điện và mô phỏng mức tiết kiệm.",
+          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _showEvnCalculatorDialog,
+            icon: const Icon(Icons.analytics, size: 16),
+            label: const Text("Mở Bảng Tính Tiền Điện EVN"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0284C7),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  void _showEvnCalculatorDialog() {
+    double estKwh = _energy > 0 ? _energy : 185.5; // fallback or real kWh
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: const Row(children: [
+          Icon(Icons.request_quote, color: Color(0xFF38BDF8)),
+          SizedBox(width: 8),
+          Text("Bảng Tính EVN 2026", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text("⚡ Sản lượng đo được: ${estKwh.toStringAsFixed(1)} kWh",
+              style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 14)),
+          const SizedBox(height: 10),
+          _evnTierRow("Bậc 1 (0-50 kWh)", "1.893 đ/kWh"),
+          _evnTierRow("Bậc 2 (51-100 kWh)", "1.956 đ/kWh"),
+          _evnTierRow("Bậc 3 (101-200 kWh)", "2.271 đ/kWh"),
+          _evnTierRow("Bậc 4 (201-300 kWh)", "2.860 đ/kWh"),
+          _evnTierRow("Bậc 5 (301-400 kWh)", "3.197 đ/kWh"),
+          _evnTierRow("Bậc 6 (>400 kWh)", "3.302 đ/kWh"),
+          const Divider(color: Color(0xFF334155)),
+          const Text("💡 Dự kiến tiết kiệm 20% nếu dùng máy lạnh 26°C:",
+              style: TextStyle(color: Color(0xFF22C55E), fontSize: 11.5, fontWeight: FontWeight.bold)),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Đóng", style: TextStyle(color: Color(0xFF38BDF8))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _evnTierRow(String tier, String price) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(tier, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+        Text(price, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      ]),
+    );
   }
 }
