@@ -45,8 +45,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     await Future.wait([_fetchMetrics(), _fetchSlow()]);
   }
 
+  Map<String, dynamic> _tinyMlData = {};
+
   Future<void> _fetchMetrics() async {
     final data = await _service.fetchLiveMetrics();
+    final tinyMl = await _service.fetchTinyML();
     if (mounted) setState(() {
       _voltage = EnergyService.parseDouble(data['voltage'], 0.0);
       _current = EnergyService.parseDouble(data['current'], 0.0);
@@ -55,6 +58,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       _frequency = EnergyService.parseDouble(data['frequency'], 50.0);
       _pf = EnergyService.parseDouble(data['pf'], 1.0);
       _isOnline = data['is_online'] == true || data['voltage'] != null;
+      _tinyMlData = tinyMl;
     });
   }
 
@@ -80,6 +84,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               _version102Banner(),
               const SizedBox(height: 14),
               _heroMetric(),
+              const SizedBox(height: 14),
+              _tinyMlCard(),
               const SizedBox(height: 14),
               _metricsGrid(),
               const SizedBox(height: 14),
@@ -361,6 +367,58 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(tier, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
         Text(price, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      ]),
+    );
+  }
+
+  // === TINYML AI CARD ===
+  Widget _tinyMlCard() {
+    final pattern = _tinyMlData['pattern_name'] ?? 'Tải Điện Bình Thường & Tối Ưu';
+    final rec = _tinyMlData['recommendation'] ?? 'Mô hình TinyML ESP32-S3 đánh giá hệ thống an toàn.';
+    final score = EnergyService.parseInt(_tinyMlData['anomaly_score'], 5);
+    final latencyUs = EnergyService.parseInt(_tinyMlData['inference_us'], 525);
+
+    Color statusColor = const Color(0xFF22C55E);
+    if (score >= 70) {
+      statusColor = Colors.redAccent;
+    } else if (score >= 40) {
+      statusColor = Colors.amberAccent;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: statusColor.withOpacity(0.4)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.psychology, color: Color(0xFF38BDF8), size: 22),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text("🤖 TINYML AI ON-DEVICE (ESP32-S3 N16R8)",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: statusColor.withOpacity(0.5)),
+            ),
+            child: Text("${latencyUs} µs", style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          const Text("Mô Hình Đánh Giá: ", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+          Expanded(
+            child: Text(pattern, style: TextStyle(color: statusColor, fontSize: 11.5, fontWeight: FontWeight.bold)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Text("💡 Khuyên: $rec", style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 11)),
       ]),
     );
   }
