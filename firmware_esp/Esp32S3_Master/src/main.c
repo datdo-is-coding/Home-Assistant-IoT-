@@ -388,7 +388,7 @@ static esp_err_t api_config_get_handler(httpd_req_t *req)
 static esp_err_t api_app_version_get_handler(httpd_req_t *req)
 {
     add_cors_headers(req);
-    const char *json_resp = "{\"version\":\"1.0.7\",\"build_number\":7,\"apk_url\":\"http://192.168.11.51:8080/downloads/app-debug.apk\",\"changelog\":\"🔥 Bản nâng cấp v1.0.7: Đổi mới giao diện Echo Nightly sang trọng & Tích hợp Push Notifications!\"}";
+    const char *json_resp = "{\"version\":\"1.0.8\",\"build_number\":8,\"apk_url\":\"http://192.168.11.51:8080/downloads/app-debug.apk\",\"changelog\":\"🔥 Bản nâng cấp v1.0.8: Thêm 4 Bộ Theme Động (Echo Nightly, Cyberpunk Neon, Emerald Matrix, Solar Gold) & Loại bỏ Banner 1.0.2!\"}";
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
 }

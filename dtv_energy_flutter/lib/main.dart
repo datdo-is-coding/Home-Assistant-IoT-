@@ -6,11 +6,13 @@ import 'screens/ota_update_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/energy_service.dart';
 import 'services/notification_service.dart';
+import 'services/theme_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await EnergyService().loadSettings();
   await NotificationService().init();
+  await ThemeService().loadTheme();
   runApp(const DTVEnergyApp());
 }
 
@@ -19,20 +21,26 @@ class DTVEnergyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'DTV Energy Hub - Echo Nightly Edition',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF090D16),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00F2FE),
-          secondary: Color(0xFF7C3AED),
-          surface: Color(0xFF131B2E),
-        ),
-        useMaterial3: true,
-      ),
-      home: const MainTabNavigator(),
+    return ListenableBuilder(
+      listenable: ThemeService(),
+      builder: (context, child) {
+        final currentTheme = ThemeService().currentTheme;
+        return MaterialApp(
+          title: 'DTV Energy Hub - Echo Nightly Edition',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            brightness: Brightness.dark,
+            scaffoldBackgroundColor: currentTheme.bg,
+            colorScheme: ColorScheme.dark(
+              primary: currentTheme.primary,
+              secondary: currentTheme.secondary,
+              surface: currentTheme.surface,
+            ),
+            useMaterial3: true,
+          ),
+          home: const MainTabNavigator(),
+        );
+      },
     );
   }
 }
@@ -57,8 +65,9 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = ThemeService().currentTheme;
     return Scaffold(
-      backgroundColor: const Color(0xFF090D16),
+      backgroundColor: theme.bg,
       body: IndexedStack(
         index: _currentIndex,
         children: _screens,
@@ -67,12 +76,12 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
         margin: const EdgeInsets.fromLTRB(14, 0, 14, 16),
         height: 64,
         decoration: BoxDecoration(
-          color: const Color(0xFF131B2E).withOpacity(0.85),
+          color: theme.surface.withOpacity(0.9),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.25), width: 1.2),
+          border: Border.all(color: theme.primary.withOpacity(0.3), width: 1.2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF00F2FE).withOpacity(0.12),
+              color: theme.primary.withOpacity(0.12),
               blurRadius: 20,
               spreadRadius: 2,
               offset: const Offset(0, 4),
@@ -82,18 +91,18 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _navItem(0, Icons.grid_view_rounded, "Tổng Quan"),
-            _navItem(1, Icons.show_chart_rounded, "Phân Tích"),
-            _navItem(2, Icons.notifications_active_rounded, "Cảnh Báo"),
-            _navItem(3, Icons.system_update_rounded, "OTA"),
-            _navItem(4, Icons.settings_rounded, "Cài Đặt"),
+            _navItem(0, Icons.grid_view_rounded, "Tổng Quan", theme),
+            _navItem(1, Icons.show_chart_rounded, "Phân Tích", theme),
+            _navItem(2, Icons.notifications_active_rounded, "Cảnh Báo", theme),
+            _navItem(3, Icons.system_update_rounded, "OTA", theme),
+            _navItem(4, Icons.settings_rounded, "Cài Đặt", theme),
           ],
         ),
       ),
     );
   }
 
-  Widget _navItem(int index, IconData icon, String label) {
+  Widget _navItem(int index, IconData icon, String label, AppThemeData theme) {
     final isSelected = _currentIndex == index;
     return GestureDetector(
       onTap: () => setState(() => _currentIndex = index),
@@ -104,10 +113,10 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
         decoration: isSelected
             ? BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [const Color(0xFF00F2FE).withOpacity(0.25), const Color(0xFF7C3AED).withOpacity(0.25)],
+                  colors: [theme.primary.withOpacity(0.25), theme.secondary.withOpacity(0.25)],
                 ),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.6), width: 1),
+                border: Border.all(color: theme.primary.withOpacity(0.6), width: 1),
               )
             : null,
         child: Row(
@@ -115,7 +124,7 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
             Icon(
               icon,
               size: 20,
-              color: isSelected ? const Color(0xFF00F2FE) : const Color(0xFF64748B),
+              color: isSelected ? theme.primary : const Color(0xFF64748B),
             ),
             if (isSelected) ...[
               const SizedBox(width: 6),

@@ -25,7 +25,7 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
   bool _isSuccess = false;
 
   // Android App OTA state
-  String _currentAppVersion = "1.0.7";
+  String _currentAppVersion = "1.0.8";
   String _serverAppVersion = "1.0.0";
   String _serverApkUrl = "";
   String _appChangelog = "";

@@ -96,8 +96,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               _header(),
-              const SizedBox(height: 12),
-              _version102Banner(),
               const SizedBox(height: 14),
               _heroMetric(),
               const SizedBox(height: 14),

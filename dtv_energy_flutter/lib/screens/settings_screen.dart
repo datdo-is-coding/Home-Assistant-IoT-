@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
 import '../services/notification_service.dart';
+import '../services/theme_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -128,7 +129,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
           ),
-          const SizedBox(height: 16),
+          // ── THEME SELECTOR CARD ───
+          _themeSelectorCard(),
+          const SizedBox(height: 14),
 
           // ── RUST SERVER URL (only config app needs) ───
           _buildCard(
@@ -357,6 +360,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
         SizedBox(width: 70, child: Text(label, style: const TextStyle(color: Color(0xFF64748B), fontSize: 11))),
         Expanded(child: Text(value, style: const TextStyle(color: Color(0xFFE2E8F0), fontSize: 11))),
       ]),
+    );
+  }
+
+  // === THEME SELECTOR CARD ===
+  Widget _themeSelectorCard() {
+    return ListenableBuilder(
+      listenable: ThemeService(),
+      builder: (context, child) {
+        final service = ThemeService();
+        final currentMode = service.currentMode;
+
+        return _buildCard(
+          icon: Icons.palette_rounded,
+          title: "🎨 Giao Diện App (Dynamic Themes)",
+          subtitle: "Chọn màu sắc hiển thị phù hợp với phong cách",
+          isConnected: true,
+          child: Column(
+            children: AppThemeMode.values.map((mode) {
+              final themeData = ThemeService.themes[mode]!;
+              final isSelected = mode == currentMode;
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? themeData.surface : const Color(0xFF090D16).withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isSelected ? themeData.primary : const Color(0xFF334155),
+                    width: isSelected ? 1.5 : 1,
+                  ),
+                ),
+                child: ListTile(
+                  dense: true,
+                  onTap: () => service.setTheme(mode),
+                  leading: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: themeData.primary.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(themeData.icon, color: themeData.primary, size: 18),
+                  ),
+                  title: Text(
+                    themeData.name,
+                    style: TextStyle(
+                      color: isSelected ? Colors.white : const Color(0xFFCBD5E1),
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  subtitle: Text(
+                    themeData.description,
+                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 10),
+                  ),
+                  trailing: isSelected
+                      ? Icon(Icons.check_circle_rounded, color: themeData.primary, size: 18)
+                      : null,
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 }
