@@ -509,31 +509,32 @@ function toggleChatWindow() {
 }
 
 function fetchData() {
-    let ip = document.getElementById("espIpInput").value;
-    fetch(`/api/data?ip=` + encodeURIComponent(ip))
+    fetch('/api/status')
     .then(r => r.json())
     .then(data => {
         let statusTag = document.getElementById("statusTag");
         let offlineAlert = document.getElementById("offlineAlert");
 
+        let v = (typeof data.voltage === 'number') ? data.voltage : parseFloat(data.voltage || 0);
+        let i = (typeof data.current === 'number') ? data.current : parseFloat(data.current || 0);
+        let p = (typeof data.power === 'number') ? data.power : parseFloat(data.power || 0);
+        let e = (typeof data.energy === 'number') ? data.energy : parseFloat(data.energy || 0);
+
         if(data.is_online) {
             statusTag.classList.remove("offline");
-            document.getElementById("statusText").innerText = "ONLINE - " + ip;
+            document.getElementById("statusText").innerText = "ONLINE - ESP32-S3 (192.168.11.181)";
             if(offlineAlert) offlineAlert.style.display = "none";
         } else {
             statusTag.classList.add("offline");
-            document.getElementById("statusText").innerText = "OFFLINE - Chưa kết nối ESP32";
+            document.getElementById("statusText").innerText = "OFFLINE - Đang quét kết nối ESP32...";
             if(offlineAlert) offlineAlert.style.display = "block";
         }
 
-        document.getElementById("voltage").innerText = data.voltage;
-        document.getElementById("current").innerText = data.current;
-        document.getElementById("power").innerText = data.power;
-        document.getElementById("energy").innerText = data.energy;
-        document.getElementById("monthKwh").innerText = data.month;
-        document.getElementById("evnCost").innerText = Math.round(data.evn_vat_cost).toLocaleString("vi-VN") + " VNĐ";
+        document.getElementById("voltage").innerText = v.toFixed(1);
+        document.getElementById("current").innerText = i.toFixed(2);
+        document.getElementById("power").innerText = p.toFixed(0);
+        document.getElementById("energy").innerText = e.toFixed(1);
 
-        let p = parseFloat(data.power) || 0;
         pzemHistory.push(p);
         pzemHistory.shift();
 
