@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
+import '../services/notification_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -50,16 +51,31 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Future<void> _fetchMetrics() async {
     final data = await _service.fetchLiveMetrics();
     final tinyMl = await _service.fetchTinyML();
-    if (mounted) setState(() {
-      _voltage = EnergyService.parseDouble(data['voltage'], 0.0);
-      _current = EnergyService.parseDouble(data['current'], 0.0);
-      _power = EnergyService.parseDouble(data['power'], 0.0);
-      _energy = EnergyService.parseDouble(data['energy'], 0.0);
-      _frequency = EnergyService.parseDouble(data['frequency'], 50.0);
-      _pf = EnergyService.parseDouble(data['pf'], 1.0);
-      _isOnline = data['is_online'] == true || data['voltage'] != null;
-      _tinyMlData = tinyMl;
-    });
+    if (mounted) {
+      setState(() {
+        _voltage = EnergyService.parseDouble(data['voltage'], 0.0);
+        _current = EnergyService.parseDouble(data['current'], 0.0);
+        _power = EnergyService.parseDouble(data['power'], 0.0);
+        _energy = EnergyService.parseDouble(data['energy'], 0.0);
+        _frequency = EnergyService.parseDouble(data['frequency'], 50.0);
+        _pf = EnergyService.parseDouble(data['pf'], 1.0);
+        _isOnline = data['is_online'] == true || data['voltage'] != null;
+        _tinyMlData = tinyMl;
+      });
+
+      // 🔔 Auto push notification if TinyML detects anomaly or voltage spike
+      final score = EnergyService.parseInt(_tinyMlData['anomaly_score'], 0);
+      if (score >= 45) {
+        final pattern = _tinyMlData['pattern_name'] ?? 'Cảnh báo TinyML AI';
+        final rec = _tinyMlData['recommendation'] ?? '';
+        NotificationService().showAnomalyNotification(
+          id: 101,
+          title: "🤖 TinyML AI Alert: $pattern",
+          body: rec,
+          isCritical: score >= 70,
+        );
+      }
+    }
   }
 
   Future<void> _fetchSlow() async {
@@ -105,27 +121,50 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Widget _header() {
     return Row(children: [
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text("⚡ DTV ENERGY",
-            style: TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 20, letterSpacing: 1)),
-        Text("Smart Hub · Hà Nội",
-            style: TextStyle(color: const Color(0xFF64748B), fontSize: 12)),
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(colors: [Color(0xFF00F2FE), Color(0xFF7C3AED)]),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 8),
+          ShaderMask(
+            shaderCallback: (bounds) => const LinearGradient(
+              colors: [Color(0xFF00F2FE), Color(0xFF93C5FD)],
+            ).createShader(bounds),
+            child: const Text("DTV ECHO HUB",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20, letterSpacing: 1.2)),
+          ),
+        ]),
+        const SizedBox(height: 2),
+        const Text("Standalone IoT Gateway · Hà Nội",
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.w500)),
       ]),
       const Spacer(),
       AnimatedBuilder(
         animation: _pulseController,
         builder: (context, child) {
           return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
             decoration: BoxDecoration(
-              color: (_isOnline ? Colors.green : Colors.red).withOpacity(0.08 + _pulseController.value * 0.08),
+              color: (_isOnline ? const Color(0xFF10B981) : Colors.red).withOpacity(0.12 + _pulseController.value * 0.08),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _isOnline ? Colors.green : Colors.red, width: 1.2),
+              border: Border.all(color: _isOnline ? const Color(0xFF10B981) : Colors.red, width: 1.2),
+              boxShadow: [
+                BoxShadow(
+                  color: (_isOnline ? const Color(0xFF10B981) : Colors.red).withOpacity(0.2),
+                  blurRadius: 10,
+                ),
+              ],
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.sensors, size: 14, color: _isOnline ? Colors.green : Colors.red),
+              Icon(Icons.sensors_rounded, size: 14, color: _isOnline ? const Color(0xFF10B981) : Colors.red),
               const SizedBox(width: 5),
-              Text(_isOnline ? "ESP-NOW LIVE" : "OFFLINE",
-                  style: TextStyle(color: _isOnline ? Colors.green : Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
+              Text(_isOnline ? "ESP-NOW 24/7" : "OFFLINE",
+                  style: TextStyle(color: _isOnline ? const Color(0xFF10B981) : Colors.red, fontSize: 10.5, fontWeight: FontWeight.bold)),
             ]),
           );
         },
@@ -133,27 +172,52 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     ]);
   }
 
-  // === HERO METRIC (Power) ===
+  // === HERO METRIC (Power - echo-nightly Glassmorphism) ===
   Widget _heroMetric() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF0284C7).withOpacity(0.2),
-            const Color(0xFF1E293B),
-          ],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.3)),
+        color: const Color(0xFF131B2E).withOpacity(0.7),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.35), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00F2FE).withOpacity(0.08),
+            blurRadius: 24,
+            spreadRadius: 2,
+          ),
+        ],
       ),
       child: Column(children: [
-        const Text("ACTIVE POWER", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12, letterSpacing: 2, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        Text("${_power.toStringAsFixed(0)}", style: const TextStyle(color: Colors.white, fontSize: 52, fontWeight: FontWeight.bold)),
-        const Text("WATTS", style: TextStyle(color: Color(0xFF38BDF8), fontSize: 14, letterSpacing: 3)),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Container(
+            width: 8, height: 8,
+            decoration: const BoxDecoration(color: Color(0xFF00F2FE), shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 8),
+          const Text("CÔNG SUẤT TIÊU THỤ THỜI GIAN THỰC",
+              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11, letterSpacing: 1.5, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 10),
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [Color(0xFFFFFFFF), Color(0xFF38BDF8)],
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+          ).createShader(bounds),
+          child: Text(_power.toStringAsFixed(0),
+              style: const TextStyle(color: Colors.white, fontSize: 56, fontWeight: FontWeight.w900, height: 1.0)),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00F2FE).withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.4)),
+          ),
+          child: const Text("WATT (W)", style: TextStyle(color: Color(0xFF00F2FE), fontSize: 11, letterSpacing: 2, fontWeight: FontWeight.bold)),
+        ),
       ]),
     );
   }
@@ -371,54 +435,85 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === TINYML AI CARD ===
+  // === TINYML AI CARD (echo-nightly glassmorphic) ===
   Widget _tinyMlCard() {
     final pattern = _tinyMlData['pattern_name'] ?? 'Tải Điện Bình Thường & Tối Ưu';
     final rec = _tinyMlData['recommendation'] ?? 'Mô hình TinyML ESP32-S3 đánh giá hệ thống an toàn.';
     final score = EnergyService.parseInt(_tinyMlData['anomaly_score'], 5);
     final latencyUs = EnergyService.parseInt(_tinyMlData['inference_us'], 525);
 
-    Color statusColor = const Color(0xFF22C55E);
+    Color statusColor = const Color(0xFF10B981);
     if (score >= 70) {
-      statusColor = Colors.redAccent;
+      statusColor = const Color(0xFFEF4444);
     } else if (score >= 40) {
-      statusColor = Colors.amberAccent;
+      statusColor = const Color(0xFFF59E0B);
     }
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: statusColor.withOpacity(0.4)),
+        color: const Color(0xFF131B2E).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: statusColor.withOpacity(0.4), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withOpacity(0.12),
+            blurRadius: 18,
+            spreadRadius: 1,
+          ),
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          const Icon(Icons.psychology, color: Color(0xFF38BDF8), size: 22),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text("🤖 TINYML AI ON-DEVICE (ESP32-S3 N16R8)",
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-          ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
               color: statusColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.psychology_rounded, color: statusColor, size: 22),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text("🤖 TINYML AI ENGINE (ESP32-S3 N16R8)",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12, letterSpacing: 0.5)),
+              Text("On-Device Inference · Xtensa LX7 Vector",
+                  style: TextStyle(color: const Color(0xFF64748B), fontSize: 10)),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
               border: Border.all(color: statusColor.withOpacity(0.5)),
             ),
-            child: Text("${latencyUs} µs", style: TextStyle(color: statusColor, fontSize: 10, fontWeight: FontWeight.bold)),
+            child: Text("${latencyUs} µs", style: TextStyle(color: statusColor, fontSize: 10.5, fontWeight: FontWeight.bold)),
           ),
         ]),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Row(children: [
-          const Text("Mô Hình Đánh Giá: ", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+          const Text("Trạng Thái: ", style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5)),
           Expanded(
-            child: Text(pattern, style: TextStyle(color: statusColor, fontSize: 11.5, fontWeight: FontWeight.bold)),
+            child: Text(pattern, style: TextStyle(color: statusColor, fontSize: 12, fontWeight: FontWeight.bold)),
           ),
         ]),
         const SizedBox(height: 6),
-        Text("💡 Khuyên: $rec", style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 11)),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF090D16).withOpacity(0.6),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(children: [
+            const Icon(Icons.lightbulb_outline_rounded, color: Color(0xFF38BDF8), size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(rec, style: const TextStyle(color: Color(0xFFCBD5E1), fontSize: 11, height: 1.3)),
+            ),
+          ]),
+        ),
       ]),
     );
   }

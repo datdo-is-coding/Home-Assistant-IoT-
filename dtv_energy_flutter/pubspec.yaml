@@ -1,7 +1,7 @@
 name: dtv_energy_flutter
 description: "DTV Energy Hub - Next-Gen Flutter & Rust Power Ecosystem with Voice AI & Google Assistant"
 publish_to: 'none'
-version: 1.0.6+6
+version: 1.0.7+7
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -17,6 +17,7 @@ dependencies:
   file_picker: ^8.0.0
   ota_update: ^7.1.0
   url_launcher: ^6.2.0
+  flutter_local_notifications: ^17.0.0
 
 dev_dependencies:
   flutter_test:

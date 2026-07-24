@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/energy_service.dart';
+import '../services/notification_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -173,6 +174,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   label: const Text("Lưu IP lên Server"),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF0284C7),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 14),
+
+          // ── NOTIFICATION PUSH TEST ───
+          _buildCard(
+            icon: Icons.notifications_active_rounded,
+            title: "🔔 Push Notifications (Cảnh Báo System & TinyML)",
+            subtitle: "Tự động phát thông báo khi có bất thường điện năng",
+            isConnected: true,
+            child: Column(children: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    NotificationService().showAnomalyNotification(
+                      id: 999,
+                      title: "🤖 TinyML AI Alert: Hệ Số Cos φ Thấp (0.78)",
+                      body: "Phát hiện tải cảm quạt/động cơ. Nên gắn tụ bù để tối ưu tiền điện EVN.",
+                      isCritical: true,
+                    );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('🔔 Đã bắn thông báo thử nghiệm! Kiểm tra thanh trạng thái Android.'), backgroundColor: Color(0xFF00F2FE)),
+                    );
+                  },
+                  icon: const Icon(Icons.notifications_active, size: 16),
+                  label: const Text("Thử Nghiệm Bắn Thông Báo Push ngay"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
