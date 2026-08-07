@@ -1,0 +1,14 @@
+# PlatformIO build files
+.pio/
+.vscode/
+
+# Mosquitto data and log files
+mosquitto/data/*
+mosquitto/log/*
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store

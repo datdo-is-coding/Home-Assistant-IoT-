@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # 1. MQTT Broker (Eclipse Mosquitto)
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: iot_mosquitto
+    restart: always
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+
+  # 2. Database PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: iot_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: iot_db
+      POSTGRES_USER: iot_user
+      POSTGRES_PASSWORD: iot_password
+      TZ: Asia/Ho_Chi_Minh
+      PGTZ: Asia/Ho_Chi_Minh
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_data:/var/lib/postgresql/data
+
+  # 3. Web UI quản lý Database (Adminer) - Truy cập qua http://localhost:8080
+  adminer:
+    image: adminer:latest
+    container_name: iot_adminer
+    restart: always
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  # 4. Subscriber Service (Nhận tin MQTT & Ghi vào DB)
+  subscriber:
+    build: ./subscriber
+    container_name: iot_subscriber
+    restart: always
+    environment:
+      MQTT_BROKER: iot_mosquitto
+      MQTT_PORT: 1883
+      MQTT_TOPIC: esp32/sensor/data
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: iot_db
+      DB_USER: iot_user
+      DB_PASSWORD: iot_password
+      TZ: Asia/Ho_Chi_Minh
+    depends_on:
+      - mosquitto
+      - postgres
+
+volumes:
+  postgres_data:
