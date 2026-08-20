@@ -1,0 +1,143 @@
+;Proteus Design Interchange Format
+(PDIF
+ (vendor "SamacSys Limited")
+ (version 1 0)
+ (library
+  (part "B0505S-2W"
+   (description "2W isolated DC-DC converter Fixed input voltage, 5VDC, 400 mA unregulated single output")
+   (family "ANA")
+   (package "B0505S2W")
+   (attribute "Datasheet Link" "https://www.mornsun-power.com/html/pdf/B0505S-2WR3.html")
+   (attribute "Geometry.Height" "10.41mm")
+   (attribute "Manufacturer_Name" "Mornsun Power")
+   (attribute "Manufacturer_Part_Number" "B0505S-2W")
+   (attribute "Mouser Part Number" "")
+   (attribute "Mouser Price/Stock" "")
+   (attribute "Arrow Part Number" "")
+   (attribute "Arrow Price/Stock" "")
+   (gate
+    (symbol "B0505S-2W")
+    (pin "VIN" 1 PS)
+    (pin "GND" 2 PS)
+    (pin "0V" 4 PS)
+    (pin "+VO" 6 PS)
+   )
+  )
+  (symbol "B0505S-2W"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 200 100) (pt 700 100) (pt 700 -400) (pt 200 -400) (pt 200 100) (closed))
+   )
+   (terminal
+    (body (symbol "PIN") (pt 0 0) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -100) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -200) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -300) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+  )
+  (symbol "PIN"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 200 0))))
+  (symbol "PINSHORT"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 100 0))))
+  (package "B0505S2W"
+   (units MM)
+   (layer TASM
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -2.21 0.9)
+      (pt 17.44 0.9)
+      (pt 17.44 -6.15)
+      (pt -2.21 -6.15)
+      (pt -2.21 0.9))))
+   (layer OCCA
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -3.21 -7.15)
+      (pt 18.44 -7.15)
+      (pt 18.44 1.9)
+      (pt -3.21 1.9)
+      (pt -3.21 -7.15))))
+   (layer TSLK
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -0.005 1.5)
+      (arc (pt -0.005 1.500) (pt -0.055 1.400) (pt 0.045 1.500) (start 180.0) (sweep 90.0))
+      (pt -0.005 1.4)
+      (arc (pt -0.005 1.400) (pt -0.055 1.400) (pt 0.045 1.500) (start 180.0) (sweep -90.0))
+      (pt -0.005 1.5))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -0.985 0.9)
+      (pt -2.21 0.9)
+      (pt -2.21 -6.15)
+      (pt 17.44 -6.15)
+      (pt 17.44 0.9)
+      (pt 13.415 0.9))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 11.915 0.9)
+      (pt 8.315 0.9))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 6.915 0.9)
+      (pt 3.215 0.9))))
+   (leg 1 (pt 0.000 0.000) (padstack 1))
+   (leg 2 (pt 2.540 0.000) (padstack 0))
+   (leg 4 (pt 7.620 0.000) (padstack 0))
+   (leg 6 (pt 12.700 0.000) (padstack 0))
+   (padstack 0
+    (hole 1)
+    (plated true)
+    (pad (layer TCOP) (round 1.500))
+    (pad (layer INNER) (round 1.500))
+    (pad (layer BCOP) (round 1.500))
+   )
+   (padstack 1
+    (hole 1)
+    (plated true)
+    (pad (layer TCOP) (square 1.500))
+    (pad (layer INNER) (round 1.500))
+    (pad (layer BCOP) (square 1.500))
+   )
+   (model "B0505S-2W.stp"
+    (euler 0 0 0)
+    (offset 0 0 0)
+   )
+  )
+ )
+)

@@ -1,0 +1,122 @@
+;Proteus Design Interchange Format
+(PDIF
+ (vendor "SamacSys Limited")
+ (version 1 0)
+ (library
+  (part "PC817X3NIP1B"
+   (description "Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel")
+   (family "ANA")
+   (package "SOP254P960X420-4N")
+   (attribute "Datasheet Link" "https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf")
+   (attribute "Geometry.Height" "4.2mm")
+   (attribute "Manufacturer_Name" "Sharp Microelectronics")
+   (attribute "Manufacturer_Part_Number" "PC817X3NIP1B")
+   (attribute "Mouser Part Number" "852-PC817X3NIP1B")
+   (attribute "Mouser Price/Stock" "https://www.mouser.co.uk/ProductDetail/Sharp-Microelectronics/PC817X3NIP1B?qs=rrS6PyfT74f4G0G4E3ul%2FQ%3D%3D")
+   (attribute "Arrow Part Number" "PC817X3NIP1B")
+   (attribute "Arrow Price/Stock" "https://www.arrow.com/en/products/pc817x3nip1b/sharp.html?utm_currency=USD&region=europe")
+   (gate
+    (symbol "PC817X3NIP1B")
+    (pin "ANODE" 1 PS)
+    (pin "CATHODE" 2 PS)
+    (pin "COLLECTOR" 4 PS)
+    (pin "EMITTER" 3 PS)
+   )
+  )
+  (symbol "PC817X3NIP1B"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 200 100) (pt 1300 100) (pt 1300 -200) (pt 200 -200) (pt 200 100) (closed))
+   )
+   (terminal
+    (body (symbol "PIN") (pt 0 0) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -100) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1500 0) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1500 -100) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+  )
+  (symbol "PIN"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 200 0))))
+  (symbol "PINSHORT"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 100 0))))
+  (package "SOP254P960X420-4N"
+   (units MM)
+   (layer OCCA
+    (graphic
+     (stroke 0.05)
+     (path
+      (closed true)
+      (pt -5.6 2.725)
+      (pt 5.6 2.725)
+      (pt 5.6 -2.725)
+      (pt -5.6 -2.725)
+      (pt -5.6 2.725))))
+   (layer TASM
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -3.25 2.3)
+      (pt 3.25 2.3)
+      (pt 3.25 -2.3)
+      (pt -3.25 -2.3)
+      (pt -3.25 2.3))))
+   (layer TASM
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed false)
+      (pt -3.25 -0.24)
+      (pt -0.71 2.3))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed true)
+      (pt -2.9 2.3)
+      (pt 2.9 2.3)
+      (pt 2.9 -2.3)
+      (pt -2.9 -2.3)
+      (pt -2.9 2.3))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -5.35 2.395)
+      (pt -3.25 2.395))))
+   (leg 1 (pt -4.3 1.27) (padstack 0))
+   (leg 2 (pt -4.3 -1.27) (padstack 0))
+   (leg 3 (pt 4.3 -1.27) (padstack 0))
+   (leg 4 (pt 4.3 1.27) (padstack 0))
+   (padstack 0
+    (plated false)
+    (pad (layer TCOP) (rectf 1.55 2.1 0 0 0))
+   )
+   (model "PC817X3NIP1B.stp"
+    (euler 0 0 0)
+    (offset 0 0 0)
+   )
+  )
+ )
+)

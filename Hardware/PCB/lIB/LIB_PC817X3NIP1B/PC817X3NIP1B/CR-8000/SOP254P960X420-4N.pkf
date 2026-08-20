@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "SOP254P960X420-4N"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "SOP254P960X420-4N")
+        (spec "default")
+    )
+)

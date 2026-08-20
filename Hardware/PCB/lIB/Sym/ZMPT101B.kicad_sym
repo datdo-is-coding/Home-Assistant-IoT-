@@ -1,134 +1,439 @@
-
-(kicad_symbol_lib (version 20211014) (generator kicad_symbol_editor)
-  (symbol "ZMPT101B" (pin_names (offset 1.016)) (in_bom yes) (on_board yes)
-    (property "Reference" "T" (id 0) (at -5.08394 7.6279 0)
-      (effects (font (size 1.27 1.27)) (justify bottom left))
-    )
-    (property "Value" "ZMPT101B" (id 1) (at -5.08137 -7.6227 0)
-      (effects (font (size 1.27 1.27)) (justify bottom left))
-    )
-    (property "Footprint" "ZMPT101B:XFMR_ZMPT101B" (id 2) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "MF" "Qingxian Zeming Langxi Electronic" (id 4) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "MAXIMUM_PACKAGE_HEIGHT" "18.8mm" (id 5) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "Package" "None" (id 6) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "Price" "None" (id 7) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "Check_prices" "https://www.snapeda.com/parts/ZMPT101B/Qingxian+Zeming+Langxi+Electronic/view-part/?ref=eda" (id 8) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "STANDARD" "Manufacturer Recommendations" (id 9) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "PARTREV" "NA" (id 10) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "SnapEDA_Link" "https://www.snapeda.com/parts/ZMPT101B/Qingxian+Zeming+Langxi+Electronic/view-part/?ref=snap" (id 11) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "MP" "ZMPT101B" (id 12) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "Description" "\n                        \n                            Current-type Voltage Transformer\n                        \n" (id 13) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "Availability" "In Stock" (id 14) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (property "MANUFACTURER" "Qingxian Zeming Langxi Electronic" (id 15) (at 0 0 0)
-      (effects (font (size 1.27 1.27)) (justify bottom) hide)
-    )
-    (symbol "ZMPT101B_0_0"
-      (arc (start -2.54 -2.54) (mid -1.27 -1.27) (end -2.54 0.0)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start -2.54 -5.08) (mid -1.27 -3.81) (end -2.54 -2.54)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start 2.54 -2.54) (mid 1.27 -3.81) (end 2.54 -5.08)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start 2.54 0.0) (mid 1.27 -1.27) (end 2.54 -2.54)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start -2.54 0.0) (mid -1.27 1.27) (end -2.54 2.54)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start -2.54 2.54) (mid -1.27 3.81) (end -2.54 5.08)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start 2.54 2.54) (mid 1.27 1.27) (end 2.54 0.0)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (arc (start 2.54 5.08) (mid 1.27 3.81) (end 2.54 2.54)
-        (stroke (width 0.1524) (type default) (color 0 0 0 0))
-        (fill (type none))
-      )
-      (polyline
-        (pts (xy -0.635 5.715) (xy -0.635 -5.715)) (stroke (width 0.1524))
-      )
-      (polyline
-        (pts (xy 0.635 5.715) (xy 0.635 -5.715)) (stroke (width 0.1524))
-      )
-      (circle (center -3.048 3.81) (radius 0.254)
-        (stroke (width 0.508)) (fill (type none))
-      )
-      (circle (center 2.54 3.81) (radius 0.254)
-        (stroke (width 0.508)) (fill (type none))
-      )
-      (text "PRIMARY" (at -12.7 0.0 0)
-        (effects (font (size 1.27 1.27)) (justify bottom left))
-      )
-      (text "SECONDARY" (at 5.08 0.0 0)
-        (effects (font (size 1.27 1.27)) (justify bottom left))
-      )
-      (pin passive line (at -7.62 5.08 0) (length 5.08)
-        (name "~"
-          (effects (font (size 1.016 1.016)))
-        )
-        (number "1"
-          (effects (font (size 1.016 1.016)))
-        )
-      )
-      (pin passive line (at 7.62 5.08 180.0) (length 5.08)
-        (name "~"
-          (effects (font (size 1.016 1.016)))
-        )
-        (number "3"
-          (effects (font (size 1.016 1.016)))
-        )
-      )
-      (pin passive line (at -7.62 -5.08 0) (length 5.08)
-        (name "~"
-          (effects (font (size 1.016 1.016)))
-        )
-        (number "2"
-          (effects (font (size 1.016 1.016)))
-        )
-      )
-      (pin passive line (at 7.62 -5.08 180.0) (length 5.08)
-        (name "~"
-          (effects (font (size 1.016 1.016)))
-        )
-        (number "4"
-          (effects (font (size 1.016 1.016)))
-        )
-      )
-    )
-  )
+(kicad_symbol_lib
+	(version 20251024)
+	(generator "kicad_symbol_editor")
+	(generator_version "10.0")
+	(symbol "ZMPT101B"
+		(pin_names
+			(offset 1.016)
+		)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(duplicate_pin_numbers_are_jumpers no)
+		(property "Reference" "T"
+			(at -5.0839 7.6279 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Value" "ZMPT101B"
+			(at -5.0814 -7.6227 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Footprint" "ZMPT101B:XFMR_ZMPT101B"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "Datasheet" ""
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Current-type Voltage Transformer"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "MF" "Qingxian Zeming Langxi Electronic"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "MAXIMUM_PACKAGE_HEIGHT" "18.8mm"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "Package" "None"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "Price" "None"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "Check_prices" "https://www.snapeda.com/parts/ZMPT101B/Qingxian+Zeming+Langxi+Electronic/view-part/?ref=eda"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "STANDARD" "Manufacturer Recommendations"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "PARTREV" "NA"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "SnapEDA_Link" "https://www.snapeda.com/parts/ZMPT101B/Qingxian+Zeming+Langxi+Electronic/view-part/?ref=snap"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "MP" "ZMPT101B"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "Availability" "In Stock"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(property "MANUFACTURER" "Qingxian Zeming Langxi Electronic"
+			(at 0 0 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify bottom)
+			)
+		)
+		(symbol "ZMPT101B_0_0"
+			(circle
+				(center -3.048 3.81)
+				(radius 0.254)
+				(stroke
+					(width 0.508)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start -2.54 5.08)
+				(mid -1.2755 3.81)
+				(end -2.54 2.54)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start -2.54 2.54)
+				(mid -1.2755 1.27)
+				(end -2.54 0)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start -2.54 0)
+				(mid -1.2755 -1.27)
+				(end -2.54 -2.54)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start -2.54 -2.54)
+				(mid -1.2755 -3.81)
+				(end -2.54 -5.08)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(polyline
+				(pts
+					(xy -0.635 5.715) (xy -0.635 -5.715)
+				)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(polyline
+				(pts
+					(xy 0.635 5.715) (xy 0.635 -5.715)
+				)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(circle
+				(center 2.54 3.81)
+				(radius 0.254)
+				(stroke
+					(width 0.508)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start 2.54 2.54)
+				(mid 1.2755 3.81)
+				(end 2.54 5.08)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start 2.54 0)
+				(mid 1.2755 1.27)
+				(end 2.54 2.54)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start 2.54 -2.54)
+				(mid 1.2755 -1.27)
+				(end 2.54 0)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(arc
+				(start 2.54 -5.08)
+				(mid 1.2755 -3.81)
+				(end 2.54 -2.54)
+				(stroke
+					(width 0.1524)
+					(type default)
+				)
+				(fill
+					(type none)
+				)
+			)
+			(text "PRIMARY"
+				(at -12.7 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left bottom)
+				)
+			)
+			(text "SECONDARY"
+				(at 5.08 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(justify left bottom)
+				)
+			)
+			(pin passive line
+				(at -7.62 5.08 0)
+				(length 5.08)
+				(name ""
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+				(number "1"
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+			)
+			(pin passive line
+				(at -7.62 -5.08 0)
+				(length 5.08)
+				(name ""
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+				(number "2"
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+			)
+			(pin passive line
+				(at 7.62 5.08 180)
+				(length 5.08)
+				(name ""
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+				(number "3"
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+			)
+			(pin passive line
+				(at 7.62 -5.08 180)
+				(length 5.08)
+				(name ""
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+				(number "4"
+					(effects
+						(font
+							(size 1.016 1.016)
+						)
+					)
+				)
+			)
+		)
+		(embedded_fonts no)
+	)
 )

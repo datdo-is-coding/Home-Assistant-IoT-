@@ -1,0 +1,31 @@
+EESchema-LIBRARY Version 2.3
+#encoding utf-8
+#SamacSys ECAD Model IRS2117STRPBF
+#/995238/2123509/2.50/8/2/Integrated Circuit
+DEF IRS2117STRPBF IC 0 30 Y Y 1 F N
+F0 "IC" 950 300 50 H V L CNN
+F1 "IRS2117STRPBF" 950 200 50 H V L CNN
+F2 "SOIC127P600X175-8N" 950 100 50 H I L CNN
+F3 "https://www.infineon.com/dgdl/irs2117pbf.pdf?fileId=5546d462533600a4015356767f2127b9" 950 0 50 H I L CNN
+F4 "Gate Drivers Sngl Hi Sd Drvr NonInvrt Inpt" 950 -100 50 H I L CNN "Description"
+F5 "1.75" 950 -200 50 H I L CNN "Height"
+F6 "Infineon" 950 -300 50 H I L CNN "Manufacturer_Name"
+F7 "IRS2117STRPBF" 950 -400 50 H I L CNN "Manufacturer_Part_Number"
+F8 "942-IRS2117STRPBF" 950 -500 50 H I L CNN "Mouser Part Number"
+F9 "https://www.mouser.co.uk/ProductDetail/Infineon-IR/IRS2117STRPBF?qs=9%252BKlkBgLFf2%2F9HQV1aBW1Q%3D%3D" 950 -600 50 H I L CNN "Mouser Price/Stock"
+F10 "" 950 -700 50 H I L CNN "Arrow Part Number"
+F11 "" 950 -800 50 H I L CNN "Arrow Price/Stock"
+DRAW
+X VCC 1 0 0 200 R 50 50 0 0 P
+X IN 2 0 -100 200 R 50 50 0 0 P
+X COM 3 0 -200 200 R 50 50 0 0 P
+X NC_1 4 0 -300 200 R 50 50 0 0 P
+X VB 8 1100 0 200 L 50 50 0 0 P
+X HO 7 1100 -100 200 L 50 50 0 0 P
+X VS 6 1100 -200 200 L 50 50 0 0 P
+X NC_2 5 1100 -300 200 L 50 50 0 0 P
+P 5 0 1 6 200 100 900 100 900 -400 200 -400 200 100 N
+ENDDRAW
+ENDDEF
+#
+#End Library

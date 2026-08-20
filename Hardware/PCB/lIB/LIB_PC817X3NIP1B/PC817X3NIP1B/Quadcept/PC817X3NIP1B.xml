@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--/1220469/2123509/2.50/4/3/Phototransistor/-->
+<quadcept_library>
+  <setting unit="mil" />
+  <textstyle name="Default" height="47.244094488189" strokewidth="7.8740157480315" charwidth="47.244094488189" />
+  <textstyle name="Dimension" height="19.6850393700787" strokewidth="0" charwidth="19.6850393700787" />
+  <textstyle name="H127W0635TH00762" height="50" strokewidth="3" charwidth="25" />
+  <textstyle name="H15W15TH02" height="59.0551181102362" strokewidth="7.8740157480315" charwidth="59.0551181102362" />
+  <padstyle name="r210_155" surface="True" plated="False" isvia="False" nopaste="False" nomask="True" complex="False" holesize="0">
+    <padshape layer="TOP" shape="rectangle" width="61.023622047243" height="82.67716535433" />
+    <padshape layer="TOP_SOLDER_MASK" shape="rectangle" width="68.897637795275" height="90.551181102361" />
+    <padshape layer="TOP_SOLDER_PASTE" shape="rectangle" width="61.023622047243" height="82.67716535433" />
+  </padstyle>
+  <footprint name="SOP254P960X420-4N" originx="0" originy="0" pickpointx="0" pickpointy="0">
+    <pcbpin number="1" name="1" style="r210_155" originx="-169.29133858268" originy="49.999999999999" rotation="90" />
+    <pcbpin number="2" name="2" style="r210_155" originx="-169.29133858268" originy="-49.999999999999" rotation="90" />
+    <pcbpin number="3" name="3" style="r210_155" originx="169.29133858268" originy="-49.999999999999" rotation="90" />
+    <pcbpin number="4" name="4" style="r210_155" originx="169.29133858268" originy="49.999999999999" rotation="90" />
+    <line layer="TOP_PLACE_BOUND" originx="-220.47244094488" originy="107.28346456693" endx="220.47244094488" endy="107.28346456693" width="1.9685039370079" />
+    <line layer="TOP_PLACE_BOUND" originx="220.47244094488" originy="107.28346456693" endx="220.47244094488" endy="-107.28346456693" width="1.9685039370079" />
+    <line layer="TOP_PLACE_BOUND" originx="220.47244094488" originy="-107.28346456693" endx="-220.47244094488" endy="-107.28346456693" width="1.9685039370079" />
+    <line layer="TOP_PLACE_BOUND" originx="-220.47244094488" originy="-107.28346456693" endx="-220.47244094488" endy="107.28346456693" width="1.9685039370079" />
+    <line layer="TOP_ASSEMBLY" originx="-127.95275590551" originy="90.551181102361" endx="127.95275590551" endy="90.551181102361" width="3.9370078740157" />
+    <line layer="TOP_ASSEMBLY" originx="127.95275590551" originy="90.551181102361" endx="127.95275590551" endy="-90.551181102361" width="3.9370078740157" />
+    <line layer="TOP_ASSEMBLY" originx="127.95275590551" originy="-90.551181102361" endx="-127.95275590551" endy="-90.551181102361" width="3.9370078740157" />
+    <line layer="TOP_ASSEMBLY" originx="-127.95275590551" originy="-90.551181102361" endx="-127.95275590551" endy="90.551181102361" width="3.9370078740157" />
+    <line layer="TOP_ASSEMBLY" originx="-127.95275590551" originy="-9.4488188976377" endx="-27.952755905511" endy="90.551181102361" width="3.9370078740157" />
+    <line layer="TOP_SILKSCREEN" originx="-114.17322834646" originy="90.551181102361" endx="114.17322834646" endy="90.551181102361" width="7.8740157480314" />
+    <line layer="TOP_SILKSCREEN" originx="114.17322834646" originy="90.551181102361" endx="114.17322834646" endy="-90.551181102361" width="7.8740157480314" />
+    <line layer="TOP_SILKSCREEN" originx="114.17322834646" originy="-90.551181102361" endx="-114.17322834646" endy="-90.551181102361" width="7.8740157480314" />
+    <line layer="TOP_SILKSCREEN" originx="-114.17322834646" originy="-90.551181102361" endx="-114.17322834646" endy="90.551181102361" width="7.8740157480314" />
+    <line layer="TOP_SILKSCREEN" originx="-210.62992125984" originy="94.291338582676" endx="-127.95275590551" endy="94.291338582676" width="7.8740157480314" />
+  </footprint>
+  <symbol name="PC817X3NIP1B" originx="0" originy="0">
+    <line originx="200" originy="100" endx="1300" endy="100" width="0" />
+    <line originx="1300" originy="-200" endx="1300" endy="100" width="0" />
+    <line originx="1300" originy="-200" endx="200" endy="-200" width="0" />
+    <line originx="200" originy="100" endx="200" endy="-200" width="0" />
+    <sympin number="1" originx="200" originy="0" rotation="180" length="100" width="7.8740157480315" flipped="False">
+      <text name="pinname" originx="230" originy="0" style="Default" rotation="0" justify="left" flipped="False" hidden="False" data="ANODE" />
+      <text name="pindes" originx="140" originy="20" style="Default" rotation="0" justify="lowerright" flipped="False" hidden="False" data="1" />
+    </sympin>
+    <sympin number="2" originx="200" originy="-100" rotation="180" length="100" width="7.8740157480315" flipped="False">
+      <text name="pinname" originx="230" originy="-100" style="Default" rotation="0" justify="left" flipped="False" hidden="False" data="CATHODE" />
+      <text name="pindes" originx="140" originy="-80" style="Default" rotation="0" justify="lowerright" flipped="False" hidden="False" data="2" />
+    </sympin>
+    <sympin number="4" originx="1300" originy="0" rotation="0" length="100" width="7.8740157480315" flipped="False">
+      <text name="pinname" originx="1270" originy="0" style="Default" rotation="0" justify="right" flipped="False" hidden="False" data="COLLECTOR" />
+      <text name="pindes" originx="1360" originy="20" style="Default" rotation="0" justify="lowerleft" flipped="False" hidden="False" data="4" />
+    </sympin>
+    <sympin number="3" originx="1300" originy="-100" rotation="0" length="100" width="7.8740157480315" flipped="False">
+      <text name="pinname" originx="1270" originy="-100" style="Default" rotation="0" justify="right" flipped="False" hidden="False" data="EMITTER" />
+      <text name="pindes" originx="1360" originy="-80" style="Default" rotation="0" justify="lowerleft" flipped="False" hidden="False" data="3" />
+    </sympin>
+  </symbol>
+  <component name="PC817X3NIP1B" designatorprefix="Q" height="165.35433070866" footprint="SOP254P960X420-4N">
+    <comppin designator="1" sympin="1" pinswap="0" gateswap="0" gate="1" group="1" side="" type="Any" name="ANODE" />
+    <comppin designator="2" sympin="2" pinswap="0" gateswap="0" gate="1" group="1" side="" type="Any" name="CATHODE" />
+    <comppin designator="3" sympin="3" pinswap="0" gateswap="0" gate="1" group="1" side="" type="Any" name="EMITTER" />
+    <comppin designator="4" sympin="4" pinswap="0" gateswap="0" gate="1" group="1" side="" type="Any" name="COLLECTOR" />
+    <attached_symbol gate="1" name="PC817X3NIP1B" />
+    <pinmap designator="1" footprintpin="1" />
+    <pinmap designator="2" footprintpin="2" />
+    <pinmap designator="3" footprintpin="3" />
+    <pinmap designator="4" footprintpin="4" />
+    <text name="Datasheet" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf" />
+    <text name="Description" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel" />
+    <text name="Manufacturer_Name" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="Sharp Microelectronics" />
+    <text name="Manufacturer_Part_Number" originx="1350" originy="200" style="Default" rotation="0" justify="left" flipped="False" hidden="False" data="PC817X3NIP1B" />
+    <text name="Mouser Part Number" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="852-PC817X3NIP1B" />
+    <text name="Mouser Price/Stock" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="https://www.mouser.co.uk/ProductDetail/Sharp-Microelectronics/PC817X3NIP1B?qs=rrS6PyfT74f4G0G4E3ul%2FQ%3D%3D" />
+    <text name="Arrow Part Number" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="PC817X3NIP1B" />
+    <text name="Arrow Price/Stock" originx="0" originy="0" style="Default" rotation="0" justify="" flipped="False" hidden="True" data="https://www.arrow.com/en/products/pc817x3nip1b/sharp.html?utm_currency=USD&amp;region=europe" />
+  </component>
+</quadcept_library>

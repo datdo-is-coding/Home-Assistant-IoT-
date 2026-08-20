@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP MJD122
+D COMPLEMENTARY DARLINGTON PLASTIC POWER TRANSISTORS 100V, 120mA,- 65 to +150
+K
+F https://www.cdil.com/s/MJD122_127-bdbg.pdf
+$ENDCMP
+#
+#End Doc Library

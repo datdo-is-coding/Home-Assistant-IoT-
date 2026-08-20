@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP INA180A3IDBVT
+D 26V, 350kHz Bandwidth, Low- or High-Side Voltage Output Current Sense Amplifier
+K
+F http://www.ti.com/lit/gpn/ina180
+$ENDCMP
+#
+#End Doc Library

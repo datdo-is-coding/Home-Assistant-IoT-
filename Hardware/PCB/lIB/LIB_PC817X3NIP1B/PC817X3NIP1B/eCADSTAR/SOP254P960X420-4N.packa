@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "PC817X3NIP1B"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2023-06-22-02:40:16)
+    (mountForm default
+        (footprintRef "SOP254P960X420-4N")
+        (spec "System")
+    )
+)

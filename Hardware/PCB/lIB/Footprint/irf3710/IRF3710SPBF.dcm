@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP IRF3710SPBF
+D IRF3710SPBF, N-channel MOSFET Transistor 57 A 100 V, 3-Pin D2PAK
+K
+F https://www.infineon.com/assets/row/public/documents/24/49/infineon-irf3710s-datasheet-en.pdf
+$ENDCMP
+#
+#End Doc Library

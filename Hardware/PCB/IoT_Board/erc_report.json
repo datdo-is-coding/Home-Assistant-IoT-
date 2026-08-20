@@ -1,0 +1,552 @@
+{
+    "$schema": "https://schemas.kicad.org/erc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-08-20T07:09:16",
+    "ignored_checks": [
+        {
+            "description": "Global label only appears once in the schematic",
+            "key": "single_global_label"
+        },
+        {
+            "description": "Four connection points are joined together",
+            "key": "four_way_junction"
+        },
+        {
+            "description": "SPICE model issue",
+            "key": "simulation_model_issue"
+        },
+        {
+            "description": "Assigned footprint doesn't match footprint filters",
+            "key": "footprint_filter"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning",
+        "exclusion"
+    ],
+    "kicad_version": "10.0.5",
+    "sheets": [
+        {
+            "path": "/",
+            "uuid_path": "/f7f4c251-abef-4e4b-a993-341f87747a84",
+            "violations": [
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR084 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 0.254,
+                                "y": 1.9431
+                            },
+                            "uuid": "b5cd8166-d716-4b0c-a97e-51a325cf5f90"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR02 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 0.8001,
+                                "y": 1.0033
+                            },
+                            "uuid": "730b23b6-db67-473b-9a89-1aa4dc288f19"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR050 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 3.0988,
+                                "y": 2.4892
+                            },
+                            "uuid": "52e1d0d6-73b9-4038-9abe-eff7a8cacac5"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol U4 Pin 1 [AC/L, Power input, Line]",
+                            "pos": {
+                                "x": 3.7719,
+                                "y": 2.4384
+                            },
+                            "uuid": "8c816a6c-8a3a-41cc-a2a6-f548a6676469"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol U4 Pin 2 [AC/N, Power input, Line]",
+                            "pos": {
+                                "x": 3.7719,
+                                "y": 2.4892
+                            },
+                            "uuid": "cb2fd9f5-f13d-47e5-ae27-fba32ff6b465"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Input Power pin not driven by any Output Power pins",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR020 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 4.0132,
+                                "y": 1.9177
+                            },
+                            "uuid": "68cfb4bc-cebc-4915-9af9-787679c535c8"
+                        }
+                    ],
+                    "severity": "error",
+                    "type": "power_pin_not_driven"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'RS'",
+                            "pos": {
+                                "x": 0.381,
+                                "y": 1.7145
+                            },
+                            "uuid": "b298640f-4574-49c6-8d62-dcc4a15465a9"
+                        },
+                        {
+                            "description": "Label 'RS'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.7747
+                            },
+                            "uuid": "e8d65ba2-23ef-425e-aab3-1f068c4bb817"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'CS'",
+                            "pos": {
+                                "x": 0.4064,
+                                "y": 1.6637
+                            },
+                            "uuid": "2660a994-a5c1-498b-9973-3872fac3d0f9"
+                        },
+                        {
+                            "description": "Label 'CS'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8001
+                            },
+                            "uuid": "a8f4a235-bba1-448a-b271-5bd2aaae82cf"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'DIN'",
+                            "pos": {
+                                "x": 0.4064,
+                                "y": 1.9685
+                            },
+                            "uuid": "7b3745de-0734-4e22-90a6-6320d8cf863f"
+                        },
+                        {
+                            "description": "Label 'DIN'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8255
+                            },
+                            "uuid": "8737fbf6-2a2c-4646-a4c8-c3c45747e4f5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'SCLK'",
+                            "pos": {
+                                "x": 0.4064,
+                                "y": 1.9939
+                            },
+                            "uuid": "e140e95c-120c-4d30-80ad-a47ec17d4a19"
+                        },
+                        {
+                            "description": "Label 'SCLK'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8509
+                            },
+                            "uuid": "347d522f-7907-4934-b590-ef46c08e973f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'ADS'",
+                    "items": [
+                        {
+                            "description": "Symbol U14 [ADS1256IDBR]",
+                            "pos": {
+                                "x": 0.6985,
+                                "y": 1.9431
+                            },
+                            "uuid": "4cb53a29-abc9-4111-9221-3dd6d97aae1f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'DRDY'",
+                            "pos": {
+                                "x": 0.9652,
+                                "y": 1.6637
+                            },
+                            "uuid": "ddf2159c-ba31-45c8-bbba-c24d74eabf4c"
+                        },
+                        {
+                            "description": "Label 'DRDY'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.9017
+                            },
+                            "uuid": "ffe69671-cc1a-48e2-9b30-691836ca2582"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "Local and global labels have same name",
+                    "items": [
+                        {
+                            "description": "Global Label 'DO'",
+                            "pos": {
+                                "x": 0.9652,
+                                "y": 1.6891
+                            },
+                            "uuid": "77757afb-7ade-4e26-b5f4-46f1f9cf1dea"
+                        },
+                        {
+                            "description": "Label 'DO'",
+                            "pos": {
+                                "x": 0.5588,
+                                "y": 0.8763
+                            },
+                            "uuid": "61acb315-91eb-47d9-99af-f42a4602b011"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "same_local_global_label"
+                },
+                {
+                    "description": "Both VREFP and V_Bias are attached to the same items; VREFP will be used in the netlist",
+                    "items": [
+                        {
+                            "description": "Label 'VREFP'",
+                            "pos": {
+                                "x": 2.3876,
+                                "y": 2.667
+                            },
+                            "uuid": "be457d2b-3c94-4caa-86fd-4db5fcb7337b"
+                        },
+                        {
+                            "description": "Label 'V_Bias'",
+                            "pos": {
+                                "x": 1.27,
+                                "y": 1.4859
+                            },
+                            "uuid": "13b11406-66e0-4f3a-8d47-28f518ab535d"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "multiple_net_names"
+                },
+                {
+                    "description": "Symbol 'Conn_01x07_Pin' doesn't match copy in library 'Connector'",
+                    "items": [
+                        {
+                            "description": "Symbol J14 [Conn_01x07_Pin]",
+                            "pos": {
+                                "x": 1.8288,
+                                "y": 0.6731
+                            },
+                            "uuid": "f532ea66-21e2-40a3-9191-1571a4d8e230"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "Symbol 'Conn_02x03_Counter_Clockwise' doesn't match copy in library 'Connector_Generic'",
+                    "items": [
+                        {
+                            "description": "Symbol J15 [Conn_02x03_Counter_Clockwise]",
+                            "pos": {
+                                "x": 1.9177,
+                                "y": 0.9144
+                            },
+                            "uuid": "b9c00d30-e921-4453-b671-398037a77805"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_mismatch"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library ''",
+                    "items": [
+                        {
+                            "description": "Symbol IC1 [VS1838B]",
+                            "pos": {
+                                "x": 2.3241,
+                                "y": 0.2921
+                            },
+                            "uuid": "7b13177b-1e4a-4eaa-9162-ac5428aa4e3f"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'B050S'",
+                    "items": [
+                        {
+                            "description": "Symbol PS1 [B0505S-2W]",
+                            "pos": {
+                                "x": 3.0988,
+                                "y": 2.413
+                            },
+                            "uuid": "6e646781-986f-4d5c-8720-c3524766a4c7"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'PC817_SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol U7 [PC817]",
+                            "pos": {
+                                "x": 3.1623,
+                                "y": 0.381
+                            },
+                            "uuid": "c7770020-8e1e-4e31-ad91-965029774d67"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'PC817_SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol U6 [PC817]",
+                            "pos": {
+                                "x": 3.175,
+                                "y": 0.7493
+                            },
+                            "uuid": "572a8a9f-b20e-40d2-b0ff-2aaaf576c1c7"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'PC817_SMD'",
+                    "items": [
+                        {
+                            "description": "Symbol U5 [PC817]",
+                            "pos": {
+                                "x": 3.175,
+                                "y": 1.143
+                            },
+                            "uuid": "5a359e7f-ec46-4b0e-9760-415b31eb598e"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'RL10SRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K3 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.6957,
+                                "y": 0.2921
+                            },
+                            "uuid": "f7892b9b-8971-468a-88fa-bb209708aec5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'RL10ASRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K3 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.6957,
+                                "y": 0.2921
+                            },
+                            "uuid": "f7892b9b-8971-468a-88fa-bb209708aec5"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'RL10SRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K2 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.7084,
+                                "y": 0.6604
+                            },
+                            "uuid": "ccf5047d-66a2-4859-946b-28efe5f68b84"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'RL10ASRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K2 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.7084,
+                                "y": 0.6604
+                            },
+                            "uuid": "ccf5047d-66a2-4859-946b-28efe5f68b84"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'RL10SRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K1 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.7084,
+                                "y": 1.0541
+                            },
+                            "uuid": "de30e700-fb04-459e-9990-6f783e577efb"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'RL10ASRD'",
+                    "items": [
+                        {
+                            "description": "Symbol K1 [SRD-12VDC-SL-C]",
+                            "pos": {
+                                "x": 3.7084,
+                                "y": 1.0541
+                            },
+                            "uuid": "de30e700-fb04-459e-9990-6f783e577efb"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                },
+                {
+                    "description": "Both +5VD and USB_V are attached to the same items; +5VD will be used in the netlist",
+                    "items": [
+                        {
+                            "description": "Symbol #PWR0117 Pin 1 [Power input, Line]",
+                            "pos": {
+                                "x": 1.8796,
+                                "y": 0.7747
+                            },
+                            "uuid": "f5f81813-110b-4a01-adc7-40e6ab3f99b2"
+                        },
+                        {
+                            "description": "Label 'USB_V'",
+                            "pos": {
+                                "x": 3.7592,
+                                "y": 1.6764
+                            },
+                            "uuid": "b58510bd-4db4-4e37-83fe-6144ace5ffec"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "multiple_net_names"
+                },
+                {
+                    "description": "The current configuration does not include the footprint library 'KH-TYPE-C-16P'",
+                    "items": [
+                        {
+                            "description": "Symbol J3 [KH-TYPE-C-16P]",
+                            "pos": {
+                                "x": 3.8354,
+                                "y": 1.9177
+                            },
+                            "uuid": "c138939c-c84c-4e8b-ae01-cb60e68d2713"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "footprint_link_issues"
+                },
+                {
+                    "description": "The current configuration does not include the symbol library 'KH-TYPE-C-16P'",
+                    "items": [
+                        {
+                            "description": "Symbol J3 [KH-TYPE-C-16P]",
+                            "pos": {
+                                "x": 3.8354,
+                                "y": 1.9177
+                            },
+                            "uuid": "c138939c-c84c-4e8b-ae01-cb60e68d2713"
+                        }
+                    ],
+                    "severity": "warning",
+                    "type": "lib_symbol_issues"
+                }
+            ]
+        }
+    ],
+    "source": "IoT_Board.kicad_sch"
+}

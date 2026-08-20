@@ -1,0 +1,18 @@
+.PC817X3NIP1B :1 ;Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel
+SOP254P960X420-4N
+*STM Q
+*NGS
+*PLB 1="ANODE" 2="CATHODE" 3="EMITTER" 4="COLLECTOR"
+*MXP 4
+*DFN PC817X3NIP1B
+~!Manufacturer_Name (Sharp Microelectronics)
+~!Manufacturer_Part_Number (PC817X3NIP1B)
+~!Mouser Part Number (852-PC817X3NIP1B)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Sharp-Microelectronics/PC817X3NIP1B?qs=rrS6PyfT74f4G0G4E3ul%2FQ%3D%3D)
+~!Arrow Part Number (PC817X3NIP1B)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/pc817x3nip1b/sharp.html?utm_currency=USD&region=europe)
+~!Link Datasheet (https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf)
+~!Height (4.2mm)
+~!3D_Model (PC817X3NIP1B)
+PC817X3NIP1B
+1.1!U 2.1!U 4.1!U 3.1!U 

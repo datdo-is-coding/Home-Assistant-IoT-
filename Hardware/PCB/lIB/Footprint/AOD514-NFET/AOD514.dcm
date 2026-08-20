@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP AOD514
+D N-Channel 30 V 17A (Ta), 46A (Tc) 2.5W (Ta), 50W (Tc) Surface Mount TO-252 (DPAK)
+K
+F https://aosmd.com/res/data_sheets/AOD514.pdf
+$ENDCMP
+#
+#End Doc Library

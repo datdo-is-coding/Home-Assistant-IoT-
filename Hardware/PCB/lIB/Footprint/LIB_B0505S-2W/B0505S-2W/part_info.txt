@@ -1,0 +1,9 @@
+Manufacturer=Mornsun Power
+PartNumber=B0505S-2W
+PartCategory=Power Supply
+PackageCategory=Other
+PinCount=4
+Version=1.2
+Released=2022-04-28 08:37:41
+Downloaded=2026-07-30 05:06:54
+3D=Y

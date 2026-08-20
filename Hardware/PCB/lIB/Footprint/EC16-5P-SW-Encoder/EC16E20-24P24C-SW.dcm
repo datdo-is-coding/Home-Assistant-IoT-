@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP EC16E20-24P24C-SW
+D Specification ; Resolution. 24imp/revol. ; Number of positions. 24 ; Output signal. two phase A and B ; Mechanical durability. 50000 cycles ; Operating voltage. 5V ..
+K
+F https://www.tme.eu/Document/56f07056c56a74881a9c3bc32fab901d/EC16E20-24P24C-SW.pdf
+$ENDCMP
+#
+#End Doc Library

@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'B0505S_2W'
+CLASS = DISCRETE
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Mornsun Power", "B0505S-2W" (!) = "", "B0505S2W", "Other", "", "", "", "", "2W isolated DC-DC converter Fixed input voltage, 5VDC, 400 mA unregulated single output", "https://www.mornsun-power.com/html/pdf/B0505S-2WR3.html", "10.41 mm"
+END_PART
+
+END.

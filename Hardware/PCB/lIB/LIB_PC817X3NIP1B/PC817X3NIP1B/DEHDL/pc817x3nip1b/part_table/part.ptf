@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'PC817X3NIP1B'
+CLASS = DISCRETE
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Sharp Microelectronics", "PC817X3NIP1B" (!) = "", "SOP254P960X420-4N", "Small Outline Packages", "852-PC817X3NIP1B", "https://www.mouser.co.uk/ProductDetail/Sharp-Microelectronics/PC817X3NIP1B?qs=rrS6PyfT74f4G0G4E3ul%2FQ%3D%3D", "PC817X3NIP1B", "https://www.arrow.com/en/products/pc817x3nip1b/sharp.html?utm_currency=USD&region=europe", "Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel", "https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf", "4.2 mm"
+END_PART
+
+END.

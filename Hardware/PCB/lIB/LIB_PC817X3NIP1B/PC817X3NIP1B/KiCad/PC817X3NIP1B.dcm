@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP PC817X3NIP1B
+D Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel
+K
+F https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf
+$ENDCMP
+#
+#End Doc Library

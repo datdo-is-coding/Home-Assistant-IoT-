@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP IRS2117STRPBF
+D Gate Drivers Sngl Hi Sd Drvr NonInvrt Inpt
+K
+F https://www.infineon.com/dgdl/irs2117pbf.pdf?fileId=5546d462533600a4015356767f2127b9
+$ENDCMP
+#
+#End Doc Library

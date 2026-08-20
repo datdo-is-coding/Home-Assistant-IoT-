@@ -1,0 +1,118 @@
+
+(EDIF
+  (rename &PC817X3NIP1B "PC817X3NIP1B")
+  (EDIFVersion 2 0 0)
+  (EDIFLevel 0)
+  (keywordMap (keywordLevel 0))
+  (status
+    (written
+      (timestamp 2026 08 20 11 33 37)
+      (dataOrigin "1220469/2123509/2.50/4/3/Phototransistor")
+      (program "SamacSys ECAD Model PC817X3NIP1B"
+        (version "2.1"))))
+  (library
+  (rename &PC817X3NIP1B "PC817X3NIP1B")
+    (EDIFLevel 0)
+    (technology
+      (numberDefinition (scale 1 (e 254 -6) (unit DISTANCE)))
+      (userData GRIDRESOLUTION (integer 50 50))
+      (figureGroup DEFAULT (pathWidth 10) (textHeight 100))
+      (figureGroup PROPERTY (pathWidth 10) (textHeight 90))
+      (figureGroup PINNUMBER (pathWidth 10) (textHeight 90))
+      (figureGroup PINNAME (pathWidth 10) (textHeight 90))
+      (figureGroup COMMENT (pathWidth 10) (textHeight 90))
+      (figureGroup PIN (pathWidth 10) (textHeight 90))
+      (figureGroup GRAPHIC (pathWidth 10) (textHeight 100))
+    )
+    (cell
+      (rename &PC817X3NIP1B "PC817X3NIP1B")
+      (cellType GENERIC)
+      (view
+        (rename NORMAL "Normal")
+        (viewType SCHEMATIC)
+        (interface
+          (designator "Q")
+          (property (rename PACKAGENAME "PackageName") (string "PC817X3NIP1B"))
+          (property (rename ISHETEROGENEOUS "IsHeterogeneous") (string "False"))
+          (property (rename DEVICESINVIEW "DevicesInView") (string "1"))
+          (property (rename DEVICESINPACKAGE "DevicesInPackage") (string "1"))
+          (property (rename DEVICEDESIGNATOR "DeviceDesignator") (string "A"))
+          (property (rename DEVICENUMBERING "DeviceNumbering") (string "Alpha"))
+          (property (rename PCB_32_FOOTPRINT "PCB Footprint") (string "SOP254P960X420-4N"))
+          (property (rename &Manufacturer_Name "Manufacturer_Name") (string "Sharp Microelectronics"))
+          (property (rename &Manufacturer_Part_Number "Manufacturer_Part_Number") (string "PC817X3NIP1B"))
+          (property (rename &Mouser_Part_Number "Mouser Part Number") (string "852-PC817X3NIP1B"))
+          (property (rename &Mouser_Price_Stock "Mouser Price/Stock") (string "https://www.mouser.co.uk/ProductDetail/Sharp-Microelectronics/PC817X3NIP1B?qs=rrS6PyfT74f4G0G4E3ul%2FQ%3D%3D"))
+          (property (rename &Arrow_Part_Number "Arrow Part Number") (string "PC817X3NIP1B"))
+          (property (rename &Arrow_Price_Stock "Arrow Price/Stock") (string "https://www.arrow.com/en/products/pc817x3nip1b/sharp.html?utm_currency=USD&region=europe"))
+          (property (rename &Description "Description") (string "Transistor Output Optocouplers OPTOISOLATOR 5KV TRANS SMD, Optoisolator Transistor Output 1 Channel"))
+          (property (rename &Datasheet_Link "Datasheet Link") (string "https://datasheet.datasheetarchive.com/originals/distributors/Datasheets_SAMA/6722695ec663e8d5f4c0406356e05a32.pdf"))
+          (property (rename &Height "Height") (string "4.2 mm"))
+          (property (rename &_60__32_VALUE_32__62_ "Value") (string "PC817X3NIP1B"))
+          (property (rename VALUE "Value") (string "Value"))
+          (port
+            (rename &ANODE "ANODE")
+            (designator "1")
+            (property (rename ORDER "Order") (string "0") (owner "OrCAD"))
+          )
+          (port
+            (rename &CATHODE "CATHODE")
+            (designator "2")
+            (property (rename ORDER "Order") (string "1") (owner "OrCAD"))
+          )
+          (port
+            (rename &EMITTER "EMITTER")
+            (designator "3")
+            (property (rename ORDER "Order") (string "2") (owner "OrCAD"))
+          )
+          (port
+            (rename &COLLECTOR "COLLECTOR")
+            (designator "4")
+            (property (rename ORDER "Order") (string "3") (owner "OrCAD"))
+          )
+          (symbol
+            (portImplementation
+              (name &ANODE (display PINNAME))
+              (keywordDisplay DESIGNATOR (display PINNUMBER))
+              (figure PIN (path (pointList (pt -200 -100) (pt 0 -100))))
+              (connectLocation (figure GRAPHIC (dot (pt -200 -100))))
+            )
+            (portImplementation
+              (name &CATHODE (display PINNAME))
+              (keywordDisplay DESIGNATOR (display PINNUMBER))
+              (figure PIN (path (pointList (pt -200 -200) (pt 0 -200))))
+              (connectLocation (figure GRAPHIC (dot (pt -200 -200))))
+            )
+            (portImplementation
+              (name &COLLECTOR (display PINNAME))
+              (keywordDisplay DESIGNATOR (display PINNUMBER))
+              (figure PIN (path (pointList (pt 1100 -100) (pt 1300 -100))))
+              (connectLocation (figure GRAPHIC (dot (pt 1300 -100))))
+            )
+            (portImplementation
+              (name &EMITTER (display PINNAME))
+              (keywordDisplay DESIGNATOR (display PINNUMBER))
+              (figure PIN (path (pointList (pt 1100 -200) (pt 1300 -200))))
+              (connectLocation (figure GRAPHIC (dot (pt 1300 -200))))
+            )
+            (figure GRAPHIC
+              (figureGroupOverride GRAPHIC
+                (pathWidth 10))
+              (path
+                (pointList
+                  (pt 0 0)
+                  (pt 1100 0)
+                  (pt 1100 -300)
+                  (pt 0 -300)
+                  (pt 0 0)
+                )
+              )
+            )
+            (keywordDisplay DESIGNATOR (display PROPERTY (justify LOWERLEFT) (orientation R0) (origin (pt 1150 130))))
+            (propertyDisplay &_60__32_VALUE_32__62_ (display PROPERTY (justify LOWERLEFT) (orientation R0) (origin (pt 1150 30))))
+          )
+        )
+      )
+    )
+  )
+)

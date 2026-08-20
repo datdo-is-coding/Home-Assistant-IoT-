@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "B0505S-2W"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2022-12-27-11:44:48)
+    (mountForm default
+        (footprintRef "B0505S2W")
+        (spec "System")
+    )
+)

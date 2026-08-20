@@ -1,0 +1,9 @@
+Manufacturer=Sharp Microelectronics
+PartNumber=PC817X3NIP1B
+PartCategory=Phototransistor
+PackageCategory=Small Outline Packages
+PinCount=4
+Version=2.1
+Released=2018-11-16 16:59:06
+Downloaded=2026-08-20 11:33:37
+3D=Y

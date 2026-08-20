@@ -1,0 +1,18 @@
+.B0505S-2W :1 ;2W isolated DC-DC converter Fixed input voltage, 5VDC, 400 mA unregulated single output
+B0505S2W
+*STM PS
+*NGS
+*PLB 1="VIN" 2="GND" 4="0V" 6="+VO"
+*MXP 4
+*DFN B0505S-2W
+~!Manufacturer_Name (Mornsun Power)
+~!Manufacturer_Part_Number (B0505S-2W)
+~!Mouser Part Number (-)
+~!Mouser Price/Stock (-)
+~!Arrow Part Number (-)
+~!Arrow Price/Stock (-)
+~!Link Datasheet (https://www.mornsun-power.com/html/pdf/B0505S-2WR3.html)
+~!Height (10.41mm)
+~!3D_Model (B0505S-2W)
+B0505S-2W
+1.1!U 2.1!U 4.1!U 6.1!U 
