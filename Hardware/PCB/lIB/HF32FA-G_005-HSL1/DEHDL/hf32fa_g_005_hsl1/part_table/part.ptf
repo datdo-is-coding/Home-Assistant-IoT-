@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'HF32FA_G_005_HSL1'
+CLASS = DISCRETE
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Hongfa", "HF32FA-G/005-HSL1" (!) = "", "HF32FAG005HSL1", "Other", "", "", "", "", "HF32FA Series 10 A SPST 5 V Sealed Subminiature Intermediate Power Relay", "", "12.7 mm"
+END_PART
+
+END.

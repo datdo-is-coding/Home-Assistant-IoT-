@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'TPS563200DDCR'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Texas Instruments", "TPS563200DDCR" (!) = "", "SOT95P280X110-6N", "SOT23 (6-Pin)", "595-TPS563200DDCR", "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/TPS563200DDCR?qs=bT6MOr62zwLjxJIF4PA64g%3D%3D", "TPS563200DDCR", "https://www.arrow.com/en/products/tps563200ddcr/texas-instruments.html?utm_currency=USD&region=europe", "17 V Input, 3A Synchronous Step-Down Regulator in SOT-23 with Advanced Eco-mode", "http://www.ti.com/lit/gpn/TPS563200", "1.1 mm"
+END_PART
+
+END.

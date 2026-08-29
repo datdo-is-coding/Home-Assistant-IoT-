@@ -1,0 +1,9 @@
+Manufacturer=Hongfa
+PartNumber=HF32FA-G/005-HSL1
+PartCategory=Relay or Contactor
+PackageCategory=Other
+PinCount=4
+Version=1.5
+Released=2020-11-25 11:02:10
+Downloaded=2026-08-26 16:29:32
+3D=Y

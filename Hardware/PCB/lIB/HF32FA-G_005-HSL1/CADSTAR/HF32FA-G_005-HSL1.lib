@@ -1,0 +1,18 @@
+.HF32FA-G_005-HSL1 :1 ;HF32FA Series 10 A SPST 5 V Sealed Subminiature Intermediate Power Relay
+HF32FAG005HSL1
+*STM K
+*NGS
+*PLB 1="COIL_1" 2="COM" 3="NO" 4="COIL_2"
+*MXP 4
+*DFN HF32FA-G_005-HSL1
+~!Manufacturer_Name (Hongfa)
+~!Manufacturer_Part_Number (HF32FA-G/005-HSL1)
+~!Mouser Part Number (-)
+~!Mouser Price/Stock (-)
+~!Arrow Part Number (-)
+~!Arrow Price/Stock (-)
+~!Link Datasheet (-)
+~!Height (12.7mm)
+~!3D_Model (HF32FA-G_005-HSL1)
+HF32FA-G_005-HSL1
+1.1!U 2.1!U 3.1!U 4.1!U 

@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "HF32FAG005HSL1"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "HF32FAG005HSL1")
+        (spec "default")
+    )
+)

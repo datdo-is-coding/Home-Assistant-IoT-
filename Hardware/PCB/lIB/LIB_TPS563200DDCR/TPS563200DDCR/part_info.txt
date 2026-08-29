@@ -1,0 +1,9 @@
+Manufacturer=Texas Instruments
+PartNumber=TPS563200DDCR
+PartCategory=Integrated Circuit
+PackageCategory=SOT23 (6-Pin)
+PinCount=6
+Version=1.1
+Released=2020-01-22 02:47:49
+Downloaded=2026-08-29 03:42:52
+3D=Y

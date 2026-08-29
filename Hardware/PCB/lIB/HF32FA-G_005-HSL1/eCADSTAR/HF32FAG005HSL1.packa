@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "HF32FA-G_005-HSL1"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2020-11-25-11:02:10)
+    (mountForm default
+        (footprintRef "HF32FAG005HSL1")
+        (spec "System")
+    )
+)

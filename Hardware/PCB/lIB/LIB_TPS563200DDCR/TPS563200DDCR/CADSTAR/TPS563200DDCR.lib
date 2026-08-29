@@ -1,0 +1,18 @@
+.TPS563200DDCR :1 ;17 V Input, 3A Synchronous Step-Down Regulator in SOT-23 with Advanced Eco-mode
+SOT95P280X110-6N
+*STM IC
+*NGS
+*PLB 1="GND" 2="SW" 3="VIN" 4="VFB" 5="EN" 6="VBST"
+*MXP 6
+*DFN TPS563200DDCR
+~!Manufacturer_Name (Texas Instruments)
+~!Manufacturer_Part_Number (TPS563200DDCR)
+~!Mouser Part Number (595-TPS563200DDCR)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Texas-Instruments/TPS563200DDCR?qs=bT6MOr62zwLjxJIF4PA64g%3D%3D)
+~!Arrow Part Number (TPS563200DDCR)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/tps563200ddcr/texas-instruments.html?utm_currency=USD&region=europe)
+~!Link Datasheet (http://www.ti.com/lit/gpn/TPS563200)
+~!Height (1.1mm)
+~!3D_Model (TPS563200DDCR)
+TPS563200DDCR
+1.1!G 2.1!U 3.1!P 6.1!U 5.1!I 4.1!I 

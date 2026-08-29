@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "TPS563200DDCR"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2020-01-22-02:47:49)
+    (mountForm default
+        (footprintRef "SOT95P280X110-6N")
+        (spec "System")
+    )
+)
