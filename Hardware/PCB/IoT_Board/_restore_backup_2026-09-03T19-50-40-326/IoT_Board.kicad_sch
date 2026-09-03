@@ -15155,7 +15155,7 @@
 				)
 			)
 		)
-		(property "Value" "220"
+		(property "Value" "100"
 			(at 271.78 69.85 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -24074,7 +24074,7 @@
 				)
 			)
 		)
-		(property "Value" "220"
+		(property "Value" "100"
 			(at 271.78 109.22 90)
 			(show_name no)
 			(do_not_autoplace no)
