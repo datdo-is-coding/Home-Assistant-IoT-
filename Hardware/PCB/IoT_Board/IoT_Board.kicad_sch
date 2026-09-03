@@ -12049,7 +12049,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "0484277c-edf2-4652-9a78-7b55e5b3bbba")
-		(property "Reference" "J7"
+		(property "Reference" "CT2"
 			(at 304.546 191.262 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12111,7 +12111,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J7")
+					(reference "CT2")
 					(unit 1)
 				)
 			)
@@ -13822,7 +13822,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "1ee6d317-6eca-4e8b-9443-9eee559c13ba")
-		(property "Reference" "D9"
+		(property "Reference" "LED_RL2"
 			(at 279.7174 69.85 90)
 			(hide yes)
 			(show_name no)
@@ -13899,7 +13899,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "D9")
+					(reference "LED_RL2")
 					(unit 1)
 				)
 			)
@@ -14714,7 +14714,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "308a177f-3154-45b7-9689-17e813e6a114")
-		(property "Reference" "D8"
+		(property "Reference" "LED_RL1"
 			(at 279.7174 109.22 90)
 			(hide yes)
 			(show_name no)
@@ -14791,7 +14791,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "D8")
+					(reference "LED_RL1")
 					(unit 1)
 				)
 			)
@@ -20596,7 +20596,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "98e86786-848d-46e7-afca-a098cb432664")
-		(property "Reference" "J6"
+		(property "Reference" "CT1"
 			(at 304.546 154.432 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -20658,7 +20658,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J6")
+					(reference "CT1")
 					(unit 1)
 				)
 			)
@@ -20675,7 +20675,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "99f335ef-2439-45ab-b68b-6af1118dec0b")
-		(property "Reference" "J2"
+		(property "Reference" "UART0"
 			(at 31.242 34.29 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -20743,7 +20743,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J2")
+					(reference "UART0")
 					(unit 1)
 				)
 			)
@@ -22040,7 +22040,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "b9c00d30-e921-4453-b671-398037a77805")
-		(property "Reference" "J15"
+		(property "Reference" "INMP_441"
 			(at 195.58 226.06 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -22114,7 +22114,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J15")
+					(reference "INMP_441")
 					(unit 1)
 				)
 			)
@@ -22604,7 +22604,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "c10b07ad-0916-4ca0-a68b-80c0a1ec1a19")
-		(property "Reference" "J10"
+		(property "Reference" "5V1"
 			(at 169.545 264.16 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -22666,7 +22666,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J10")
+					(reference "5V1")
 					(unit 1)
 				)
 			)
@@ -22772,7 +22772,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "c366c9fb-c0bd-4fe8-8bae-cc6a795d51b5")
-		(property "Reference" "J5"
+		(property "Reference" "I2C1"
 			(at 31.242 76.708 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -22840,7 +22840,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J5")
+					(reference "I2C1")
 					(unit 1)
 				)
 			)
@@ -23267,7 +23267,7 @@
 		(in_pos_files yes)
 		(dnp no)
 		(uuid "cb1d0ae8-1503-4a33-afdf-1f481d4a9421")
-		(property "Reference" "J4"
+		(property "Reference" "UART1"
 			(at 31.496 53.34 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -23335,7 +23335,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J4")
+					(reference "UART1")
 					(unit 1)
 				)
 			)
@@ -25644,7 +25644,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "f532ea66-21e2-40a3-9191-1571a4d8e230")
-		(property "Reference" "J14"
+		(property "Reference" "MAX_98357"
 			(at 186.055 198.12 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -25721,7 +25721,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "J14")
+					(reference "MAX_98357")
 					(unit 1)
 				)
 			)
