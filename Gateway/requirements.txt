@@ -1,0 +1,25 @@
+# DTV Smart Home Gateway — Dependencies
+# Install: pip install -r requirements.txt
+
+# Core async
+aiomqtt>=2.0.0          # Modern async MQTT
+
+# LLM communication
+httpx>=0.27.0           # Async HTTP client for llama-server
+
+# Text-to-Speech
+edge-tts>=6.1.0         # Microsoft EdgeTTS
+
+# Audio processing
+opuslib>=3.0.1          # Opus codec bindings
+websockets>=12.0        # WebSocket server
+
+# Database
+influxdb-client>=1.40.0 # InfluxDB v2 client
+
+# ASR (install separately — large download)
+# sherpa-onnx>=1.10.0   # Uncomment after model download
+
+# Utilities
+pydub>=0.25.1           # Audio format conversion
+numpy>=1.26.0           # Audio processing

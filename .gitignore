@@ -1,0 +1,25 @@
+# OS & Editor
+.DS_Store
+Thumbs.db
+*.lck
+~*.lck
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+*.venv/
+*.egg-info/
+
+# Databases
+*.sqlite3
+*.db
+
+# KiCad backup & temporary
+*-save.kicad_pcb
+*-save.kicad_sch
+*.kicad_prl.bak

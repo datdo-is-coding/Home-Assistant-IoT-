@@ -1,0 +1,30 @@
+{
+  "nodes": {
+    "esp32_wroom_01": {
+      "mac": "FF:FF:FF:FF:FF:FF",
+      "area": "phong_ngu_master",
+      "description": "Node phòng ngủ chính (mẫu)",
+      "channels": {
+        "ch1": {
+          "device_type": "den_ngu",
+          "description": "Đèn ngủ đầu giường",
+          "rated_watts": 7,
+          "gpio": 26
+        },
+        "ch2": {
+          "device_type": "den_tran",
+          "description": "Đèn trần chiếu sáng",
+          "rated_watts": 40,
+          "gpio": 27
+        }
+      },
+      "sensors": {
+        "pzem": true,
+        "temperature": false
+      },
+      "registered_at": "2026-09-10T00:00:00+07:00",
+      "last_seen": "2026-09-10T00:00:00+07:00",
+      "status": "pending"
+    }
+  }
+}

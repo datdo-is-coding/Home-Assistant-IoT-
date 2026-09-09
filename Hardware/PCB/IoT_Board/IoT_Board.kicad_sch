@@ -13340,7 +13340,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "19c9089c-eb12-4e15-8600-3545133e8507")
-		(property "Reference" "EN"
+		(property "Reference" "EN1"
 			(at 50.8 208.28 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13402,7 +13402,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "EN")
+					(reference "EN1")
 					(unit 1)
 				)
 			)
@@ -25945,7 +25945,7 @@
 		(dnp no)
 		(fields_autoplaced yes)
 		(uuid "fbb3895f-a10a-49b7-89c7-f0baf9062b41")
-		(property "Reference" "BOOT"
+		(property "Reference" "BOOT1"
 			(at 52.07 186.69 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -26007,7 +26007,7 @@
 		(instances
 			(project "IoT_Board"
 				(path "/f7f4c251-abef-4e4b-a993-341f87747a84"
-					(reference "BOOT")
+					(reference "BOOT1")
 					(unit 1)
 				)
 			)

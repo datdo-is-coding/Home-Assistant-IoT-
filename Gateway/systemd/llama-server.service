@@ -1,0 +1,17 @@
+[Unit]
+Description=Llama.cpp Server (Qwen 2.5 1.5B)
+After=network.target
+
+[Service]
+Type=simple
+User=pi4
+WorkingDirectory=/home/pi4
+Environment=LD_LIBRARY_PATH=/opt/llama.cpp/build/bin
+ExecStart=/opt/llama.cpp/build/bin/llama-server -m /home/pi4/models/qwen2.5-1.5b-instruct-q4_k_m.gguf -c 1024 -t 3 --port 8080 --host 0.0.0.0
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -554,7 +554,7 @@
       "netlist": "",
       "plot": "gerber/",
       "specctra_dsn": "",
-      "step": "",
+      "step": "IoT_Board.step",
       "vrml": ""
     },
     "page_layout_descr_file": ""
