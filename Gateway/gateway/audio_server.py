@@ -106,6 +106,8 @@ class AudioServer:
                                 f"🎙️ Voice recording STARTED "
                                 f"(codec={codec}, sr={sample_rate}Hz)"
                             )
+                            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                self.gateway.broadcast_event("audio_state", {"state": "RECORDING"})
                             await websocket.send(json.dumps({
                                 "type": "status", "state": "recording"
                             }))
@@ -119,6 +121,8 @@ class AudioServer:
                                 f"{len(pcm_chunks)} chunks, "
                                 f"{elapsed:.2f}s"
                             )
+                            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
                             await websocket.send(json.dumps({
                                 "type": "status", "state": "processing"
                             }))
@@ -160,11 +164,14 @@ class AudioServer:
                             logger.debug(f"Opus decode error: {e}")
                     else:
                         # Raw PCM: 16-bit signed little-endian mono
-                        pcm_float = (
-                            np.frombuffer(message, dtype=np.int16)
-                            .astype(np.float32) / 32768.0
-                        )
+                        raw_i16 = np.frombuffer(message, dtype=np.int16)
+                        pcm_float = raw_i16.astype(np.float32) / 32768.0
                         pcm_chunks.append(pcm_float)
+
+                        if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
+                            if len(raw_i16) > 0:
+                                rms = int(np.sqrt(np.mean(np.square(raw_i16.astype(np.float32)))))
+                                self.gateway.broadcast_event("audio_meter", {"rms": rms, "frames": total_frames})
 
                     # ─── Server-side max duration check ───
                     elapsed = time.monotonic() - record_start_time
@@ -220,6 +227,8 @@ class AudioServer:
             return
 
         logger.info(f"📝 Recognized voice: '{text}'")
+        if self.gateway and hasattr(self.gateway, "broadcast_event"):
+            self.gateway.broadcast_event("transcript", {"text": text})
         await websocket.send(json.dumps({
             "type": "transcript", "text": text
         }))
@@ -271,6 +280,8 @@ class AudioServer:
             f"🔊 Streaming {total_len} bytes PCM to ESP32 speaker "
             f"({duration_s:.2f}s audio)"
         )
+        if self.gateway and hasattr(self.gateway, "broadcast_event"):
+            self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
 
         # Send start marker with PCM format info
         await websocket.send(json.dumps({
@@ -297,6 +308,8 @@ class AudioServer:
         logger.info(
             f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to ESP32"
         )
+        if self.gateway and hasattr(self.gateway, "broadcast_event"):
+            self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
 
     async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes):
         """

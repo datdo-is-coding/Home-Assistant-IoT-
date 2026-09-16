@@ -37,6 +37,10 @@ TTS_FALLBACK_VOICE = "vi-VN-NamMinhNeural"
 WS_AUDIO_HOST = "0.0.0.0"
 WS_AUDIO_PORT = 8765
 
+# ─── Web Monitor Dashboard ─────────────────────────
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 8000
+
 # ─── InfluxDB ──────────────────────────────────────
 INFLUX_URL = "http://127.0.0.1:8086"
 INFLUX_TOKEN = ""  # Will be set after InfluxDB setup

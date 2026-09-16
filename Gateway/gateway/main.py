@@ -23,6 +23,7 @@ from asr_engine import ASREngine
 from audio_server import AudioServer
 from verify_engine import CommandVerifier, VerifyResult
 from memory_engine import MemoryEngine
+from web_server import WebServer
 
 try:
     from telemetry_writer import TelemetryWriter
@@ -46,6 +47,7 @@ class SmartHomeGateway:
         self.audio_server = AudioServer(self)
         self.memory = MemoryEngine()
         self.verifier = CommandVerifier(self.mqtt, self.registry)
+        self.web_server = WebServer(self)
         
         # Optional engines
         self.telemetry_writer = None
@@ -66,6 +68,9 @@ class SmartHomeGateway:
         
         # Start Audio WebSocket Server
         await self.audio_server.start()
+        
+        # Start Web Monitor Dashboard
+        await self.web_server.start()
         
         # Initialize optional services
         if self.telemetry_writer:
@@ -188,6 +193,11 @@ class SmartHomeGateway:
         
         return result
     
+    def broadcast_event(self, event_name: str, data: dict):
+        """Broadcast an event to Web Monitor clients."""
+        if hasattr(self, "web_server") and self.web_server:
+            self.web_server.broadcast_event(event_name, data)
+
     # ── MQTT Callbacks ──────────────────────────────────
     
     async def _on_node_register(self, topic: str, payload: dict):
@@ -196,10 +206,13 @@ class SmartHomeGateway:
         channels = payload.get("channels", {})
         self.registry.register_node(node_id, mac, channels)
         logger.info(f"📡 Node registered: {node_id} (MAC: {mac})")
+        self.broadcast_event("node_status", {"node_id": node_id, "online": True, "channels": channels})
     
     async def _on_telemetry(self, topic: str, payload: dict):
         node_id = topic.split("/")[-1]
         self.registry.update_heartbeat(node_id)
+        if isinstance(payload, dict):
+            self.broadcast_event("node_telemetry", payload)
         if self.telemetry_writer:
             node_info = self.registry.get_all_nodes().get(node_id, {})
             area = node_info.get("area", "unknown")
@@ -215,6 +228,8 @@ class SmartHomeGateway:
     async def _on_status(self, topic: str, payload: dict):
         node_id = topic.split("/")[-1]
         self.registry.update_heartbeat(node_id)
+        if isinstance(payload, dict):
+            self.broadcast_event("node_status", payload)
 
 
 def setup_logging():
@@ -243,6 +258,7 @@ async def _shutdown(gateway):
     logger.info("Shutting down gateway...")
     gateway._running = False
     await gateway.audio_server.stop()
+    await gateway.web_server.stop()
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for t in tasks:
         t.cancel()
