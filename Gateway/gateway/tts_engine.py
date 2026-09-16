@@ -76,27 +76,47 @@ class TTSEngine:
         Convert Vietnamese text to raw PCM audio bytes (16kHz, 16-bit, mono).
         Suitable for direct playback on ESP32 I2S speaker.
 
-        Flow: text → EdgeTTS → MP3 bytes → pydub → raw PCM
+        Flow: text → EdgeTTS → MP3 bytes → pydub/ffmpeg → raw PCM
         """
         mp3_data = await self.synthesize(text)
         if not mp3_data:
             return None
 
-        if not HAS_PYDUB:
-            logger.error("pydub not installed — cannot convert MP3 to PCM")
-            return None
+        # Method 1: pydub
+        if HAS_PYDUB:
+            try:
+                audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
+                audio = audio.set_frame_rate(sample_rate)
+                audio = audio.set_channels(1)    # Mono
+                audio = audio.set_sample_width(2) # 16-bit
+                pcm_data = audio.raw_data
+                logger.info(
+                    f"TTS MP3→PCM converted (pydub): {len(mp3_data)} bytes MP3 → "
+                    f"{len(pcm_data)} bytes PCM ({len(pcm_data) / (sample_rate * 2):.2f}s)"
+                )
+                return pcm_data
+            except Exception as e:
+                logger.warning(f"pydub conversion failed: {e}, trying ffmpeg fallback")
 
+        # Method 2: ffmpeg subprocess (direct, zero extra python dependencies)
         try:
-            audio = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-            audio = audio.set_frame_rate(sample_rate)
-            audio = audio.set_channels(1)    # Mono
-            audio = audio.set_sample_width(2) # 16-bit
-            pcm_data = audio.raw_data
-            logger.info(
-                f"TTS MP3→PCM converted: {len(mp3_data)} bytes MP3 → "
-                f"{len(pcm_data)} bytes PCM ({len(pcm_data) / (sample_rate * 2):.2f}s)"
+            proc = await asyncio.create_subprocess_exec(
+                "ffmpeg", "-y", "-i", "pipe:0", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1", "pipe:1",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL
             )
-            return pcm_data
+            pcm_data, _ = await proc.communicate(input=mp3_data)
+            if proc.returncode == 0 and pcm_data:
+                logger.info(
+                    f"TTS MP3→PCM converted (ffmpeg): {len(mp3_data)} bytes MP3 → "
+                    f"{len(pcm_data)} bytes PCM ({len(pcm_data) / (sample_rate * 2):.2f}s)"
+                )
+                return pcm_data
+            else:
+                logger.error("ffmpeg conversion returned empty data or non-zero exit code")
         except Exception as e:
-            logger.error(f"MP3→PCM conversion error: {e}")
-            return None
+            logger.error(f"ffmpeg conversion failed: {e}")
+
+        logger.error("Neither pydub nor ffmpeg is available. Run: pip install pydub && sudo apt install -y ffmpeg")
+        return None
