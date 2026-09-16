@@ -21,5 +21,6 @@ influxdb-client>=1.40.0 # InfluxDB v2 client
 # sherpa-onnx>=1.10.0   # Uncomment after model download
 
 # Utilities
-pydub>=0.25.1           # Audio format conversion
+pydub>=0.25.1           # Audio format conversion (MP3→PCM for ESP32 speaker)
+                        # Requires ffmpeg: sudo apt install ffmpeg
 numpy>=1.26.0           # Audio processing

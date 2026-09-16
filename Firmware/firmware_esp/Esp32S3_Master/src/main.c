@@ -28,6 +28,10 @@
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
 
+/* ─── Audio Streaming & MQTT Relay Modules ─── */
+#include "ws_audio_client.h"
+#include "mqtt_relay.h"
+
 static void add_cors_headers(httpd_req_t *req);
 
 
@@ -83,7 +87,8 @@ static void init_rgb_led(void)
     ESP_LOGE(TAG, "Failed to initialize RMT WS2812 RGB LED driver on GPIO %d", RGB_LED_GPIO);
 }
 
-static void set_rgb_led_color(uint8_t r, uint8_t g, uint8_t b)
+/* Non-static: shared with ws_audio_client.c for LED status indication */
+void set_rgb_led_color(uint8_t r, uint8_t g, uint8_t b)
 {
     if (!led_chan || !bytes_encoder) return;
     uint8_t grb[3] = {g, r, b}; // WS2812 protocol requires Green-Red-Blue
@@ -127,7 +132,8 @@ static uint32_t last_telemetry_ms = 0;
 #define SPK_I2S_GPIO_DOUT    GPIO_NUM_7
 
 static i2s_chan_handle_t rx_handle = NULL;
-static i2s_chan_handle_t tx_handle = NULL;
+/* Non-static: shared with ws_audio_client.c for speaker playback */
+i2s_chan_handle_t tx_handle = NULL;
 static const esp_afe_sr_iface_t *afe_handle = &ESP_AFE_SR_HANDLE;
 static esp_afe_sr_data_t *afe_data = NULL;
 static volatile bool is_listening = false;
@@ -716,6 +722,11 @@ static void audio_feed_task(void *arg)
 
             afe_handle->feed(afe_data, i2s_buff);
 
+            /* ── Feed PCM to WebSocket if streaming to Pi ── */
+            if (ws_audio_is_streaming()) {
+                ws_audio_feed_pcm(i2s_buff, mono_samples);
+            }
+
             // Log Mic Live Audio Level every ~0.5 seconds
             frame_count++;
             if (frame_count >= 50) {
@@ -771,6 +782,16 @@ static void audio_detect_task(void *arg)
 
             // Trigger ESP-NOW request to ESP32 WROOM Energy Slave for power status
             send_esp_now_request_power();
+
+            /* ── Start WebSocket audio streaming to Pi 4 ── */
+            if (!ws_audio_is_streaming()) {
+                set_rgb_led_color(0, 200, 255); /* Cyan = streaming active */
+                esp_err_t ws_err = ws_audio_start_stream();
+                if (ws_err != ESP_OK) {
+                    ESP_LOGW(TAG, "WebSocket stream failed to start: %s", esp_err_to_name(ws_err));
+                    set_rgb_led_color(0, 0, 30); /* Back to dim blue */
+                }
+            }
         }
 
         if (res->vad_state == AFE_VAD_SPEECH && is_listening) {
@@ -831,6 +852,9 @@ void app_main(void)
     // 2b. Start continuous telemetry polling task (5s interval)
     xTaskCreate(telemetry_poll_task, "telemetry_poll", 3072, NULL, 4, NULL);
 
+    // 2c. Initialize MQTT Relay Controller (connects to EMQX broker on Pi 4)
+    mqtt_relay_init("mqtt://192.168.11.29:1883", "admin", "SmarthomePass2026!");
+
 
 
 
@@ -856,6 +880,9 @@ void app_main(void)
     if (spk_err != ESP_OK) {
         ESP_LOGW(TAG, "Speaker Init Warning (optional): %s", esp_err_to_name(spk_err));
     }
+
+    // 3b. Initialize WebSocket Audio Client (connects to Pi 4 Gateway)
+    ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
 
     // 4. Configure ESP-SR Audio Front-End (AFE)
     srmodel_list_t *models = esp_srmodel_init("model");

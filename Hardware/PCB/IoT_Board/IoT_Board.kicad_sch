@@ -7707,6 +7707,10 @@
 		(uuid "544d2c13-2490-46fc-a44f-5609fd71ad9a")
 	)
 	(no_connect
+		(at 387.35 201.93)
+		(uuid "85d5b85a-22b1-4f3f-9b6b-966e911869f6")
+	)
+	(no_connect
 		(at 355.6 203.2)
 		(uuid "92143042-49a9-4630-bb76-2c4d260556b5")
 	)
@@ -7741,6 +7745,10 @@
 	(no_connect
 		(at 114.3 59.69)
 		(uuid "ed2e3bec-897f-42b9-8aa3-a3b7bb4edce0")
+	)
+	(no_connect
+		(at 387.35 165.1)
+		(uuid "ed6e6274-b030-4aff-a6ef-e38c89a5e585")
 	)
 	(no_connect
 		(at 355.6 100.33)
@@ -11014,17 +11022,6 @@
 			(justify left bottom)
 		)
 		(uuid "71a71a3d-7a3d-4472-9fc0-590ef5728669")
-	)
-	(label "BL_RX2"
-		(at 387.35 201.93 0)
-		(effects
-			(font
-				(size 1.27 1.27)
-				(thickness 0.1588)
-			)
-			(justify left bottom)
-		)
-		(uuid "740afe0e-1df8-4cea-809c-1e5fff3a573c")
 	)
 	(label "COM1"
 		(at 251.46 171.45 0)

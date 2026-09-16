@@ -56,6 +56,21 @@ ANOMALY_SCAN_INTERVAL = 10.0
 HEARTBEAT_TIMEOUT = 60
 TELEMETRY_INTERVAL = 2.0
 
+# ─── Audio Streaming (ESP32 ↔ Pi) ─────────────────
+AUDIO_SAMPLE_RATE = 16000
+AUDIO_CHANNELS = 1
+AUDIO_SAMPLE_WIDTH = 2            # 16-bit = 2 bytes
+AUDIO_FRAME_MS = 20               # 20ms per PCM frame
+PCM_FRAME_SAMPLES = 320           # 16000 * 0.020 = 320 samples
+PCM_FRAME_BYTES = 640             # 320 * 2 = 640 bytes
+WS_SEND_CHUNK_SIZE = 2048         # Speaker PCM chunk size sent to ESP32
+
+# ─── VAD (Voice Activity Detection) ───────────────
+VAD_ENABLED = True                # Enable server-side VAD
+VAD_SILENCE_DURATION_S = 1.5      # Seconds of silence before end-of-speech
+VAD_MAX_DURATION_S = 10.0         # Maximum recording duration
+VAD_ENERGY_THRESHOLD = 0.01       # RMS energy threshold (float PCM)
+
 # ─── LLM System Prompt ────────────────────────────
 SYSTEM_PROMPT = """Bạn là bộ phân tích lệnh cho Nhà Thông Minh IoT (Smart Home AI).
 Nhiệm vụ: Phân tích khẩu lệnh thành cấu trúc JSON linh hoạt, tự động nhận diện mọi vị trí (khu vực) và phân loại chi tiết từng thiết bị.

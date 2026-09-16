@@ -158,7 +158,14 @@ class SmartHomeGateway:
             voice_reply = intent.get("voice_reply", "Đã thực hiện.")
         
         result["voice_reply"] = voice_reply
-        result["tts_audio"] = await self.tts.synthesize(voice_reply)
+        # Prefer PCM format for direct ESP32 I2S playback
+        pcm_audio = await self.tts.synthesize_pcm(voice_reply)
+        if pcm_audio:
+            result["tts_audio"] = pcm_audio
+            result["tts_format"] = "pcm"
+        else:
+            result["tts_audio"] = await self.tts.synthesize(voice_reply)
+            result["tts_format"] = "mp3"
         
         # Step 6: Log to memory
         self.memory.record_command(
