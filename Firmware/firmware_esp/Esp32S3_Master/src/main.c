@@ -31,6 +31,7 @@
 /* ─── Audio Streaming & MQTT Relay Modules ─── */
 #include "ws_audio_client.h"
 #include "mqtt_relay.h"
+#include "audio_feedback.h"
 
 static void add_cors_headers(httpd_req_t *req);
 
@@ -830,6 +831,12 @@ static void audio_detect_task(void *arg)
             // Turn WS2812 RGB LED Bright Green on "Hi ESP" detection!
             set_rgb_led_color(0, 255, 0);
 
+            // Play prompt Ding! feedback chime through speaker
+            audio_feedback_play(AUDIO_FB_WAKEUP);
+
+            // Reset AFE buffer so the Ding! sound isn't recorded into the voice command
+            afe_handle->reset_buffer(afe_data);
+
             // Trigger ESP-NOW request to ESP32 WROOM Energy Slave for power status
             send_esp_now_request_power();
 
@@ -922,6 +929,8 @@ void app_main(void)
     esp_err_t spk_err = init_i2s_speaker();
     if (spk_err != ESP_OK) {
         ESP_LOGW(TAG, "Speaker Init Warning (optional): %s", esp_err_to_name(spk_err));
+    } else {
+        audio_feedback_init(tx_handle);
     }
 
     // 4. Configure ESP-SR Audio Front-End (AFE)

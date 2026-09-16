@@ -37,7 +37,8 @@ class RegistryManager:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=2, ensure_ascii=False)
     
-    def register_node(self, node_id: str, mac: str, channels: dict = None) -> dict:
+    def register_node(self, node_id: str, mac: str, channels: dict = None,
+                      area: str = None, description: str = None) -> dict:
         """
         Register a new node or update existing.
         Called when ESP32 sends registration message via MQTT.
@@ -50,22 +51,26 @@ class RegistryManager:
             node["last_seen"] = now
             node["mac"] = mac
             node["status"] = "online"
+            if area:
+                node["area"] = area
+            if description:
+                node["description"] = description
             if channels:
                 node["channels"].update(channels)
-            logger.info(f"Node updated: {node_id}")
+            logger.info(f"Node updated: {node_id} (area: {node.get('area')})")
         else:
-            # New node — status=pending until user configures area/devices
+            # New node
             self.data["nodes"][node_id] = {
                 "mac": mac,
-                "area": "unknown",
-                "description": f"Unregistered node {node_id}",
+                "area": area or "unknown",
+                "description": description or f"Node {node_id}",
                 "channels": channels or {},
                 "sensors": {"pzem": True, "temperature": False},
                 "registered_at": now,
                 "last_seen": now,
-                "status": "pending",
+                "status": "online",
             }
-            logger.info(f"New node registered (pending): {node_id}")
+            logger.info(f"New node registered: {node_id} (area: {area})")
         
         self.save()
         return self.data["nodes"][node_id]
@@ -92,33 +97,63 @@ class RegistryManager:
         logger.info(f"Node configured: {node_id} → {area}")
         return True
     
-    def find_node_by_device(self, device_type: str, area: str) -> Optional[tuple]:
+    def find_node_by_device(self, device_type: str, area: str = None) -> Optional[tuple]:
         """
         Find node_id and channel for a given device_type + area.
-        Returns (node_id, channel_id) or None.
-        
-        This is the KEY function that bridges LLM output → hardware control.
-        LLM says: {"device":"den_ngu", "location":"phong_ngu_master"}
-        This returns: ("esp32_wroom_01", "ch1")
+        Handles aliases and fuzzy matching.
+        e.g.:
+          device_type="den" or "den_ngu", area="phong_ngu" -> ("esp32s3_master", "ch1")
+          device_type="quat" or "quat_ngu" or "quat_tran", area="phong_ngu" -> ("esp32s3_master", "ch2")
+          area=None or "" -> fallback to any online node matching device
         """
+        dev_norm = (device_type or "").lower().strip()
+        area_norm = (area or "").lower().strip()
+
+        # Helper to check if a channel matches device query
+        def matches_channel(ch_info: dict) -> bool:
+            c_type = ch_info.get("device_type", "").lower()
+            c_desc = ch_info.get("description", "").lower()
+            aliases = [str(a).lower() for a in ch_info.get("aliases", [])]
+
+            if dev_norm in [c_type, c_desc] or dev_norm in aliases:
+                return True
+            # Partial substring matching: "den" in "den_ngu", "quat" in "quat_tran"
+            if (c_type and c_type in dev_norm) or (dev_norm and dev_norm in c_type):
+                return True
+            if any(a in dev_norm or dev_norm in a for a in aliases):
+                return True
+            return False
+
+        # Helper to check if node matches area
+        def matches_area(node: dict) -> bool:
+            if not area_norm or area_norm in ["all", "any", "none"]:
+                return True  # No specific area specified -> match
+            n_area = node.get("area", "").lower()
+            aliases = [str(a).lower() for a in node.get("aliases", [])]
+            if area_norm == n_area or area_norm in n_area or n_area in area_norm:
+                return True
+            if any(area_norm in a or a in area_norm for a in aliases):
+                return True
+            return False
+
+        # Pass 1: Matching area + matching device
         for node_id, node in self.data["nodes"].items():
-            if node.get("area") != area:
-                continue
             if node.get("status") != "online":
                 continue
-            for ch_id, ch_info in node.get("channels", {}).items():
-                if ch_info.get("device_type") == device_type:
-                    return (node_id, ch_id)
-        
-        # Fuzzy match: try partial area match
-        for node_id, node in self.data["nodes"].items():
-            if node.get("status") != "online":
-                continue
-            if area in node.get("area", ""):
+            if matches_area(node):
                 for ch_id, ch_info in node.get("channels", {}).items():
-                    if ch_info.get("device_type") == device_type:
+                    if matches_channel(ch_info):
                         return (node_id, ch_id)
-        
+
+        # Pass 2: Fallback if area didn't match, search across any online node
+        if area_norm:
+            for node_id, node in self.data["nodes"].items():
+                if node.get("status") != "online":
+                    continue
+                for ch_id, ch_info in node.get("channels", {}).items():
+                    if matches_channel(ch_info):
+                        return (node_id, ch_id)
+
         return None
     
     def get_rated_watts(self, node_id: str, channel: str) -> float:

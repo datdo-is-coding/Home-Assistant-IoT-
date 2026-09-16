@@ -1,30 +1,50 @@
 {
   "nodes": {
-    "esp32_wroom_01": {
-      "mac": "FF:FF:FF:FF:FF:FF",
-      "area": "phong_ngu_master",
-      "description": "Node phòng ngủ chính (mẫu)",
+    "esp32s3_master": {
+      "mac": "30:ED:A0:BD:69:D4",
+      "area": "phong_ngu",
+      "aliases": [
+        "phong_ngu_master",
+        "phong_ngu",
+        "phòng ngủ",
+        "phong ngu"
+      ],
+      "description": "ESP32-S3 Master Voice + 2-CH Relay Phòng Ngủ",
       "channels": {
         "ch1": {
-          "device_type": "den_ngu",
-          "description": "Đèn ngủ đầu giường",
-          "rated_watts": 7,
-          "gpio": 26
+          "device_type": "den",
+          "aliases": [
+            "den_ngu",
+            "den_phong_ngu",
+            "den_chieu_sang",
+            "đèn",
+            "den"
+          ],
+          "description": "Đèn phòng ngủ",
+          "rated_watts": 40,
+          "gpio": 4
         },
         "ch2": {
-          "device_type": "den_tran",
-          "description": "Đèn trần chiếu sáng",
-          "rated_watts": 40,
-          "gpio": 27
+          "device_type": "quat",
+          "aliases": [
+            "quat_ngu",
+            "quat_phong_ngu",
+            "quat_tran",
+            "quạt",
+            "quat"
+          ],
+          "description": "Quạt phòng ngủ",
+          "rated_watts": 60,
+          "gpio": 5
         }
       },
       "sensors": {
         "pzem": true,
         "temperature": false
       },
-      "registered_at": "2026-09-10T00:00:00+07:00",
-      "last_seen": "2026-09-10T00:00:00+07:00",
-      "status": "pending"
+      "registered_at": "2026-09-17T00:00:00+07:00",
+      "last_seen": "2026-09-17T00:00:00+07:00",
+      "status": "online"
     }
   }
 }

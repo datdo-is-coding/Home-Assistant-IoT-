@@ -305,11 +305,11 @@ static void publish_registration(void)
              "\"node_id\":\"%s\","
              "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\","
              "\"type\":\"voice_relay_combined\","
-             "\"area\":\"phong_ngu_master\","
-             "\"description\":\"ESP32-S3 Voice + Relay Node\","
+             "\"area\":\"phong_ngu\","
+             "\"description\":\"ESP32-S3 Master Voice + 2-CH Relay Phòng Ngủ\","
              "\"channels\":{"
-               "\"ch1\":{\"device_type\":\"den_ngu\",\"description\":\"Đèn ngủ\",\"gpio\":%d},"
-               "\"ch2\":{\"device_type\":\"den_tran\",\"description\":\"Đèn trần\",\"gpio\":%d}"
+               "\"ch1\":{\"device_type\":\"den\",\"description\":\"Đèn phòng ngủ\",\"gpio\":%d},"
+               "\"ch2\":{\"device_type\":\"quat\",\"description\":\"Quạt phòng ngủ\",\"gpio\":%d}"
              "},"
              "\"capabilities\":[\"voice\",\"relay\",\"speaker\"]"
              "}",
@@ -319,7 +319,7 @@ static void publish_registration(void)
 
     esp_mqtt_client_publish(mqtt_client, TOPIC_REGISTER,
                            reg_json, 0, 1, 0);
-    ESP_LOGI(TAG, "📡 Published node registration to %s", TOPIC_REGISTER);
+    ESP_LOGI(TAG, "📡 Published node registration (phong_ngu: RL1=den, RL2=quat) to %s", TOPIC_REGISTER);
 }
 
 /* ─── Heartbeat Task ─────────────────────────────────────────────────── */

@@ -204,9 +204,11 @@ class SmartHomeGateway:
         mac = payload.get("mac", "unknown")
         node_id = payload.get("node_id", f"node_{mac.replace(':', '')[-6:]}")
         channels = payload.get("channels", {})
-        self.registry.register_node(node_id, mac, channels)
-        logger.info(f"📡 Node registered: {node_id} (MAC: {mac})")
-        self.broadcast_event("node_status", {"node_id": node_id, "online": True, "channels": channels})
+        area = payload.get("area")
+        description = payload.get("description")
+        self.registry.register_node(node_id, mac, channels, area, description)
+        logger.info(f"📡 Node registered: {node_id} (MAC: {mac}, Area: {area})")
+        self.broadcast_event("node_status", {"node_id": node_id, "online": True, "channels": channels, "area": area})
     
     async def _on_telemetry(self, topic: str, payload: dict):
         node_id = topic.split("/")[-1]

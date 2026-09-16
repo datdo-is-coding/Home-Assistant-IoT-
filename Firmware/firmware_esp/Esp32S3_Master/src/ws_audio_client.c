@@ -14,6 +14,7 @@
  */
 
 #include "ws_audio_client.h"
+#include "audio_feedback.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -223,9 +224,13 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
         ws_connected = true;
         set_rgb_led_color(0, 0, 30);     /* Dim blue = idle connected */
         ESP_LOGI(TAG, "✅ WebSocket connected to Pi 4 Gateway");
+        audio_feedback_play(AUDIO_FB_CONNECTED);
         break;
 
     case WEBSOCKET_EVENT_DISCONNECTED:
+        if (ws_connected) {
+            audio_feedback_play(AUDIO_FB_ERROR);
+        }
         ws_connected = false;
         if (ws_state == WS_STATE_STREAMING || ws_state == WS_STATE_PROCESSING) {
             ws_state = WS_STATE_IDLE;
@@ -335,6 +340,8 @@ static void handle_ws_text_message(const char *data, int len)
         ESP_LOGW(TAG, "Pi error: %s",
                  cJSON_IsString(msg) ? msg->valuestring : "unknown");
         ws_state = WS_STATE_IDLE;
+        set_rgb_led_color(255, 0, 0);  /* Red = error */
+        audio_feedback_play(AUDIO_FB_ERROR);
         set_rgb_led_color(0, 0, 30);
     }
 
@@ -441,6 +448,9 @@ static void audio_stream_task(void *arg)
                      frame_count, frame_count * 0.02f);
 
             set_rgb_led_color(0, 50, 255);  /* Blue = processing on Pi */
+
+            /* Play audio feedback confirming speech recording ended */
+            audio_feedback_play(AUDIO_FB_RECORDING_DONE);
         }
 
         /* If we broke out due to error, reset to idle */
