@@ -115,21 +115,22 @@ static uint32_t last_telemetry_ms = 0;
 
 
 // ============================================================================
-// I2S MICROPHONE PIN DEFINITIONS (Default: INMP441 MEMS Mic)
+// I2S MICROPHONE PIN DEFINITIONS (INMP441 MEMS Mic - Matches Schematic)
 // ============================================================================
 #define MIC_I2S_PORT         I2S_NUM_0
-#define MIC_I2S_GPIO_BCLK    GPIO_NUM_47
-#define MIC_I2S_GPIO_WS      GPIO_NUM_10
-#define MIC_I2S_GPIO_DIN     GPIO_NUM_21
+#define MIC_I2S_GPIO_BCLK    GPIO_NUM_15   // Schematic: MIC_BCLK (IO15)
+#define MIC_I2S_GPIO_WS      GPIO_NUM_16   // Schematic: MIC_WS (IO16)
+#define MIC_I2S_GPIO_DIN     GPIO_NUM_8    // Schematic: MIC_DIN (IO8)
 
 
 // ============================================================================
-// I2S SPEAKER / DAC PIN DEFINITIONS (Default: MAX98357A I2S DAC/AMP)
+// I2S SPEAKER / DAC PIN DEFINITIONS (MAX98357A I2S DAC/AMP - Matches Schematic)
 // ============================================================================
 #define SPK_I2S_PORT         I2S_NUM_1
-#define SPK_I2S_GPIO_BCLK    GPIO_NUM_15
-#define SPK_I2S_GPIO_WS      GPIO_NUM_16
-#define SPK_I2S_GPIO_DOUT    GPIO_NUM_7
+#define SPK_I2S_GPIO_BCLK    GPIO_NUM_17   // Schematic: SP_BCLK (IO17)
+#define SPK_I2S_GPIO_WS      GPIO_NUM_18   // Schematic: SP_LRC (IO18)
+#define SPK_I2S_GPIO_DOUT    GPIO_NUM_21   // Schematic: SP_DOUT (IO21)
+#define SPK_SD_GPIO          GPIO_NUM_2    // Schematic: SP_SD (IO2 - Amp Shutdown/Enable)
 
 static i2s_chan_handle_t rx_handle = NULL;
 /* Non-static: shared with ws_audio_client.c for speaker playback */
@@ -173,7 +174,10 @@ static esp_err_t init_i2s_microphone(void)
         },
     };
 
-    ESP_LOGI(TAG, "INMP441 I2S Microphone successfully initialized!");
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
+
+    ESP_LOGI(TAG, "INMP441 I2S Microphone successfully initialized and enabled!");
     return ESP_OK;
 }
 
@@ -670,8 +674,27 @@ static esp_err_t init_i2s_speaker(void)
 
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
-    ESP_LOGI(TAG, "I2S Speaker DAC successfully initialized!");
+
+    // Configure MAX98357A SD pin (GPIO 2) for dynamic power-down
+    gpio_config_t sd_conf = {
+        .pin_bit_mask = (1ULL << SPK_SD_GPIO),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_down_en = 1,
+        .pull_up_en = 0,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&sd_conf);
+    gpio_set_level(SPK_SD_GPIO, 0); // Start MUTED to eliminate idle hum/hiss!
+
+    ESP_LOGI(TAG, "I2S Speaker DAC successfully initialized (Amp initially muted on GPIO %d)", SPK_SD_GPIO);
     return ESP_OK;
+}
+
+/* Non-static: dynamically enable/disable MAX98357A Amp via SP_SD GPIO 2 */
+void speaker_enable(bool enable)
+{
+    gpio_set_level(SPK_SD_GPIO, enable ? 1 : 0);
+    ESP_LOGI(TAG, "Speaker Amp %s (GPIO %d)", enable ? "ENABLED (Unmuted)" : "SHUTDOWN (Muted)", SPK_SD_GPIO);
 }
 
 /**
@@ -713,10 +736,20 @@ static void audio_feed_task(void *arg)
             int mono_samples = samples_read / 2;
             if (mono_samples > audio_chunksize) mono_samples = audio_chunksize;
 
-            // Convert Left Channel 24-bit PCM (in 32-bit slot) to 16-bit PCM for ESP-SR
+            // Convert Left/Right Channel 24-bit PCM (in 32-bit slot) to 16-bit PCM for ESP-SR
+            int64_t sum_l = 0, sum_r = 0;
             for (int i = 0; i < mono_samples; i++) {
-                int32_t left_sample = raw_buff[i * 2]; // INMP441 L/R=GND is Left channel
-                i2s_buff[i] = (int16_t)(left_sample >> 14); // Scale to 16-bit PCM
+                int32_t left_sample  = raw_buff[i * 2];
+                int32_t right_sample = raw_buff[i * 2 + 1];
+
+                int16_t l16 = (int16_t)(left_sample >> 14);
+                int16_t r16 = (int16_t)(right_sample >> 14);
+
+                sum_l += abs(l16);
+                sum_r += abs(r16);
+
+                // Auto-select whichever channel has audio signal (handles L/R tied to GND, 3.3V, or floating)
+                i2s_buff[i] = (abs(left_sample) >= abs(right_sample)) ? l16 : r16;
             }
 
             afe_handle->feed(afe_data, i2s_buff);
@@ -730,11 +763,9 @@ static void audio_feed_task(void *arg)
             frame_count++;
             if (frame_count >= 50) {
                 frame_count = 0;
-                int64_t sum = 0;
-                for (int i = 0; i < mono_samples; i++) {
-                    sum += abs(i2s_buff[i]);
-                }
-                int avg_amp = mono_samples > 0 ? (int)(sum / mono_samples) : 0;
+                int avg_l = mono_samples > 0 ? (int)(sum_l / mono_samples) : 0;
+                int avg_r = mono_samples > 0 ? (int)(sum_r / mono_samples) : 0;
+                int avg_amp = (avg_l >= avg_r) ? avg_l : avg_r;
 
                 char bar[21] = {0};
                 int level = avg_amp / 150;
@@ -742,7 +773,10 @@ static void audio_feed_task(void *arg)
                 for (int i = 0; i < 20; i++) {
                     bar[i] = (i < level) ? '#' : '-';
                 }
-                ESP_LOGI(TAG, "INMP441 Real Audio Level: %5d | [%s]", avg_amp, bar);
+                ESP_LOGI(TAG, "INMP441 Mic L=%4d, R=%4d | Raw[0]=0x%08lX, Raw[1]=0x%08lX | [%s]",
+                         avg_l, avg_r,
+                         (unsigned long)raw_buff[0], (unsigned long)raw_buff[1],
+                         bar);
             }
         } else {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -764,10 +798,27 @@ static void audio_detect_task(void *arg)
     int afe_chunksize = afe_handle->get_fetch_chunksize(afe_data);
     ESP_LOGI(TAG, "Audio Detect Task started (fetch chunk size: %d)", afe_chunksize);
 
+    static ws_audio_state_t prev_ws_state = WS_STATE_IDLE;
+
     while (1) {
+        ws_audio_state_t current_ws_state = ws_audio_get_state();
+        if (prev_ws_state == WS_STATE_PLAYING && current_ws_state == WS_STATE_IDLE) {
+            // Speaker playback finished, flush any residual sound out of AFE buffer!
+            afe_handle->reset_buffer(afe_data);
+            is_listening = false;
+            ESP_LOGI(TAG, "Speaker playback ended — AFE buffer flushed, WakeNet re-armed!");
+        }
+        prev_ws_state = current_ws_state;
+
+        // Fetch AFE output continuously so the internal audio pipeline is never stalled or overflowed
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
         if (!res || res->ret_value < 0) {
             vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+
+        // While speaker is playing TTS audio, discard wake word detections to avoid self-triggering
+        if (current_ws_state == WS_STATE_PLAYING) {
             continue;
         }
 

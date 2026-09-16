@@ -221,10 +221,8 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
         ws_connected = true;
-        set_rgb_led_color(0, 100, 255);  /* Blue = connected */
+        set_rgb_led_color(0, 0, 30);     /* Dim blue = idle connected */
         ESP_LOGI(TAG, "✅ WebSocket connected to Pi 4 Gateway");
-        vTaskDelay(pdMS_TO_TICKS(500));
-        set_rgb_led_color(0, 0, 30);     /* Dim blue = idle */
         break;
 
     case WEBSOCKET_EVENT_DISCONNECTED:
@@ -337,8 +335,6 @@ static void handle_ws_text_message(const char *data, int len)
         ESP_LOGW(TAG, "Pi error: %s",
                  cJSON_IsString(msg) ? msg->valuestring : "unknown");
         ws_state = WS_STATE_IDLE;
-        set_rgb_led_color(255, 0, 0);  /* Red = error */
-        vTaskDelay(pdMS_TO_TICKS(500));
         set_rgb_led_color(0, 0, 30);
     }
 
@@ -462,6 +458,8 @@ static void audio_stream_task(void *arg)
  * Runs continuously once activated, stops when all TTS audio is played.
  */
 
+extern void speaker_enable(bool enable);
+
 static void speaker_playback_task(void *arg)
 {
     uint8_t play_buf[SPK_PLAY_BUF_SIZE];
@@ -487,13 +485,19 @@ static void speaker_playback_task(void *arg)
         }
 
         ESP_LOGI(TAG, "🔊 Starting speaker playback...");
+        /* Unmute / Enable MAX98357A amplifier via SP_SD GPIO 2 */
+        speaker_enable(true);
+        vTaskDelay(pdMS_TO_TICKS(30)); /* Let amp power up smoothly */
+
         int total_played = 0;
+        int empty_wait_count = 0;
 
         while (ws_state == WS_STATE_PLAYING) {
             size_t received = xStreamBufferReceive(spk_stream_buf, play_buf,
                                                     sizeof(play_buf),
-                                                    pdMS_TO_TICKS(500));
+                                                    pdMS_TO_TICKS(200));
             if (received > 0) {
+                empty_wait_count = 0;
                 size_t bytes_written = 0;
                 esp_err_t err = i2s_channel_write(spk_i2s_handle, play_buf,
                                                    received, &bytes_written,
@@ -509,9 +513,24 @@ static void speaker_playback_task(void *arg)
                              total_played, (float)total_played / (16000 * 2));
                     break;
                 }
-                /* Still waiting for more data from Pi... */
+                empty_wait_count++;
+                if (empty_wait_count >= 15) { // 3 seconds timeout
+                    ESP_LOGW(TAG, "Speaker playback timed out waiting for audio data");
+                    break;
+                }
             }
         }
+
+        /* ── Drain I2S DMA with silence (zeros) so no residual buffer buzz remains ── */
+        memset(play_buf, 0, sizeof(play_buf));
+        for (int i = 0; i < 4; i++) {
+            size_t dummy = 0;
+            i2s_channel_write(spk_i2s_handle, play_buf, sizeof(play_buf), &dummy, pdMS_TO_TICKS(50));
+        }
+        vTaskDelay(pdMS_TO_TICKS(50)); /* Let zero-samples output completely */
+
+        /* ── Put MAX98357A into hardware SHUTDOWN (mute) to eliminate idle hum/hiss ── */
+        speaker_enable(false);
 
         /* Return to idle state */
         ws_state = WS_STATE_IDLE;

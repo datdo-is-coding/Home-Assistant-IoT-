@@ -191,8 +191,8 @@ class AudioServer:
                             )
                         pcm_chunks.clear()
 
-        except websockets.exceptions.ConnectionClosed:
-            logger.info(f"ESP32 client disconnected: {client_addr}")
+        except websockets.exceptions.ConnectionClosed as e:
+            logger.info(f"ESP32 client disconnected: {client_addr} (code={e.code}, reason='{e.reason}')")
         except Exception as e:
             logger.error(f"Error handling WebSocket client {client_addr}: {e}")
 
