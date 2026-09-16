@@ -584,7 +584,6 @@ static esp_err_t init_esp_now_master(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_connect();
 
     uint8_t s3_mac[6];
     esp_wifi_get_mac(WIFI_IF_STA, s3_mac);
@@ -852,13 +851,6 @@ void app_main(void)
     // 2b. Start continuous telemetry polling task (5s interval)
     xTaskCreate(telemetry_poll_task, "telemetry_poll", 3072, NULL, 4, NULL);
 
-    // 2c. Initialize MQTT Relay Controller (connects to EMQX broker on Pi 4)
-    mqtt_relay_init("mqtt://192.168.11.29:1883", "admin", "SmarthomePass2026!");
-
-
-
-
-
     // 3. Check & Log Memory Status (Octal PSRAM 8MB)
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t psram_free    = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -880,9 +872,6 @@ void app_main(void)
     if (spk_err != ESP_OK) {
         ESP_LOGW(TAG, "Speaker Init Warning (optional): %s", esp_err_to_name(spk_err));
     }
-
-    // 3b. Initialize WebSocket Audio Client (connects to Pi 4 Gateway)
-    ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
 
     // 4. Configure ESP-SR Audio Front-End (AFE)
     srmodel_list_t *models = esp_srmodel_init("model");
@@ -918,6 +907,12 @@ void app_main(void)
     // 5. Create Audio Tasks
     xTaskCreatePinnedToCore(audio_feed_task, "audio_feed_task", 8 * 1024, afe_data, 5, NULL, 0);
     xTaskCreatePinnedToCore(audio_detect_task, "audio_detect_task", 8 * 1024, afe_data, 5, NULL, 1);
+
+    // 6. Initialize MQTT Relay Controller (connects to EMQX broker on Pi 4)
+    mqtt_relay_init("mqtt://192.168.11.29:1883", "admin", "SmarthomePass2026!");
+
+    // 7. Initialize WebSocket Audio Client (connects to Pi 4 Gateway)
+    ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
 
     ESP_LOGI(TAG, "System ready. Say 'Hi ESP' to wake up the system.");
 }

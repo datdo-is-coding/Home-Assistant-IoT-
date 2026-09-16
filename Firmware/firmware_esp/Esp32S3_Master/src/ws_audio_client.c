@@ -22,14 +22,15 @@
 #include "freertos/stream_buffer.h"
 #include "esp_log.h"
 #include "esp_websocket_client.h"
+#include "esp_heap_caps.h"
 #include "cJSON.h"
 
 static const char *TAG = "WS_AUDIO";
 
 /* ─── Configuration ──────────────────────────────────────────────────── */
 
-#define MIC_STREAM_BUF_SIZE    (64000)    /* ~2 seconds of 16kHz/16-bit PCM */
-#define SPK_STREAM_BUF_SIZE    (160000)   /* ~5 seconds of 16kHz/16-bit PCM */
+#define MIC_STREAM_BUF_SIZE    (16000)    /* 500ms of 16kHz/16-bit PCM in PSRAM */
+#define SPK_STREAM_BUF_SIZE    (64000)    /* 2 seconds of 16kHz/16-bit PCM in PSRAM */
 #define WS_SEND_BUF_SIZE       (640)      /* 20ms frame: 320 samples × 2 bytes */
 #define SPK_PLAY_BUF_SIZE      (1024)     /* Speaker write chunk */
 
@@ -75,9 +76,30 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
     ESP_LOGI(TAG, "Initializing WebSocket audio client → %s", uri);
     spk_i2s_handle = spk_handle;
 
-    /* Create stream buffers (trigger level = 1 byte for responsiveness) */
-    mic_stream_buf = xStreamBufferCreate(MIC_STREAM_BUF_SIZE, 1);
-    spk_stream_buf = xStreamBufferCreate(SPK_STREAM_BUF_SIZE, 1);
+    /* Allocate buffer storage in Octal PSRAM (8MB available) to preserve internal SRAM */
+    static uint8_t *mic_buf_storage = NULL;
+    static StaticStreamBuffer_t mic_buf_struct;
+    static uint8_t *spk_buf_storage = NULL;
+    static StaticStreamBuffer_t spk_buf_struct;
+
+    if (!mic_buf_storage) {
+        mic_buf_storage = (uint8_t *)heap_caps_malloc(MIC_STREAM_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    if (!spk_buf_storage) {
+        spk_buf_storage = (uint8_t *)heap_caps_malloc(SPK_STREAM_BUF_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+
+    if (mic_buf_storage && spk_buf_storage) {
+        mic_stream_buf = xStreamBufferCreateStatic(MIC_STREAM_BUF_SIZE, 1, mic_buf_storage, &mic_buf_struct);
+        spk_stream_buf = xStreamBufferCreateStatic(SPK_STREAM_BUF_SIZE, 1, spk_buf_storage, &spk_buf_struct);
+        ESP_LOGI(TAG, "Stream buffers allocated in Octal PSRAM (mic=%d KB, spk=%d KB)",
+                 MIC_STREAM_BUF_SIZE / 1024, SPK_STREAM_BUF_SIZE / 1024);
+    } else {
+        ESP_LOGW(TAG, "PSRAM alloc failed, falling back to internal SRAM buffers");
+        mic_stream_buf = xStreamBufferCreate(3200, 1);
+        spk_stream_buf = xStreamBufferCreate(16000, 1);
+    }
+
     if (!mic_stream_buf || !spk_stream_buf) {
         ESP_LOGE(TAG, "Failed to create stream buffers! Check free heap.");
         return ESP_ERR_NO_MEM;
@@ -104,17 +126,17 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY,
                                   ws_event_handler, NULL);
 
-    /* Create background tasks */
+    /* Create background tasks (4KB stack is sufficient for stream and playback) */
     BaseType_t ret;
     ret = xTaskCreatePinnedToCore(audio_stream_task, "audio_stream",
-                                  8 * 1024, NULL, 4, &stream_task_handle, 1);
+                                  4 * 1024, NULL, 4, &stream_task_handle, 1);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create audio_stream_task!");
         return ESP_ERR_NO_MEM;
     }
 
     ret = xTaskCreatePinnedToCore(speaker_playback_task, "spk_play",
-                                  6 * 1024, NULL, 3, &speaker_task_handle, 1);
+                                  4 * 1024, NULL, 3, &speaker_task_handle, 1);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create speaker_playback_task!");
         return ESP_ERR_NO_MEM;
