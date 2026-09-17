@@ -223,6 +223,36 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
         </div>
         <div class="hint" id="proactive-last-action" style="font-style:italic">—</div>
       </div>
+
+      <!-- Voice Prosody & Sweet Female Persona -->
+      <div style="display:flex;flex-direction:column;gap:10px;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px">
+        <div style="font-weight:700;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>🌸 Giọng Nữ Ngọt Ngào & Luyến Láy</span>
+        </div>
+        <div class="hint">EdgeTTS <b style="color:#f472b6">vi-VN-HoaiMyNeural</b> — Nữ miền Bắc ấm áp, xưng "em" gọi "anh".</div>
+        
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:0.78rem">
+            <span>Tốc độ đọc (Rate):</span>
+            <span id="rate-val" style="color:var(--accent);font-weight:600">-4%</span>
+          </div>
+          <input type="range" id="voice-rate" min="-20" max="10" step="1" value="-4" style="accent-color:var(--accent);cursor:pointer" oninput="$('rate-val').textContent=(this.value>0?'+':'')+this.value+'%'">
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="display:flex;justify-content:space-between;font-size:0.78rem">
+            <span>Cao độ / Điệu bộ (Pitch):</span>
+            <span id="pitch-val" style="color:var(--accent);font-weight:600">+2Hz</span>
+          </div>
+          <input type="range" id="voice-pitch" min="-5" max="10" step="1" value="2" style="accent-color:var(--accent);cursor:pointer" oninput="$('pitch-val').textContent=(this.value>0?'+':'')+this.value+'Hz'">
+        </div>
+
+        <div style="display:flex;gap:6px;margin-top:2px">
+          <button class="btn btn-a" style="flex:1" onclick="saveVoiceSettings()">💾 Lưu Cài Đặt</button>
+          <button class="btn btn-g" onclick="testSpeak('chào')">🔊 Nghe Thử</button>
+        </div>
+        <div class="hint" id="voice-save-status" style="color:var(--green);font-weight:600">—</div>
+      </div>
     </div>
   </div>
 
@@ -533,6 +563,16 @@ async function loadProactiveStatus(){
       if($('proactive-status-label')) $('proactive-status-label').textContent = j.enabled ? 'Đang bật tự động bắt chuyện' : 'Đang tạm dừng tự động bắt chuyện';
       if($('gemini-status')) $('gemini-status').textContent = j.has_gemini_key ? '✨ Đã kích hoạt Google Gemini Cloud API (Siêu thông minh)' : '⚡ Đang dùng Persona Offline (Dân ca, chuyện cười, thời gian)';
       if(j.has_gemini_key && $('gemini-key') && !$('gemini-key').value) $('gemini-key').placeholder = '•••••••••••••••••••••••• (Đã lưu key)';
+      if(j.tts_rate && $('voice-rate')){
+        const rInt = parseInt(j.tts_rate.replace('%','')) || -4;
+        $('voice-rate').value = rInt;
+        $('rate-val').textContent = (rInt>0?'+':'') + rInt + '%';
+      }
+      if(j.tts_pitch && $('voice-pitch')){
+        const pInt = parseInt(j.tts_pitch.replace('Hz','')) || 2;
+        $('voice-pitch').value = pInt;
+        $('pitch-val').textContent = (pInt>0?'+':'') + pInt + 'Hz';
+      }
     }
   }catch(e){}
 }
@@ -579,6 +619,26 @@ async function testSpeak(type){
       if($('proactive-last-action')) $('proactive-last-action').textContent = `Chưa phát được (ESP32 chưa nối WebSocket audio)`;
     }
   }catch(e){ addLog('⚠️ Lỗi phát loa: '+e); }
+}
+
+async function saveVoiceSettings(){
+  const rateVal = $('rate-val').textContent.trim();
+  const pitchVal = $('pitch-val').textContent.trim();
+  addLog(`🌸 Lưu tinh chỉnh giọng: Tốc độ ${rateVal}, Cao độ ${pitchVal}...`);
+  try {
+    const r = await fetch('/api/settings/voice', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rate: rateVal, pitch: pitchVal})
+    });
+    const j = await r.json();
+    if(j.success){
+      addLog(`✅ Đã lưu cấu hình giọng nữ ngọt ngào (${rateVal}, ${pitchVal})!`, true);
+      if($('voice-save-status')) $('voice-save-status').textContent = '✨ Đã áp dụng giọng mới!';
+    } else {
+      addLog(`⚠️ Lỗi: ` + (j.error||''), true);
+    }
+  } catch(e) { addLog('⚠️ Lỗi lưu giọng: '+e); }
 }
 
 // doanh nghiệp: 1 datalist phòng phổ biến
@@ -828,6 +888,8 @@ class WebServer:
                     "cooldown_hours": getattr(config, "PROACTIVE_COOLDOWN_HOURS", 2.0),
                     "quiet_start": getattr(config, "PROACTIVE_QUIET_START", 22),
                     "quiet_end": getattr(config, "PROACTIVE_QUIET_END", 7),
+                    "tts_rate": getattr(config, "TTS_RATE", "-4%"),
+                    "tts_pitch": getattr(config, "TTS_PITCH", "+2Hz"),
                     "recent_logs": recent_logs,
                     "recent_journal": recent_journal
                 }
@@ -895,6 +957,39 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode()+body)
                 await writer.drain(); writer.close(); return
 
+            # POST /api/settings/voice
+            if method == "POST" and path == "/api/settings/voice":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    rate = str(d.get("rate", "-4%")).strip()
+                    pitch = str(d.get("pitch", "+2Hz")).strip()
+                    config.TTS_RATE = rate
+                    config.TTS_PITCH = pitch
+                    # Clear in-memory TTS cache if exists
+                    if hasattr(self.gateway, "tts") and hasattr(self.gateway.tts, "_mem_cache"):
+                        self.gateway.tts._mem_cache.clear()
+                    # Save to local_config.json
+                    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
+                    cfg_data = {}
+                    if os.path.exists(cfg_path):
+                        try:
+                            with open(cfg_path, "r", encoding="utf-8") as f:
+                                cfg_data = json.load(f)
+                        except Exception: pass
+                    cfg_data["TTS_RATE"] = rate
+                    cfg_data["TTS_PITCH"] = pitch
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(cfg_data, f, indent=2)
+                    resp_data = {"success": True, "rate": rate, "pitch": pitch}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
+
             # POST /api/proactive/test_speak
             if method == "POST" and path == "/api/proactive/test_speak":
                 body = await _read_body()
@@ -913,9 +1008,9 @@ class WebServer:
                         jokes = getattr(self.gateway.persona, "_jokes", []) if hasattr(self.gateway, "persona") else []
                         text = random.choice(jokes) if jokes else "Tại sao con cua không bao giờ đi thẳng? Vì nó thích đi ngang đó nha!"
                     elif t == "an_toan":
-                        text = "Dạ xin lưu ý, bình nóng lạnh ở phòng tắm đã bật hơn 35 phút rồi ạ. Nhà mình chú ý tắt để đảm bảo an toàn và tiết kiệm điện nhé."
+                        text = "Dạ anh ơi~ Em thấy bình nóng lạnh ở phòng tắm đã bật hơn 35 phút rồi đó ạ. Anh nhớ tắt giúp em để vừa an toàn vừa tiết kiệm điện nha anh!"
                     else:
-                        text = "Chào bạn! Mình là Lumi, trợ lý nhà thông minh của bạn đây ạ."
+                        text = "Dạ, em chào anh ạ! Em là Lumi, cô trợ lý nhỏ luôn sẵn sàng hỗ trợ anh nè~ Anh có mệt không, để em bật chút nhạc cho anh thư giãn nha?"
 
                     ok = False
                     if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:

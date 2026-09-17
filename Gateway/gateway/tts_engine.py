@@ -29,7 +29,7 @@ class TTSEngine:
     
     def __init__(self):
         self.voice = getattr(config, "TTS_VOICE", "vi-VN-HoaiMyNeural")
-        self.fallback_voice = getattr(config, "TTS_FALLBACK_VOICE", "vi-VN-NamMinhNeural")
+        self.fallback_voice = getattr(config, "TTS_FALLBACK_VOICE", "vi-VN-HoaiMyNeural")
         self.rate = getattr(config, "TTS_RATE", "-4%")
         self.pitch = getattr(config, "TTS_PITCH", "+2Hz")
         # Persistent audio cache setup
@@ -67,6 +67,10 @@ class TTSEngine:
         t = re.sub(r"\bChào bạn\b", "Chào anh", t)
         t = re.sub(r"\bbạn nhé\b", "anh nhé", t)
         t = re.sub(r"\bbạn nha\b", "anh nha", t)
+        # Bắt triệt để mọi từ "bạn" / "người dùng" còn lại
+        t = re.sub(r"\bBạn\b", "Anh", t)
+        t = re.sub(r"\bbạn\b", "anh", t)
+        t = re.sub(r"\bngười dùng\b", "anh", t)
 
         # 2. Ngắt nhịp thở tự nhiên (~180ms micro-pause) sau từ mở đầu
         if t.startswith("Dạ ") and not t.startswith("Dạ, "):
@@ -78,9 +82,21 @@ class TTSEngine:
 
         # 3. Luyến láy đuôi câu nhẹ nhàng
         if t.endswith("nè.") or t.endswith("nè"):
+            t = t.rstrip(".").rstrip() + "~"
+        elif t.endswith("nha.") or t.endswith("nha"):
+            t = t.rstrip(".").rstrip()
+            if not t.endswith("anh"):
+                t += " anh~"
+            else:
+                t += "~"
+        elif t.endswith("nhé.") or t.endswith("nhé"):
+            t = t.rstrip(".").rstrip()
+            if not t.endswith("anh"):
+                t += " nha anh~"
+            else:
+                t += "~"
+        elif t.endswith("ạ."):
             t = t.rstrip(".") + "~"
-        elif t.endswith("nha."):
-            t = t[:-1] + " anh~"
 
         return t
 

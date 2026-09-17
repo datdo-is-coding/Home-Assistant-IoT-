@@ -133,22 +133,23 @@ class CommandVerifier:
         if result == VerifyResult.FAILED:
             if action == "turn_on":
                 msg = (
-                    f"Em đã bật công tắc {device_name} ở {area_name}, "
-                    f"nhưng không thấy tiêu thụ điện. "
-                    f"Có thể thiết bị bị hỏng hoặc chưa cắm điện."
+                    f"Dạ anh ơi, em đã bật công tắc {device_name} ở {area_name} rồi, "
+                    f"nhưng không thấy tiêu thụ điện nè. "
+                    f"Anh kiểm tra xem phích cắm hoặc bóng đèn có sao không nha anh~"
                 )
             else:
                 msg = (
-                    f"Em đã tắt công tắc {device_name} ở {area_name}, "
-                    f"nhưng vẫn thấy tiêu thụ điện. "
-                    f"Vui lòng kiểm tra lại."
+                    f"Dạ anh ơi, em đã ngắt công tắc {device_name} ở {area_name} rồi, "
+                    f"nhưng đường điện vẫn còn báo công suất. "
+                    f"Anh kiểm tra lại công tắc giúp em nha~"
                 )
             return clean_voice_text(msg)
         elif result == VerifyResult.PARTIAL:
             msg = (
-                f"{device_name} ở {area_name} có vẻ hoạt động yếu. "
-                f"Tiêu thụ thấp hơn bình thường."
+                f"Dạ anh ơi, {device_name} ở {area_name} dường như hoạt động hơi yếu hơn bình thường, "
+                f"anh để ý thêm giúp em nhé~"
             )
             return clean_voice_text(msg)
         
         return ""
+

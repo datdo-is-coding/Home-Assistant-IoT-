@@ -135,7 +135,7 @@ class SmartHomeGateway:
         # Xử lý lệnh hủy trực tiếp
         if any(w in user_text.lower().strip().split() for w in ("thôi", "hủy", "dừng", "cancel")):
             self.dialog.clear_session(client_node_id)
-            reply = "Dạ, em đã hủy lệnh rồi ạ."
+            reply = "Dạ, em đã hủy lệnh cho anh rồi nè~"
             result["voice_reply"] = reply
             result["follow_up"] = False
             result["verify"] = "cancelled"
@@ -191,7 +191,7 @@ class SmartHomeGateway:
             logger.info(f'Engine selected: {result["engine"]}')
 
             if not intent or not self.intent.validate_intent(intent):
-                reply = "Xin lỗi, em không hiểu lệnh. Bạn nói lại được không?"
+                reply = "Dạ, em nghe chưa hiểu ý anh lắm. Anh nói lại với em nha~"
                 result["voice_reply"] = reply
                 result["follow_up"] = True
                 result["tts_audio"] = await self.tts.synthesize(reply)
@@ -204,7 +204,7 @@ class SmartHomeGateway:
             # ─── BƯỚC 1.5: Kiểm tra nếu intent là unknown (câu nói không rõ hoặc bị từ chối) ───
             cmd = intent.get("command", {})
             if cmd.get("action") == "unknown":
-                reply = intent.get("voice_reply") or "Em nghe chưa rõ khẩu lệnh. Bạn muốn điều khiển thiết bị nào và ở phòng nào ạ?"
+                reply = intent.get("voice_reply") or "Dạ em nghe chưa rõ khẩu lệnh. Anh muốn em bật tắt thiết bị nào ở phòng nào vậy anh?"
                 reply = clean_voice_text(reply)
                 result["voice_reply"] = reply
                 result["follow_up"] = True
@@ -253,7 +253,7 @@ class SmartHomeGateway:
                     await self.verifier.verify_command(nid, cid, "turn_off", seq=seq)
                     turned_off_count += 1
             r_vn = get_room_name(location)
-            reply = f"Đã tắt toàn bộ thiết bị ở {r_vn} rồi ạ." if r_vn else "Đã tắt tất cả các thiết bị trong nhà rồi ạ."
+            reply = f"Dạ, em đã tắt toàn bộ thiết bị ở {r_vn} cho anh rồi nè~" if r_vn else "Dạ, em đã tắt hết tất cả thiết bị trong nhà cho anh rồi nè~"
             result["voice_reply"] = reply
             result["tts_audio"] = await self.tts.synthesize(reply)
             result["verify"] = "success"
@@ -270,25 +270,25 @@ class SmartHomeGateway:
             # Phân biệt: mơ hồ (nhiều node cùng tên) vs không tồn tại
             all_online = self.registry.get_online_nodes()
             if not all_online:
-                reply = "Hiện chưa có thiết bị nào được đăng ký. Vui lòng thêm node mới ở giao diện web."
+                reply = "Dạ anh ơi, hiện em chưa thấy có thiết bị nào trong nhà được kết nối. Anh thêm ở giao diện web giúp em nhé~"
                 follow_up = False
             elif device and location:
                 dev_name = get_device_name(device)
                 room_name = get_room_name(location)
-                reply = clean_voice_text(f"Em không tìm thấy {dev_name} ở {room_name}. Vui lòng kiểm tra lại hoặc đăng ký thiết bị ở web.")
+                reply = clean_voice_text(f"Dạ, em không tìm thấy {dev_name} ở {room_name} anh ơi. Anh kiểm tra lại giúp em nha~")
                 follow_up = False
             elif device and not location:
                 # mơ hồ: có nhiều node cùng device nhưng không nói phòng -> Hỏi lại và mở mic!
                 room_names = [get_room_name(r) for r in self.registry.allowed_rooms()]
                 dev_name = get_device_name(device)
-                reply = clean_voice_text(f"Bạn muốn điều khiển {dev_name} ở phòng nào ạ? Hiện có {', '.join(room_names)}.")
+                reply = clean_voice_text(f"Dạ anh muốn điều khiển {dev_name} ở phòng nào vậy anh? Em thấy có {', '.join(room_names)} nè~")
                 follow_up = True
                 self.dialog._sessions[client_node_id] = DialogSession(
                     node_id=client_node_id, client_id=client_node_id,
                     pending_intent=intent, missing_slot="location"
                 )
             else:
-                reply = intent.get("voice_reply") or "Bạn muốn điều khiển thiết bị nào và ở phòng nào ạ?"
+                reply = intent.get("voice_reply") or "Dạ anh muốn điều khiển thiết bị nào và ở phòng nào vậy anh?"
                 reply = clean_voice_text(reply)
                 follow_up = True
                 self.dialog._sessions[client_node_id] = DialogSession(
@@ -317,11 +317,11 @@ class SmartHomeGateway:
         result["verify"] = verify_result.value
 
         if verify_result == VerifyResult.SUCCESS:
-            voice_reply = intent.get("voice_reply") or f"Đã {('bật' if action=='turn_on' else 'tắt')} {get_device_name(device)} ở {get_room_name(location)} ạ."
+            voice_reply = intent.get("voice_reply") or f"Dạ, em đã {('bật' if action=='turn_on' else 'tắt')} {get_device_name(device)} ở {get_room_name(location)} cho anh rồi nè~"
         elif verify_result == VerifyResult.FAILED:
             voice_reply = self.verifier.generate_failure_message(action, device or channel, location or "", verify_result)
         else:
-            voice_reply = intent.get("voice_reply") or "Đã thực hiện."
+            voice_reply = intent.get("voice_reply") or "Dạ, em đã thực hiện xong cho anh rồi ạ~"
 
         # Luôn làm sạch voice_reply để loại bỏ id_room hay fullname trước khi phát ra loa
         voice_reply = clean_voice_text(voice_reply)
