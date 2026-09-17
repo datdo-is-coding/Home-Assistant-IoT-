@@ -32,7 +32,7 @@ Hệ thống được thiết kế theo mô hình **Điện toán phân tán (Ed
    ┌────────────────────────────────────────────────────────┐
    │       Raspberry Pi 4 Gateway (192.168.11.29)           │
    │  - ASR Engine: Sherpa-ONNX (Zipformer Transducer VN)   │
-   │  - LLM Engine: llama-server + Qwen2.5-1.5B-Instruct    │
+   │  - LLM Engine: llama-server + Qwen2.5-3B-Instruct      │
    │  - TTS Engine: Microsoft EdgeTTS (Hoài My Neural)      │
    │  - Closed-Loop Verifier: Xác thực biến thiên công suất │
    │  - 3-Tier Memory Engine: SQLite (Học mẫu thói quen)    │
@@ -110,7 +110,7 @@ Hệ thống được thiết kế theo mô hình **Điện toán phân tán (Ed
 
 ### 3.2. Hiểu Ngôn Ngữ Tự Nhiên & Trích Xuất Lệnh (NLU — LLM Intent Engine)
 * **Runtime:** `llama-server` (`llama.cpp`) chạy dưới dạng systemd service (`llama-server.service`).
-* **Mô hình:** **Qwen2.5-1.5B-Instruct** lượng tử hóa 4-bit (`qwen2.5-1.5b-instruct-q4_k_m.gguf`).
+* **Mô hình:** **Qwen2.5-3B-Instruct** lượng tử hóa 4-bit (`qwen2.5-3b-instruct-q4_k_m.gguf`, 3.09 tỷ tham số).
 * **Cấu hình suy luận:**
   - Context size: `1024` tokens.
   - Thread: `3` threads.
