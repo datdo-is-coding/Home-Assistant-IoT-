@@ -6,9 +6,10 @@ Wants=llama-server.service
 [Service]
 Type=simple
 User=pi4
-WorkingDirectory=/home/pi4/smarthome/gateway
-Environment=PYTHONPATH=/home/pi4/smarthome/gateway
-ExecStart=/home/pi4/voice_gateway_venv/bin/python3 /home/pi4/smarthome/gateway/main.py
+WorkingDirectory=/home/pi4/Home-Assistant-IoT-/Gateway/gateway
+Environment=PYTHONPATH=/home/pi4/Home-Assistant-IoT-/Gateway/gateway
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi4/voice_gateway_venv/bin/python3 /home/pi4/Home-Assistant-IoT-/Gateway/gateway/main.py
 Restart=always
 RestartSec=5
 StandardOutput=journal
