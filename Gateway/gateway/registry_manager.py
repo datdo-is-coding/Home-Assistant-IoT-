@@ -377,8 +377,8 @@ class RegistryManager:
         """Sinh GBNF ép LLM chỉ được sinh JSON đúng enum hiện có."""
         rooms = self.allowed_rooms()
         devs = self.allowed_devices()
-        room_alt = " | ".join(f'"{r}"' for r in rooms)
-        dev_alt = " | ".join(f'"{d}"' for d in devs)
+        room_alt = " | ".join(f'"\\"{r}\\""' for r in rooms)
+        dev_alt = " | ".join(f'"\\"{d}\\""' for d in devs)
         # GBNF cho llama.cpp: https://github.com/ggerganov/llama.cpp/blob/master/grammars/README.md
         return f'''
 root ::= "{{" ws "\\"voice_reply\\"" ws ":" ws string ws "," ws "\\"command\\"" ws ":" ws command ws "}}" 
