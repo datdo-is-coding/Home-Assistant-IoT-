@@ -413,6 +413,9 @@ class WebServer:
             try: q.put_nowait(payload)
             except Exception: pass
 
+    def broadcast(self, event_name: str, data: Dict[str, Any]):
+        self.broadcast_event(event_name, data)
+
     # ── helpers ──
     def _nodes_snapshot(self) -> dict:
         r = self.gateway.registry

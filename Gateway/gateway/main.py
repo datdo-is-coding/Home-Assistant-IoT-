@@ -61,6 +61,14 @@ class SmartHomeGateway:
             self.telemetry_writer = TelemetryWriter()
         self._running = False
 
+    def broadcast_event(self, event_type: str, data: dict):
+        """Send SSE event to WebUI and subscribers."""
+        if hasattr(self, "web_server") and self.web_server:
+            if hasattr(self.web_server, "broadcast_event"):
+                self.web_server.broadcast_event(event_type, data)
+            elif hasattr(self.web_server, "broadcast"):
+                self.web_server.broadcast(event_type, data)
+
     async def start(self):
         logger.info("=" * 60)
         logger.info("  DTV SMART HOME GATEWAY v2 — Starting Up")
