@@ -26,7 +26,7 @@ def slug(s: str) -> str:
     s = (s or "").lower().strip()
     # bỏ dấu tiếng Việt cơ bản
     tbl = str.maketrans("áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
-                        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyyd")
+                        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd")
     s = s.translate(tbl)
     s = _slug_re.sub("_", s).strip("_")
     return s or "unknown"

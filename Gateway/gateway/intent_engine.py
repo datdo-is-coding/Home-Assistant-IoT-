@@ -27,7 +27,7 @@ def _slug(s: str) -> str:
     if s is None: return ""
     s = str(s).lower().strip()
     tbl = str.maketrans("áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
-                        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyyd")
+                        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd")
     s = s.translate(tbl)
     s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
     return s
