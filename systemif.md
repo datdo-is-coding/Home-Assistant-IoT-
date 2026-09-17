@@ -108,22 +108,72 @@ Hệ thống được thiết kế theo mô hình **Điện toán phân tán (Ed
 
 ---
 
-### 3.2. Hiểu Ngôn Ngữ Tự Nhiên & Trích Xuất Lệnh (NLU — LLM Intent Engine)
-* **Runtime:** `llama-server` (`llama.cpp`) chạy dưới dạng systemd service (`llama-server.service`).
-* **Mô hình:** **Qwen2.5-3B-Instruct** lượng tử hóa 4-bit (`qwen2.5-3b-instruct-q4_k_m.gguf`, 3.09 tỷ tham số).
-* **Cấu hình suy luận:**
-  - Context size: `1024` tokens.
-  - Thread: `3` threads.
-  - Temperature: `0.0` (Đảm bảo tính chính xác tuyệt đối, cấu trúc JSON bất biến).
-* **System Prompt:**
-  ```text
-  Bạn là bộ phân tích lệnh cho Nhà Thông Minh IoT (Smart Home AI).
-  Nhiệm vụ: Phân tích khẩu lệnh thành cấu trúc JSON linh hoạt, tự động nhận diện mọi vị trí (khu vực) và phân loại chi tiết từng thiết bị.
-  Định dạng: {"voice_reply": "...", "command": {"action": "...", "device": "...", "location": "...", "value": null}}
-  Chỉ xuất DUY NHẤT một chuỗi JSON hợp lệ, không giải thích thêm.
-  ```
-* **Ánh xạ thiết bị linh hoạt (Registry Manager):**
-  - Thuật toán Fuzzy & Alias Matching trong `registry_manager.py` cho phép người dùng nói các biến thể tự nhiên như: *"bật đèn"*, *"bật đèn ngủ"*, *"bật đèn phòng ngủ"* đều ánh xạ chính xác vào kênh `ch1` của node `esp32s3_master`. Tương tự với *"bật quạt"*, *"bật quạt trần"*, *"tắt quạt ngủ"* $\rightarrow$ `ch2`.
+### 3.2. Hiểu Ngôn Ngữ Tự Nhiên & Trích Xuất Lệnh (Hybrid NLU — Cloud & Edge AI)
+
+Hệ thống triển khai **Kiến trúc Hybrid 2 tầng song song (Parallel Hybrid Architecture)** với khả năng chuyển đổi mượt mà (Seamless Automatic Switching) giữa Trí tuệ Nhân tạo Đám mây và Mô hình Biên Cục bộ:
+
+```
+                      ┌───────────────────────────┐
+                      │    Khẩu lệnh Tiếng Việt   │
+                      │  "bật đèn phòng ngủ master" │
+                      └─────────────┬─────────────┘
+                                    │
+                                    ▼
+                      ┌───────────────────────────┐
+                      │    IntentEngine Router    │
+                      └──────┬─────────────┬──────┘
+                             │             │
+        (Có mạng & có key)   │             │ (Mất mạng / Timeout >3.5s / Offline)
+        ┌────────────────────┘             └────────────────────┐
+        ▼                                                       ▼
+┌───────────────────────────────┐               ┌───────────────────────────────┐
+│     TẦNG 1: CLOUD AI          │               │     TẦNG 2: EDGE LOCAL AI     │
+│   Google Gemini 1.5 Flash     │  Fallback     │      Qwen2.5-3B-Instruct      │
+│  - Phản hồi siêu tốc: ~0.35s  │ ────────────> │  - llama-server (llama.cpp)   │
+│  - Ngữ cảnh: 1M tokens        │ (Tự động &    │  - Context: 1024 tokens       │
+│  - Schema: JSON Strict        │  không lỗi)   │  - GBNF Grammar ép schema     │
+│  - Hoàn toàn miễn phí         │               │  - Không cần mạng (100% riêng)│
+└───────────────┬───────────────┘               └───────────────┬───────────────┘
+                │                                               │
+                └───────────────────────┬───────────────────────┘
+                                        ▼
+                        ┌───────────────────────────────┐
+                        │ JSON Trích Xuất Ý Định Hợp Lệ │
+                        │  {"action": "turn_on", ...}   │
+                        └───────────────┬───────────────┘
+                                        ▼
+                        ┌───────────────────────────────┐
+                        │     LỚP 2: REGISTRY NLU       │
+                        │ Phân giải node_id & channel   │
+                        │      Chống ảo giác 100%       │
+                        └───────────────────────────────┘
+```
+
+#### Tầng 1 — Cloud Primary Tier (Google Gemini 1.5 Flash):
+* **Mô hình:** `gemini-1.5-flash` qua REST API trực tiếp (`httpx`), không phụ thuộc SDK nặng.
+* **Tốc độ phản hồi:** **0.3s — 0.5s** (Cực kỳ nhạy, tức thì cho trải nghiệm giọng nói).
+* **Đặc tả:** Tích hợp `responseMimeType: "application/json"`, nhiệt độ `0.0`.
+* **Cấu hình:** Đặt `GEMINI_API_KEY=AIzaSy...` trong file `.env` (ở `Gateway/.env` hoặc `/home/pi4/.env`). Nếu chưa có key hoặc mạng chập chờn, hệ thống tự động nhảy sang Tầng 2 mà không ném lỗi ra người dùng.
+
+#### Tầng 2 — Local Edge Fallback Tier (Qwen2.5-3B trên Raspberry Pi 4):
+* **Runtime:** `llama-server` (`llama.cpp` ARM64 build) chạy service nền `llama-server.service`.
+* **Mô hình:** **Qwen2.5-3B-Instruct (Q4_K_M)** (`/home/pi4/models/qwen2.5-3b-instruct-q4_k_m.gguf`, 2.04 GB, 3.09 tỷ tham số).
+* **Tham số tối ưu hóa phần cứng Pi 4 (4GB RAM):**
+  - Context size: `-c 1024` tokens (Mở rộng cửa sổ ngữ cảnh theo yêu cầu).
+  - Slot processing: `-np 1` (Ép 1 slot đơn để loại bỏ hiện tượng tràn bộ nhớ swap, giữ dung lượng RAM vật lý 0B swap).
+  - Luồng CPU: `-t 4` (Tận dụng 4 nhân Cortex-A72 @ 1.5GHz).
+* **Bộ đệm ngữ cảnh (Prompt KV Cache):**
+  - Kích hoạt `cache_prompt: True` trong `llama.cpp`. Lần gọi đầu tiên (cold start) đánh giá prompt mất ~70s, nhưng các lần gọi tiếp theo được tái sử dụng KV cache $\rightarrow$ thời gian phản hồi rút ngắn xuống chỉ còn **~34 giây**!
+* **Ngữ pháp GBNF (Chống ảo giác tuyệt đối):**
+  - Sử dụng GBNF Grammar ép LLM chỉ được phép sinh các token thiết bị (`"den"`, `"quat"`, ...) và phòng (`"phong_ngu"`, `"phong_khach"`, ...) đang thực tế tồn tại trong `device_registry.json`.
+
+#### Tầng 3 — Registry Resolver & Ánh Xạ Phần Cứng:
+* Khi nhận JSON từ LLM, hàm `find_node_by_device(device, location)` trong `registry_manager.py` sẽ đối chiếu với cơ sở dữ liệu `device_registry.json`.
+* Tự động xử lý các trường hợp:
+  - Khẩu lệnh chuẩn: *"bật đèn phòng ngủ"* $\rightarrow$ Node `esp32s3_master`, Channel `ch1` (GPIO 4).
+  - Khẩu lệnh tắt: *"tắt quạt phòng ngủ"* $\rightarrow$ Node `esp32s3_master`, Channel `ch2` (GPIO 5).
+  - Khẩu lệnh thiếu phòng: Tự động hỏi lại phòng hoặc chọn thiết bị phù hợp nhất.
+  - Khẩu lệnh không tồn tại: Báo lỗi thân thiện thay vì gửi lệnh rác xuống relay.
 
 ---
 
