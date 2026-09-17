@@ -337,17 +337,30 @@ class RegistryManager:
 
     # ── Helpers cho LLM prompt & grammar ─────────────────────────────────
     def allowed_rooms(self) -> List[str]:
-        rooms = sorted({n.get("room","unknown") for n in self.data["nodes"].values()})
-        return rooms or ["phong_khach","phong_ngu","phong_bep"]
+        rooms = set()
+        for n in self.data["nodes"].values():
+            r = slug(n.get("room", ""))
+            if r and r != "unknown":
+                rooms.add(r)
+            for a in n.get("aliases", []):
+                sa = slug(a)
+                if sa and sa != "unknown":
+                    rooms.add(sa)
+        # Phòng cơ bản luôn hợp lệ
+        rooms.update(["phong_khach", "phong_ngu", "phong_bep", "phong_tam", "ban_cong"])
+        return sorted(rooms)
 
     def allowed_devices(self) -> List[str]:
         devs = set()
         for n in self.data["nodes"].values():
             for ch in n.get("channels", {}).values():
-                dt = slug(ch.get("device_type",""))
+                dt = slug(ch.get("device_type", ""))
                 if dt: devs.add(dt)
-        # luôn cho phép 2 thiết bị cơ bản để node mới vẫn hiểu
-        devs.update(["light","fan","den","quat"])
+                for a in ch.get("aliases", []):
+                    sa = slug(a)
+                    if sa: devs.add(sa)
+        # luôn cho phép các thiết bị cơ bản
+        devs.update(["den", "quat", "tivi", "dieu_hoa", "binh_nong_lanh", "den_ngu", "den_tran", "light", "fan"])
         return sorted(devs)
 
     def inventory_for_prompt(self) -> str:
