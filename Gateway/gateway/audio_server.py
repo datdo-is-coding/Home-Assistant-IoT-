@@ -46,6 +46,8 @@ class AudioServer:
         self.port = config.WS_AUDIO_PORT
         self.server = None
         self._running = False
+        # node_id -> websocket, cho phép gửi relay command trực tiếp trên socket audio
+        self._ws_nodes: dict = {}
 
     async def start(self):
         """Start the WebSocket server."""
@@ -81,6 +83,9 @@ class AudioServer:
         recording = False
         record_start_time = 0.0
         total_frames = 0
+        client_mac = None
+        client_node_id = None
+        installed = {}  # channel -> device_fullname for WS-commandable node
 
         try:
             async for message in websocket:
@@ -89,7 +94,68 @@ class AudioServer:
                     try:
                         cmd = json.loads(message)
                         msg_type = cmd.get("type", "")
+                        # Compact protocol (protocol_spec.md): {"t":"..."} 
+                        compact_type = cmd.get("t")
 
+                        # ── COMPACT: HELLO / register / provision handshake ──
+                        if compact_type == "hello":
+                            client_mac = (cmd.get("mac") or "").upper()
+                            handled = None
+                            if self.gateway and hasattr(self.gateway, "registry"):
+                                handled = self.gateway.registry.on_hello(cmd, ws_available=True)
+                                if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                    self.gateway.broadcast_event("node_hello", cmd)
+                            node_id = handled.get("node_id") if handled else None
+
+                            if handled and handled.get("action") == "known":
+                                client_node_id = node_id
+                                self._ws_nodes[client_node_id] = websocket
+                                await websocket.send(json.dumps({"t": "hello_ok", "id": node_id}))
+                            elif handled and handled.get("action") == "cfg_mismatch":
+                                # re-provision
+                                if self.gateway and hasattr(self.gateway, "mqtt"):
+                                    cfg = self.gateway.registry.get_provision_payload(node_id)
+                                    if cfg:
+                                        await self.gateway.mqtt.send_cfg(node_id, cfg)
+                                await websocket.send(json.dumps({"t": "cfg_sent", "id": node_id}))
+                            elif handled and handled.get("action") == "pending":
+                                await websocket.send(json.dumps({"t": "pending", "mac": client_mac}))
+                            else:
+                                logger.warning(f"hello_ignored: {cmd}")
+                            continue
+
+                        # ── COMPACT: relay ACK ──
+                        elif compact_type == "ack":
+                            nid = cmd.get("id")
+                            rl = cmd.get("rl")
+                            if nid and isinstance(rl, list):
+                                if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                    self.gateway.broadcast_event("node_status",
+                                        {"node_id": nid, "rl_state": rl, "seq": cmd.get("seq"),
+                                         "ch1": rl[0] if len(rl)>0 else None,
+                                         "ch2": rl[1] if len(rl)>1 else None})
+                                if self.gateway and hasattr(self.gateway, "registry"):
+                                    self.gateway.registry.update_heartbeat(nid)
+                                logger.info(f"ACK {nid} rl={rl} seq={cmd.get('seq')}")
+                            continue
+
+                        # ── COMPACT: node requests config (mac-based) ──
+                        elif compact_type == "need_cfg":
+                            mac = (cmd.get("mac") or "").upper()
+                            # find node by mac in registry
+                            found = None
+                            if self.gateway:
+                                nid = self.gateway.registry.find_node_by_mac(mac) if hasattr(self.gateway.registry, "find_node_by_mac") else None
+                                if nid:
+                                    cfg = self.gateway.registry.get_provision_payload(nid)
+                                    if self.gateway.mqtt:
+                                        await self.gateway.mqtt.send_cfg(nid, cfg)
+                                        found = True
+                            if not found:
+                                await websocket.send(json.dumps({"t": "pending", "mac": mac}))
+                            continue
+
+                        # ── LEGACY: start / stop / ping (giữ nguyên) ──
                         if msg_type == "start":
                             codec = cmd.get("codec", "pcm")
                             sample_rate = cmd.get("sample_rate", config.AUDIO_SAMPLE_RATE)
@@ -145,6 +211,9 @@ class AudioServer:
                         elif msg_type == "ping":
                             await websocket.send(json.dumps({"type": "pong"}))
 
+                        elif msg_type and not compact_type:
+                            logger.debug(f"Ignored text msg: {msg_type}")
+
                     except json.JSONDecodeError:
                         logger.warning(f"Invalid text frame: {message[:100]}")
 
@@ -193,8 +262,45 @@ class AudioServer:
 
         except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"ESP32 client disconnected: {client_addr} (code={e.code}, reason='{e.reason}')")
+            # remove node from ws registry
+            for nid, ws in list(self._ws_nodes.items()):
+                if ws is websocket:
+                    del self._ws_nodes[nid]
+            logger.info(f"WS node still connected: {list(self._ws_nodes.keys())}")
         except Exception as e:
             logger.error(f"Error handling WebSocket client {client_addr}: {e}")
+
+    def has_ws(self, node_id: str) -> bool:
+        """Check if node has a stable WS audio connection (relay over WS available)."""
+        ws = self._ws_nodes.get(node_id)
+        try:
+            return ws is not None and getattr(ws, "open", True)
+        except Exception:
+            return False
+
+    async def send_relay_ws(self, node_id: str, channel: str, action: str, seq: int) -> bool:
+        """
+        Gửi relay command TRỰC TIẾP trên socket audio (TEXT frame, opcode 0x1).
+        Payload: {"t":"rl","ch":1,"s":1,"seq":n} (~27 byte, nhẹ hơn 1 PCM frame ~24 lần).
+        TEXT frame xen kẽ vẫn giữ luồng PCM 2 chiều ổn định.
+        """
+        ws = self._ws_nodes.get(node_id)
+        if ws is None:
+            return False
+        ch = {"ch1": 1, "ch2": 2}.get(channel, 0)
+        if ch not in (1, 2):
+            return False
+        s = 1 if action in ("turn_on", "open", "on") else 0
+        payload = json.dumps({"t": "rl", "ch": ch, "s": s, "seq": seq})
+        try:
+            await ws.send(payload)
+            logger.info(f"⚡ WS relay {node_id} ch{ch}={s} seq={seq} (~{len(payload)}B)")
+            return True
+        except Exception as e:
+            logger.warning(f"WS relay to {node_id} failed: {e}")
+            # dọn socket hỏng
+            self._ws_nodes.pop(node_id, None)
+            return False
 
     async def _process_audio(
         self, websocket, pcm_samples: np.ndarray, sample_rate: int

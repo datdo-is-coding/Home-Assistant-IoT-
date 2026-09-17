@@ -24,13 +24,31 @@ class VerifyResult(Enum):
 
 class CommandVerifier:
     """Verify commands by comparing power telemetry before/after."""
-    
+
     def __init__(self, mqtt_handler, registry):
         self.mqtt = mqtt_handler
         self.registry = registry
-    
+        self.audio_server = None  # set by main.py — ưu tiên WS TEXT frame
+
+    async def _dispatch(self, node_id: str, channel: str, action: str, seq: int) -> str:
+        """
+        Gửi relay: ưu tiên WS TEXT trực tiếp trên socket audio (rẻ ~27B,
+        xen được giữa PCM), fallback MQTT compact.
+        Trả về "ws" | "mqtt" | "failed".
+        """
+        if self.audio_server is not None:
+            try:
+                if self.audio_server.has_ws(node_id):
+                    ok = await self.audio_server.send_relay_ws(node_id, channel, action, seq)
+                    if ok:
+                        return "ws"
+            except Exception as e:
+                logger.warning(f"WS dispatch error: {e}")
+        ok = await self.mqtt.send_command(node_id, channel, action, seq=seq)
+        return "mqtt" if ok else "failed"
+
     async def verify_command(self, node_id: str, channel: str,
-                             action: str) -> tuple:
+                             action: str, seq: int = 0) -> tuple:
         """
         Send command and verify via telemetry feedback.
         
@@ -43,11 +61,14 @@ class CommandVerifier:
         before_power = self.mqtt.get_current_power(node_id)
         logger.info(
             f"Verify: {action} {node_id}/{channel} "
-            f"(rated={rated_watts}W, before={before_power:.1f}W)"
+            f"(rated={rated_watts}W, before={before_power:.1f}W, seq={seq})"
         )
-        
-        # 2. Send command
-        await self.mqtt.send_command(node_id, channel, action)
+
+        # 2. Send command (WS ưu tiên, fallback MQTT)
+        via = await self._dispatch(node_id, channel, action, seq)
+        if via == "failed":
+            logger.error(f"Dispatch failed: {node_id}/{channel}")
+            return VerifyResult.TIMEOUT, before_power, before_power, 0.0
         
         # 3. Wait for telemetry update
         await asyncio.sleep(config.VERIFY_TIMEOUT_SECONDS)

@@ -1,376 +1,382 @@
 """
-DTV Smart Home Gateway — Web Monitor Dashboard
-Lightweight, real-time web interface built with standard asyncio HTTP + SSE.
-Provides live visual monitoring of ESP32-S3 ↔ Pi4 audio streaming,
-node status, relay controls, and event logs.
+DTV Smart Home Gateway v2 — Web GUI đầy đủ
+==========================================
+Async HTTP + SSE, không dependency ngoài stdlib.
+
+Tính năng:
+  • Dashboards: audio pipeline thời gian thực, logs SSE, telemetry
+  • THÊM Node: xem node pending (hello mới chưa provision), đăng ký phòng + gán RL1/RL2
+  • QUẢN LÝ THIẾT BỊ: nhóm theo phòng, fullname livingroom-node01-fan, bật/tắt relay
+  • Phân biệt rõ node online/offline, hiển thị cfg_version, RSSI, trạng thái relay
+
+API endpoints:
+  GET  /                          → trang chính
+  GET  /api/events                → SSE live
+  GET  /api/nodes                 → toàn bộ node + rooms + pending
+  POST /api/relay                 → {node_id, channel|ch, action|s}
+  POST /api/provision             → {mac, room, rl1, rl2, node_short?}
+  POST /api/node/config           → {node_id, room, rl1, rl2} chỉnh lại cấu hình
+  POST /api/node/remove           → {mac} xoá node pending
 """
 
 import asyncio
 import json
 import logging
 import time
-from typing import Set, Dict, Any
+from typing import Set, Dict, Any, Optional
 
 import config
 
 logger = logging.getLogger("web_server")
 
+# ── Trang HTML (self-contained, không lib ngoài) ─────────────────────────────
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DTV Smart Home — Live Voice & System Monitor</title>
-  <style>
-    :root {
-      --bg: #0b0f19;
-      --card-bg: rgba(18, 24, 38, 0.85);
-      --card-border: rgba(255, 255, 255, 0.08);
-      --accent: #00f2fe;
-      --accent-glow: rgba(0, 242, 254, 0.35);
-      --green: #10b981;
-      --orange: #f59e0b;
-      --red: #ef4444;
-      --purple: #8b5cf6;
-      --text: #f3f4f6;
-      --text-dim: #9ca3af;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, sans-serif; }
-    body { background: var(--bg); color: var(--text); padding: 20px; min-height: 100vh; }
-    .container { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-    
-    /* Header */
-    header {
-      display: flex; justify-content: space-between; align-items: center;
-      background: var(--card-bg); border: 1px solid var(--card-border);
-      padding: 16px 24px; border-radius: 16px; backdrop-filter: blur(10px);
-    }
-    .logo { display: flex; align-items: center; gap: 12px; }
-    .logo-icon { width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #00f2fe, #4facfe); display: flex; align-items: center; justify-content: center; font-size: 20px; }
-    .logo-text h1 { font-size: 1.25rem; font-weight: 700; color: #fff; letter-spacing: 0.5px; }
-    .logo-text p { font-size: 0.8rem; color: var(--text-dim); }
-    .badges { display: flex; gap: 10px; flex-wrap: wrap; }
-    .badge { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--card-border); }
-    .dot { width: 8px; height: 8px; border-radius: 50%; }
-    .dot-green { background: var(--green); box-shadow: 0 0 8px var(--green); }
-    .dot-orange { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
-    .dot-red { background: var(--red); }
-    .dot-pulse { animation: pulse 1.5s infinite; }
-    @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.3); } 100% { opacity: 1; transform: scale(1); } }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DTV Smart Home — Node Manager & Monitor</title>
+<style>
+:root{
+  --bg:#0b0f19; --card-bg:rgba(18,24,38,.85); --border:rgba(255,255,255,.08);
+  --accent:#00f2fe; --accent-glow:rgba(0,242,254,.35); --green:#10b981;
+  --orange:#f59e0b; --red:#ef4444; --purple:#8b5cf6; --text:#f3f4f6; --dim:#9ca3af;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+body{background:var(--bg);color:var(--text);padding:18px;min-height:100vh}
+.container{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;justify-content:space-between;align-items:center;background:var(--card-bg);border:1px solid var(--border);padding:14px 22px;border-radius:16px;flex-wrap:wrap;gap:10px}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-icon{width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#00f2fe,#4facfe);display:flex;align-items:center;justify-content:center;font-size:20px}
+.logo-text h1{font-size:1.2rem;font-weight:700;color:#fff;letter-spacing:.5px}
+.logo-text p{font-size:.8rem;color:var(--dim)}
+.badges{display:flex;gap:10px;flex-wrap:wrap}
+.badge{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;font-size:.78rem;font-weight:600;background:rgba(255,255,255,.05);border:1px solid var(--border)}
+.dot{width:8px;height:8px;border-radius:50%}
+.dg{background:var(--green);box-shadow:0 0 8px var(--green)} .do{background:var(--orange);box-shadow:0 0 8px var(--orange)} .dr{background:var(--red)} .dp{animation:pulse 1.5s infinite}
+@keyframes pulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 
-    /* Grid */
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
-    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 20px; backdrop-filter: blur(10px); display: flex; flex-direction: column; gap: 16px; }
-    .card-title { font-size: 1rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.75px; display: flex; align-items: center; gap: 8px; }
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:18px;display:flex;flex-direction:column;gap:14px}
+.card.full{grid-column:1/-1}
+.ct{font-size:.85rem;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.75px;display:flex;align-items:center;gap:8px}
 
-    /* Audio Pipeline Section */
-    .pipeline { grid-column: 1 / -1; }
-    .steps { display: flex; justify-content: space-between; position: relative; margin: 15px 0; gap: 10px; flex-wrap: wrap; }
-    .step { flex: 1; min-width: 140px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; text-align: center; transition: all 0.3s ease; }
-    .step.active { background: rgba(0, 242, 254, 0.1); border-color: var(--accent); box-shadow: 0 0 20px var(--accent-glow); }
-    .step-num { font-size: 0.75rem; color: var(--accent); font-weight: 700; margin-bottom: 4px; }
-    .step-name { font-size: 0.9rem; font-weight: 600; }
-    .step-sub { font-size: 0.75rem; color: var(--text-dim); margin-top: 4px; }
+.steps{display:flex;gap:8px;flex-wrap:wrap}
+.step{flex:1;min-width:120px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center;transition:.3s}
+.step.active{background:rgba(0,242,254,.1);border-color:var(--accent);box-shadow:0 0 18px var(--accent-glow)}
+.sn{font-size:.68rem;color:var(--accent);font-weight:700;margin-bottom:3px} .sm{font-size:.82rem;font-weight:600} .ss{font-size:.68rem;color:var(--dim);margin-top:2px}
 
-    /* VU Meter & Waveform */
-    .meter-container { background: rgba(0, 0, 0, 0.3); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; border: 1px solid rgba(255, 255, 255, 0.05); }
-    .meter-bar-bg { background: rgba(255, 255, 255, 0.08); height: 16px; border-radius: 8px; overflow: hidden; position: relative; }
-    .meter-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #10b981 0%, #f59e0b 70%, #ef4444 100%); transition: width 0.08s ease-out; }
-    .meter-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-dim); }
+.meter{background:rgba(0,0,0,.3);border-radius:10px;padding:10px;border:1px solid rgba(255,255,255,.05)}
+.mbar{background:rgba(255,255,255,.08);height:14px;border-radius:7px;overflow:hidden}
+.mfill{height:100%;width:0;background:linear-gradient(90deg,#10b981,#f59e0b 70%,#ef4444);transition:.08s}
+.mlab{display:flex;justify-content:space-between;font-size:.7rem;color:var(--dim);margin-bottom:6px}
 
-    /* Text Boxes */
-    .bubble { background: rgba(0, 0, 0, 0.25); border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0; padding: 12px 16px; font-size: 0.95rem; line-height: 1.5; }
-    .bubble.reply { border-left-color: var(--purple); }
-    .bubble-label { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 4px; font-weight: 600; }
-    .bubble-text { font-size: 1.05rem; font-weight: 500; color: #fff; }
+.bubble{background:rgba(0,0,0,.25);border-left:4px solid var(--accent);border-radius:0 10px 10px 0;padding:10px 14px;font-size:.92rem;line-height:1.5}
+.bub2{border-left-color:var(--purple)} .bl{font-size:.7rem;color:var(--dim);margin-bottom:4px;font-weight:600} .bt{font-size:1rem;font-weight:500;color:#fff}
 
-    /* Relay Switches */
-    .relay-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; }
-    .relay-info h4 { font-size: 1rem; margin-bottom: 2px; }
-    .relay-info p { font-size: 0.8rem; color: var(--text-dim); }
-    .btn { padding: 8px 18px; border-radius: 20px; font-weight: 600; font-size: 0.85rem; cursor: pointer; border: none; transition: all 0.2s ease; }
-    .btn-on { background: var(--green); color: #fff; box-shadow: 0 0 10px rgba(16, 185, 129, 0.4); }
-    .btn-off { background: rgba(255, 255, 255, 0.1); color: var(--text-dim); }
-    .btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+/* Rooms */
+.room-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.room{border:1px solid var(--border);border-radius:14px;padding:14px;background:rgba(255,255,255,.02)}
+.room-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.room-title{font-weight:700;font-size:.95rem;text-transform:capitalize}
+.node{border-top:1px solid rgba(255,255,255,.06);padding:8px 0}
+.node-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.node-id{font-family:ui-monospace,monospace;font-size:.82rem;color:var(--accent);font-weight:600}
+.status-tag{font-size:.66rem;padding:3px 8px;border-radius:12px;font-weight:700}
+.on{background:rgba(16,185,129,.18);color:var(--green)} .off{background:rgba(239,68,68,.15);color:var(--red)} .pend{background:rgba(245,158,11,.15);color:var(--orange)}
+.node-meta{font-size:.7rem;color:var(--dim);margin-top:3px}
+.ch-list{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.ch-row{display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:9px;padding:6px 10px;font-size:.78rem}
+.ch-name{font-family:ui-monospace,monospace;color:#e2e8f0}
+.ch-gpio{font-size:.66rem;color:var(--dim)}
+.switch{position:relative;width:46px;height:24px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#334;border-radius:24px;transition:.25s}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.25s}
+input:checked+.slider{background:var(--green)}
+input:checked+.slider:before{transform:translateX(22px)}
+input:disabled+.slider{opacity:.35;cursor:not-allowed}
 
-    /* Console Logs */
-    .log-box { background: #050811; border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 10px; padding: 12px; height: 180px; overflow-y: auto; font-family: monospace; font-size: 0.8rem; display: flex; flex-direction: column; gap: 6px; }
-    .log-line { display: flex; gap: 8px; }
-    .log-time { color: var(--text-dim); }
-    .log-msg { color: #e2e8f0; }
-    .log-msg.highlight { color: var(--accent); font-weight: 600; }
-  </style>
+/* Pending */
+.pending-card{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(239,68,68,.06));border-color:rgba(245,158,11,.35)}
+.pend-item{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.04);border-radius:10px;border:1px solid var(--border)}
+.pend-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.inp{background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:8px;color:#fff;padding:7px 10px;font-size:.82rem;outline:none}
+.inp:focus{border-color:var(--accent)} ::placeholder{color:var(--dim)}
+.sel{background:rgba(255,255,255,.08);border:1px solid var(--border);color:#fff;border-radius:8px;padding:7px 10px;font-size:.82rem;outline:none}
+.btn{padding:8px 14px;border-radius:10px;font-weight:600;font-size:.8rem;cursor:pointer;border:none;transition:.2s;color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-a{background:var(--accent);color:#000}
+.btn-g{background:var(--green)}
+.btn-o{background:rgba(255,255,255,.12);border:1px solid var(--border)}
+.btn-r{background:var(--red)}
+.btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.1)}
+
+.logbox{background:#050811;border:1px solid rgba(255,255,255,.05);border-radius:10px;padding:12px;height:150px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:.76rem;display:flex;flex-direction:column;gap:4px}
+.ll{display:flex;gap:8px} .lt{color:var(--dim)} .lm{color:#e2e8f0} .lm.hl{color:var(--accent);font-weight:600}
+.hint{font-size:.72rem;color:var(--dim);font-style:italic}
+.empty{color:var(--dim);font-size:.82rem;padding:10px;text-align:center}
+</style>
 </head>
 <body>
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="logo">
-        <div class="logo-icon">🎙️</div>
-        <div class="logo-text">
-          <h1>DTV Smart Home — Live Monitor</h1>
-          <p>Real-Time Pipeline: ESP32-S3 ⇄ Raspberry Pi 4</p>
-        </div>
-      </div>
-      <div class="badges">
-        <div class="badge" id="badge-gw"><span class="dot dot-green"></span>Gateway: Online</div>
-        <div class="badge" id="badge-esp"><span class="dot dot-orange dot-pulse"></span>ESP32: Waiting...</div>
-        <div class="badge" id="badge-mqtt"><span class="dot dot-green"></span>MQTT: Connected</div>
-      </div>
-    </header>
-
-    <!-- Full Width: Real-Time Audio Streaming Pipeline -->
-    <div class="card pipeline">
-      <div class="card-title">🔊 Audio Streaming & AI Voice Pipeline (Real-Time)</div>
-      
-      <!-- 5-Step Pipeline Indicator -->
-      <div class="steps">
-        <div class="step" id="step-wakenet">
-          <div class="step-num">BƯỚC 1</div>
-          <div class="step-name">WakeNet</div>
-          <div class="step-sub">Đánh thức "Hi ESP"</div>
-        </div>
-        <div class="step" id="step-stream">
-          <div class="step-num">BƯỚC 2</div>
-          <div class="step-name">PCM Stream</div>
-          <div class="step-sub">Mic 16kHz ➔ WS</div>
-        </div>
-        <div class="step" id="step-asr">
-          <div class="step-num">BƯỚC 3</div>
-          <div class="step-name">Sherpa ASR</div>
-          <div class="step-sub">Speech-to-Text</div>
-        </div>
-        <div class="step" id="step-llm">
-          <div class="step-num">BƯỚC 4</div>
-          <div class="step-name">Qwen LLM</div>
-          <div class="step-sub">Hiểu ý định & MQTT</div>
-        </div>
-        <div class="step" id="step-tts">
-          <div class="step-num">BƯỚC 5</div>
-          <div class="step-name">TTS Playback</div>
-          <div class="step-sub">EdgeTTS ➔ Loa I2S</div>
-        </div>
-      </div>
-
-      <!-- Real-Time VU Meter -->
-      <div class="meter-container">
-        <div class="meter-labels">
-          <span>Mic Audio Input (RMS Level)</span>
-          <span id="meter-val">0 dB (Im lặng)</span>
-        </div>
-        <div class="meter-bar-bg">
-          <div class="meter-bar-fill" id="meter-fill"></div>
-        </div>
-      </div>
-
-      <!-- Live Transcripts -->
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-        <div class="bubble">
-          <div class="bubble-label">NHẬN DIỆN GIỌNG NÓI (TRANSCRIPT)</div>
-          <div class="bubble-text" id="transcript-text">Chưa có lệnh nào. Hãy nói "Hi ESP"...</div>
-        </div>
-        <div class="bubble reply">
-          <div class="bubble-label">PHẢN HỒI CỦA TRỢ LÝ (TTS VOICE REPLY)</div>
-          <div class="bubble-text" id="reply-text">—</div>
-        </div>
-      </div>
+<div class="container">
+  <header>
+    <div class="logo"><div class="logo-icon">🏠</div>
+      <div class="logo-text"><h1>DTV Smart Home — Node Manager</h1>
+      <p>ESP32 ⇄ Gateway · Voice + Relay · Provision tự động</p></div>
     </div>
-
-    <!-- Grid 2 Columns -->
-    <div class="grid">
-      <!-- Card: Relay Control -->
-      <div class="card">
-        <div class="card-title">💡 Điều Khiển 2 Kênh Relay (ESP32-S3)</div>
-        <div class="relay-item">
-          <div class="relay-info">
-            <h4>Kênh 1: Đèn ngủ</h4>
-            <p>GPIO 4 &bull; Trạng thái: <b id="ch1-status">TẮT</b></p>
-          </div>
-          <button class="btn btn-off" id="btn-ch1" onclick="toggleRelay('ch1')">BẬT</button>
-        </div>
-        <div class="relay-item">
-          <div class="relay-info">
-            <h4>Kênh 2: Đèn trần</h4>
-            <p>GPIO 5 &bull; Trạng thái: <b id="ch2-status">TẮT</b></p>
-          </div>
-          <button class="btn btn-off" id="btn-ch2" onclick="toggleRelay('ch2')">BẬT</button>
-        </div>
-      </div>
-
-      <!-- Card: ESP32 Node Telemetry -->
-      <div class="card">
-        <div class="card-title">⚡ Trạng Thái Node & Điện Năng</div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-          <div class="step" style="padding: 10px;">
-            <div class="step-num">NODE ID</div>
-            <div class="step-name" id="node-id">esp32s3_master</div>
-          </div>
-          <div class="step" style="padding: 10px;">
-            <div class="step-num">CÔNG SUẤT (PZEM)</div>
-            <div class="step-name" id="power-val">0.0 W</div>
-          </div>
-          <div class="step" style="padding: 10px;">
-            <div class="step-num">ĐIỆN ÁP</div>
-            <div class="step-name" id="volt-val">220.0 V</div>
-          </div>
-          <div class="step" style="padding: 10px;">
-            <div class="step-num">DÒNG ĐIỆN</div>
-            <div class="step-name" id="curr-val">0.00 A</div>
-          </div>
-        </div>
-      </div>
+    <div class="badges">
+      <div class="badge" id="bd-gw"><span class="dot dg"></span>Gateway: Online</div>
+      <div class="badge" id="bd-mqtt"><span class="dot dg"></span>MQTT</div>
+      <div class="badge" id="bd-nodes"><span class="dot dg"></span>Nodes: –</div>
+      <div class="badge" id="bd-pend"><span class="dot dg"></span>Pending: 0</div>
     </div>
+  </header>
 
-    <!-- Activity Log -->
-    <div class="card">
-      <div class="card-title">📋 Nhật Ký Sự Kiện Real-Time (Live Logs)</div>
-      <div class="log-box" id="log-box">
-        <div class="log-line"><span class="log-time">[System]</span><span class="log-msg highlight">Web Monitor initialized. Connecting to event stream...</span></div>
-      </div>
+  <!-- Pending nodes -->
+  <div class="card pending-card" id="pending-box" style="display:none">
+    <div class="ct">📡 THIẾT BỊ MỚI PHÁT HIỆN — CHƯA ĐĂNG KÝ</div>
+    <div id="pending-list"></div>
+    <div class="hint">Node mới gửi HELLO → tự xuất hiện ở đây. Chọn phòng + gán tên RL1/RL2, Gateway sẽ ghi cấu hình vào bộ nhớ ESP32 (NVS) và node lưu vĩnh viễn.</div>
+  </div>
+
+  <!-- Audio pipeline -->
+  <div class="card full" id="voice-card" style="display:none">
+    <div class="ct">🎙️ VOICE & AI PIPELINE</div>
+    <div class="steps">
+      <div class="step" id="s1"><div class="sn">1</div><div class="sm">WakeNet</div><div class="ss">"Hi ESP"</div></div>
+      <div class="step" id="s2"><div class="sn">2</div><div class="sm">PCM Stream</div><div class="ss">Mic 16kHz → WS</div></div>
+      <div class="step" id="s3"><div class="sn">3</div><div class="sm">Sherpa ASR</div><div class="ss">Speech→Text</div></div>
+      <div class="step" id="s4"><div class="sn">4</div><div class="sm">Qwen LLM</div><div class="ss">Intent + Registry</div></div>
+      <div class="step" id="s5"><div class="sn">5</div><div class="sm">TTS Playback</div><div class="ss">EdgeTTS → Loa</div></div>
+    </div>
+    <div class="meter">
+      <div class="mlab"><span>Mic Input (RMS)</span><span id="mval">Im lặng</span></div>
+      <div class="mbar"><div class="mfill" id="mfill"></div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="bubble"><div class="bl">TRANSCRIPT</div><div class="bt" id="trans">Chưa có lệnh nào...</div></div>
+      <div class="bubble bub2"><div class="bl">TRỢ LÝ PHẢN HỒI</div><div class="bt" id="reply">—</div></div>
     </div>
   </div>
 
-  <script>
-    let relayState = { ch1: false, ch2: false };
+  <!-- Rooms / nodes -->
+  <div class="card full">
+    <div class="ct">💡 THIẾT BỊ THEO PHÒNG (RELAY CONTROL)</div>
+    <div id="rooms-box"><div class="empty">Chưa có node nào. Kết nối ESP32 hoặc thêm node mới...</div></div>
+  </div>
 
-    function addLog(msg, isHighlight = false) {
-      const box = document.getElementById('log-box');
-      const now = new Date().toLocaleTimeString();
-      const line = document.createElement('div');
-      line.className = 'log-line';
-      line.innerHTML = `<span class="log-time">[${now}]</span><span class="log-msg ${isHighlight ? 'highlight' : ''}">${msg}</span>`;
-      box.appendChild(line);
-      box.scrollTop = box.scrollHeight;
+  <!-- Logs -->
+  <div class="card full">
+    <div class="ct">📋 NHẬT KÝ SỰ KIỆN</div>
+    <div class="logbox" id="log"></div>
+  </div>
+</div>
+
+<script>
+let nodes={}, pending={}, rooms={};
+let nodeCount=0;
+
+const $=id=>document.getElementById(id);
+function addLog(msg,hl=false){
+  const b=$('log'), d=document.createElement('div');
+  d.className='ll';
+  d.innerHTML=`<span class="lt">[${new Date().toLocaleTimeString()}]</span><span class="lm ${hl?'hl':''}">${msg}</span>`;
+  b.appendChild(d); b.scrollTop=b.scrollHeight;
+  if(b.children.length>200) b.removeChild(b.firstChild);
+}
+function statusTag(st){
+  if(st==='pending')return '<span class="status-tag pend">CHỜ ĐĂNG KÝ</span>';
+  return st==='online'?'<span class="status-tag on">ONLINE</span>':'<span class="status-tag off">OFFLINE</span>';
+}
+
+/* ── Thay đổi switch relay ── */
+async function toggleRelay(nodeId,ch,el){
+  const s=el.checked?1:0;
+  el.disabled=true;
+  addLog(`👉 ${nodeId}/${ch} → ${s?'BẬT':'TẮT'}`);
+  try{
+    const r=await fetch('/api/relay',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({node_id:nodeId,ch,s})});
+    const j=await r.json();
+    if(!j.success) addLog(`⚠️ ${j.error||'null'}`,true);
+  }catch(e){ addLog(`⚠️ Relay error: ${e}`); }
+  // UI sẽ được đồng bộ lại qua SSE ack (không hard-set)
+  const watchdog=setTimeout(()=>{el.disabled=false;},4000);
+  el._wd=watchdog;
+}
+
+/* ── Render theo phòng ── */
+function renderRooms(){
+  const box=$('rooms-box');
+  const rmKeys=Object.keys(rooms||{});
+  if(!rmKeys.length){ box.innerHTML='<div class="empty">Chưa có node nào. Kết nối ESP32 hoặc thêm node mới...</div>'; return; }
+  let html='<div class="room-grid">';
+  for(const room of rmKeys){
+    html+=`<div class="room"><div class="room-head"><span class="room-title">🏠 ${room} (${(rooms[room]||[]).length})</span></div>`;
+    for(const nid of (rooms[room]||[])){
+      const n=nodes[nid]||{};
+      const st=n.status||'offline';
+      html+=`<div class="node"><div class="node-top"><span class="node-id">${nid}</span>${statusTag(st)}</div>`;
+      html+=`<div class="node-meta">MAC ${(n.mac||'?')} · cfg v${n.cfg_version||1}${n.rssi!=null?' · RSSI '+n.rssi+'dB':''} ${n.ip?'· '+n.ip:''}</div>`;
+      html+='<div class="ch-list">';
+      for(const [ch,ci] of Object.entries(n.channels||{})){
+        const fn=ci.fullname||nid+'-?';
+        const gpio=ci.gpio!=null?` · GPIO ${ci.gpio}`:'';
+        const rlState=(n.relay_state&&n.relay_state[(ch==='ch1'?0:1)])||0;
+        const off=st!=='online';
+        html+=`<div class="ch-row"><span><span class="ch-name">${fn}</span> <span class="ch-gpio">(${ch}${gpio})</span></span>
+          <label class="switch"><input type="checkbox" onclick="toggleRelay('${nid}','${ch}',this)"
+          ${rlState?'checked':''} ${off?'disabled':''}><span class="slider"></span></label></div>`;
+      }
+      html+='</div></div>';
     }
+    html+='</div>';
+  }
+  html+='</div>';
+  box.innerHTML=html;
+}
 
-    function setActiveStep(stepId) {
-      const steps = ['step-wakenet', 'step-stream', 'step-asr', 'step-llm', 'step-tts'];
-      steps.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.classList.toggle('active', id === stepId);
-      });
-    }
+/* ── Render pending ── */
+function renderPending(){
+  const box=$('pending-box'), list=$('pending-list');
+  const keys=Object.keys(pending||{});
+  box.style.display=keys.length?'':'none';
+  if(!keys.length){ list.innerHTML=''; return; }
+  $('bd-pend').innerHTML=`<span class="dot do dp"></span>Pending: ${keys.length}`;
+  list.innerHTML=keys.map(mac=>{
+    const p=pending[mac]||{};
+    return `<div class="pend-item">
+      <div><b style="font-family:monospace">${mac}</b>
+      <div class="hint">cfg=${p.cfg!=null?p.cfg:'chưa gán'} · IP ${p.ip||'?'} ${p.rssi!=null?'· RSSI '+p.rssi+'dB':''}</div></div>
+      <div class="pend-form">
+        <input class="inp" id="room-${mac}" placeholder="Phòng e.g. livingroom" list="room-opt">
+        <input class="inp" id="short-${mac}" placeholder="node01" style="width:90px">
+        <select class="sel" id="r1-${mac}"><option value="light">RL1 = light (đèn)</option><option value="fan">RL1 = fan (quạt)</option><option value="pump">RL1 = pump</option><option value="curtain">RL1 = curtain</option></select>
+        <select class="sel" id="r2-${mac}" ><option value="fan">RL2 = fan (quạt)</option><option value="light">RL2 = light (đèn)</option><option value="pump">RL2 = pump</option><option value="">RL2 = bỏ trống</option></select>
+        <button class="btn btn-a" onclick="provision('${mac}')">ĐĂNG KÝ</button>
+        <button class="btn btn-r" onclick="removePending('${mac}')">✕</button>
+      </div>
+    </div>`;
+  }).join('');
+}
 
-    function updateMeter(rms) {
-      const fill = document.getElementById('meter-fill');
-      const label = document.getElementById('meter-val');
-      // Normalize RMS (typical speech 1000 - 8000)
-      const pct = Math.min(100, Math.max(0, (rms / 6000) * 100));
-      fill.style.width = pct + '%';
-      label.innerText = rms > 300 ? `Đang nói (${rms} RMS)` : `Im lặng (${rms} RMS)`;
-    }
+async function provision(mac){
+  const room=$('room-'+mac).value.trim()||'unknowm';
+  const short=$('short-'+mac).value.trim()||null;
+  const rl1=$('r1-'+mac).value, rl2=$('r2-'+mac).value;
+  addLog(`📝 Đăng ký ${mac}: phòng=${room}, RL1=${rl1}, RL2=${rl2}`,true);
+  try{
+    const r=await fetch('/api/provision',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mac,room,rl1,rl2,node_short:short})});
+    const j=await r.json();
+    addLog(j.success?`✅ Thành công → ${j.node_id}`:`⚠️ ${j.error||'Lỗi'}`,true);
+    if(j.success) loadAll();
+  }catch(e){addLog('⚠️ '+e,true);}
+}
 
-    function updateRelayUI(ch, state) {
-      relayState[ch] = state;
-      const btn = document.getElementById(`btn-${ch}`);
-      const status = document.getElementById(`${ch}-status`);
-      if (state) {
-        btn.className = 'btn btn-on';
-        btn.innerText = 'TẮT';
-        status.innerText = 'ĐANG BẬT';
-        status.style.color = 'var(--green)';
-      } else {
-        btn.className = 'btn btn-off';
-        btn.innerText = 'BẬT';
-        status.innerText = 'TẮT';
-        status.style.color = 'var(--text-dim)';
+async function removePending(mac){
+  try{ await fetch('/api/node/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mac})}); loadAll(); }catch(e){}
+}
+
+/* ── Data load + SSE ── */
+async function loadAll(){
+  try{
+    const r=await fetch('/api/nodes');
+    const j=await r.json();
+    nodes=j.nodes||{}; rooms=j.rooms||{}; pending=j.pending||{};
+    nodeCount=Object.keys(nodes).length;
+    $('bd-nodes').innerHTML=`<span class="dot dg"></span>Nodes: ${nodeCount}`;
+    $('bd-pend').innerHTML=`<span class="dot ${Object.keys(pending).length?'do dp':'dg'}"></span>Pending: ${Object.keys(pending).length}`;
+    renderRooms(); renderPending();
+  }catch(e){ addLog('⚠️ Không đọc được /api/nodes',true); }
+}
+
+function setStep(id){
+  ['s1','s2','s3','s4','s5'].forEach(x=>$(x).classList.toggle('active',x===id));
+}
+function updMeter(rms){
+  $('mfill').style.width=Math.min(100,Math.max(0,(rms/6000)*100))+'%';
+  $('mval').textContent=rms>300?`Đang nói (${rms})`:'Im lặng';
+}
+
+function connectSSE(){
+  const es=new EventSource('/api/events');
+  es.onopen=()=>{$('bd-gw').innerHTML='<span class="dot dg"></span>Gateway: Online';$('voice-card').style.display='';};
+  es.addEventListener('init',e=>{ const d=JSON.parse(e.data); if(d.pending!==undefined){pending=d.pending;renderPending();} });
+
+  es.addEventListener('pending_node',e=>{
+    const d=JSON.parse(e.data); if(d.mac)pending[d.mac]=d.hello||{};
+    renderPending();
+    addLog(`📡 Node mới: ${d.mac} — cần đăng ký`,true);
+  });
+  es.addEventListener('pending_remove',e=>{
+    const d=JSON.parse(e.data); if(d.mac)delete pending[d.mac]; renderPending(); loadAll();
+  });
+  es.addEventListener('node_provisioned',e=>{
+    const d=JSON.parse(e.data); addLog(`✅ Provisioned: ${d.node_id}`,true); loadAll();
+  });
+  es.addEventListener('node_hello',e=>{ /* keepalive, không cần render liên tục */ });
+
+  es.addEventListener('node_status',e=>{
+    const d=JSON.parse(e.data);
+    if(d.node_id && nodes[d.node_id]){
+      if(d.online!==undefined) nodes[d.node_id].status=d.online?'online':'offline';
+      if(d.rl_state){ nodes[d.node_id].relay_state=d.rl_state; }
+      if(d.ch1!==undefined||d.ch2!==undefined){
+        const rl=[d.ch1!==undefined?d.ch1:0,d.ch2!==undefined?d.ch2:0];
+        if(!nodes[d.node_id].relay_state)nodes[d.node_id].relay_state=rl;
       }
     }
+    renderRooms();
+  });
 
-    async function toggleRelay(ch) {
-      const targetAction = relayState[ch] ? 'turn_off' : 'turn_on';
-      addLog(`Sending manual command: ${targetAction} ${ch}...`);
-      try {
-        await fetch('/api/relay', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ channel: ch, action: targetAction })
-        });
-      } catch (e) {
-        addLog(`Error toggling relay: ${e}`);
-      }
+  es.addEventListener('node_telemetry',e=>{
+    const d=JSON.parse(e.data);
+    if(d.node_id && nodes[d.node_id]){
+      nodes[d.node_id].power=d.power; nodes[d.node_id].voltage=d.voltage;
     }
+    // chỉ render telemetry kèm cập nhật relay_state nếu có
+  });
 
-    // Connect Server-Sent Events (SSE)
-    function connectSSE() {
-      const es = new EventSource('/api/events');
-      es.onopen = () => {
-        addLog('Connected to Gateway Live Event Stream!', true);
-        document.getElementById('badge-gw').innerHTML = '<span class="dot dot-green"></span>Gateway: Online';
-      };
+  es.addEventListener('command_result',e=>{
+    const d=JSON.parse(e.data);
+    if(d.voice_reply) $('reply').textContent=`"${d.voice_reply}"`;
+    if(d.fullname) addLog(`🤖 ${d.fullname}: ${d.action} → ${d.verify}`);
+    loadAll();
+  });
 
-      es.addEventListener('audio_state', (e) => {
-        const data = JSON.parse(e.data);
-        const state = data.state;
-        if (state === 'RECORDING') {
-          setActiveStep('step-stream');
-          addLog('🎙️ ESP32 streaming mic PCM audio...', true);
-        } else if (state === 'PROCESSING') {
-          setActiveStep('step-asr');
-          updateMeter(0);
-          addLog('⚡ Processing speech via Sherpa-ONNX & Qwen...');
-        } else if (state === 'PLAYING') {
-          setActiveStep('step-tts');
-          addLog('🔊 Streaming TTS PCM back to ESP32 speaker...');
-        } else if (state === 'IDLE') {
-          setActiveStep(null);
-          updateMeter(0);
-        }
-      });
+  ['audio_state'].forEach(ev=>{
+    es.addEventListener(ev,e=>{
+      const d=JSON.parse(e.data), st=d.state;
+      if(st==='RECORDING'){setStep('s2');updMeter(1200);}
+      else if(st==='PROCESSING'){setStep('s3');updMeter(0);}
+      else if(st==='PLAYING'){setStep('s5');}
+      else if(st==='IDLE'){setStep('');updMeter(0);}
+    });
+  });
+  es.addEventListener('transcript',e=>{const d=JSON.parse(e.data);$('trans').textContent=`"${d.text}"`;setStep('s4');});
+  es.addEventListener('audio_meter',e=>{const d=JSON.parse(e.data);updMeter(d.rms);});
 
-      es.addEventListener('audio_meter', (e) => {
-        const data = JSON.parse(e.data);
-        updateMeter(data.rms);
-      });
+  es.onerror=()=>{ $('bd-gw').innerHTML='<span class="dot dr"></span>Gateway: Disconnected'; es.close(); setTimeout(connectSSE,3000); };
+}
 
-      es.addEventListener('transcript', (e) => {
-        const data = JSON.parse(e.data);
-        document.getElementById('transcript-text').innerText = `"${data.text}"`;
-        addLog(`🗣️ Transcript: "${data.text}"`, true);
-        setActiveStep('step-llm');
-      });
-
-      es.addEventListener('command_result', (e) => {
-        const data = JSON.parse(e.data);
-        if (data.voice_reply) {
-          document.getElementById('reply-text').innerText = `"${data.voice_reply}"`;
-        }
-        if (data.channel && data.action) {
-          updateRelayUI(data.channel, data.action === 'turn_on');
-        }
-        addLog(`🤖 Assistant: "${data.voice_reply}" (Verify: ${data.verify})`);
-      });
-
-      es.addEventListener('node_status', (e) => {
-        const data = JSON.parse(e.data);
-        document.getElementById('badge-esp').innerHTML = '<span class="dot dot-green"></span>ESP32: Online';
-        if (data.ch1 !== undefined) updateRelayUI('ch1', data.ch1 === 1);
-        if (data.ch2 !== undefined) updateRelayUI('ch2', data.ch2 === 1);
-      });
-
-      es.addEventListener('node_telemetry', (e) => {
-        const data = JSON.parse(e.data);
-        if (data.power !== undefined) document.getElementById('power-val').innerText = `${data.power.toFixed(1)} W`;
-        if (data.voltage !== undefined) document.getElementById('volt-val').innerText = `${data.voltage.toFixed(1)} V`;
-        if (data.current !== undefined) document.getElementById('curr-val').innerText = `${data.current.toFixed(2)} A`;
-      });
-
-      es.onerror = () => {
-        document.getElementById('badge-gw').innerHTML = '<span class="dot dot-red"></span>Gateway: Disconnected';
-        es.close();
-        setTimeout(connectSSE, 3000);
-      };
-    }
-
-    connectSSE();
-  </script>
+// doanh nghiệp: 1 datalist phòng phổ biến
+window.addEventListener('DOMContentLoaded',()=>{
+  document.body.insertAdjacentHTML('beforeend',`<datalist id="room-opt">
+    <option value="livingroom"><option value="bedroom"><option value="kitchen"><option value="bathroom"><option value="balcony"><option value="garden">
+    <option value="phong_khach"><option value="phong_ngu"><option value="phong_bep"></datalist>`);
+  loadAll(); connectSSE();
+  setInterval(loadAll,15000); // refresh định kỳ cho node tới
+});
+</script>
 </body>
 </html>
 """
 
-
+# Đồng bộ: dữ liệu gốc (không cần thay đổi gì thêm)
 class WebServer:
-    """Async HTTP server + SSE for real-time gateway dashboard."""
+    """Async HTTP + SSE dashboard & node manager."""
 
     def __init__(self, gateway):
         self.gateway = gateway
@@ -381,164 +387,180 @@ class WebServer:
         self._running = False
 
     async def start(self):
-        """Start the async HTTP server."""
         self._running = True
         try:
-            self.server = await asyncio.start_server(
-                self._handle_client,
-                self.host,
-                self.port
-            )
-            logger.info(f"🌐 Web Monitor Dashboard running at http://{self.host}:{self.port} (open in browser)")
+            self.server = await asyncio.start_server(self._handle_client, self.host, self.port)
+            logger.info(f"🌐 Web Manager: http://{self.host}:{self.port}")
         except Exception as e:
-            logger.error(f"Failed to start Web Monitor server on port {self.port}: {e}")
+            logger.error(f"Web server failed on {self.port}: {e}")
 
     async def stop(self):
-        """Stop the server."""
         self._running = False
         if self.server:
             self.server.close()
             await self.server.wait_closed()
-            logger.info("Web Monitor server stopped")
+            logger.info("Web server stopped")
 
     def broadcast_event(self, event_name: str, data: Dict[str, Any]):
-        """Broadcast an event to all connected web browser SSE clients."""
-        if not self.sse_queues:
-            return
+        if not self.sse_queues: return
         payload = f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         for q in list(self.sse_queues):
-            try:
-                q.put_nowait(payload)
-            except Exception:
-                pass
+            try: q.put_nowait(payload)
+            except Exception: pass
 
-    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        """Handle incoming HTTP requests."""
+    # ── helpers ──
+    def _nodes_snapshot(self) -> dict:
+        r = self.gateway.registry
+        return {
+            "nodes": r.get_all_nodes(),
+            "rooms": r.get_rooms(),
+            "pending": r.get_pending(),
+        }
+
+    async def _handle_client(self, reader, writer):
         try:
             request_line = await reader.readline()
-            if not request_line:
-                writer.close()
-                return
-
+            if not request_line: writer.close(); return
             parts = request_line.decode("utf-8", errors="ignore").split()
-            if len(parts) < 2:
-                writer.close()
-                return
+            if len(parts) < 2: writer.close(); return
+            method, path = parts[0].upper(), parts[1]
 
-            method = parts[0].upper()
-            path = parts[1]
-
-            # Read headers
-            headers = {}
-            content_length = 0
+            headers = {}; content_length = 0
             while True:
                 line = await reader.readline()
-                if not line or line == b"\r\n":
-                    break
-                line_str = line.decode("utf-8", errors="ignore").strip()
-                if ":" in line_str:
-                    k, v = line_str.split(":", 1)
+                if not line or line == b"\r\n": break
+                ls = line.decode("utf-8", errors="ignore").strip()
+                if ":" in ls:
+                    k, v = ls.split(":", 1)
                     headers[k.strip().lower()] = v.strip()
                     if k.strip().lower() == "content-length":
-                        try:
-                            content_length = int(v.strip())
-                        except ValueError:
-                            content_length = 0
+                        try: content_length = int(v.strip())
+                        except ValueError: content_length = 0
 
-            # Route: GET /
-            if method == "GET" and (path == "/" or path == "/index.html"):
+            async def _read_body():
+                if content_length > 0:
+                    return await reader.readexactly(content_length)
+                return b""
+
+            # GET /
+            if method == "GET" and path in ("/", "/index.html"):
                 body = HTML_PAGE.encode("utf-8")
-                resp = (
-                    f"HTTP/1.1 200 OK\r\n"
-                    f"Content-Type: text/html; charset=utf-8\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"Connection: close\r\n"
-                    f"\r\n"
-                ).encode("utf-8") + body
-                writer.write(resp)
+                resp = (f"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                        f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode()+body
+                writer.write(resp); await writer.drain(); writer.close(); return
+
+            # GET /api/nodes
+            if method == "GET" and path == "/api/nodes":
+                data = self._nodes_snapshot()
+                body = json.dumps(data, ensure_ascii=False).encode()
+                resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                        f"Connection: close\r\n\r\n").encode()+body
+                writer.write(resp); await writer.drain(); writer.close(); return
+
+            # GET /api/events (SSE)
+            if method == "GET" and path.startswith("/api/events"):
+                writer.write(("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                              "Cache-Control: no-cache\r\nConnection: keep-alive\r\n"
+                              "Access-Control-Allow-Origin: *\r\n\r\n").encode())
                 await writer.drain()
-                writer.close()
-                return
-
-            # Route: GET /api/events (SSE)
-            elif method == "GET" and path.startswith("/api/events"):
-                header_resp = (
-                    "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: text/event-stream\r\n"
-                    "Cache-Control: no-cache\r\n"
-                    "Connection: keep-alive\r\n"
-                    "Access-Control-Allow-Origin: *\r\n"
-                    "\r\n"
-                ).encode("utf-8")
-                writer.write(header_resp)
-                await writer.drain()
-
-                client_q = asyncio.Queue(maxsize=100)
-                self.sse_queues.add(client_q)
-                logger.info(f"Browser client connected to Web Monitor SSE (Total: {len(self.sse_queues)})")
-
+                q = asyncio.Queue(maxsize=200)
+                self.sse_queues.add(q)
+                logger.info(f"SSE client connected (total {len(self.sse_queues)})")
                 try:
-                    # Send initial node status
-                    init_data = {"status": "connected"}
-                    writer.write(f"event: init\ndata: {json.dumps(init_data)}\n\n".encode("utf-8"))
+                    # gửi init snapshot
+                    snap = self._nodes_snapshot()
+                    writer.write(f"event: init\ndata: {json.dumps(snap, ensure_ascii=False)}\n\n".encode())
                     await writer.drain()
-
                     while self._running:
-                        msg = await client_q.get()
-                        writer.write(msg.encode("utf-8"))
-                        await writer.drain()
+                        msg = await q.get()
+                        writer.write(msg.encode()); await writer.drain()
                 except (asyncio.CancelledError, ConnectionResetError, BrokenPipeError):
                     pass
                 finally:
-                    self.sse_queues.discard(client_q)
-                    writer.close()
+                    self.sse_queues.discard(q); writer.close()
                 return
 
-            # Route: POST /api/relay
-            elif method == "POST" and path == "/api/relay":
-                body_bytes = b""
-                if content_length > 0:
-                    body_bytes = await reader.readexactly(content_length)
-
+            # POST /api/relay
+            if method == "POST" and path == "/api/relay":
+                body = await _read_body()
                 try:
-                    data = json.loads(body_bytes.decode("utf-8"))
-                    channel = data.get("channel", "ch1")
-                    action = data.get("action", "toggle")
-                    node_id = "esp32s3_master"
-
-                    if self.gateway and hasattr(self.gateway, "mqtt"):
-                        asyncio.create_task(
-                            self.gateway.mqtt.send_command(node_id, channel, action)
-                        )
-                        resp_data = {"success": True, "channel": channel, "action": action}
+                    data = json.loads(body.decode() or "{}")
+                    node_id = data.get("node_id") or data.get("node")
+                    channel = data.get("channel") or (f"ch{data['ch']}" if data.get("ch") in (1,2,"1","2") else None)
+                    action = data.get("action")
+                    s = data.get("s")
+                    if action is None and s is not None:
+                        action = "turn_on" if int(s)==1 else "turn_off"
+                    if not node_id or not channel or not action:
+                        resp_data = {"success": False, "error": "Thiếu node_id/channel/action"}
                     else:
-                        resp_data = {"success": False, "error": "MQTT not ready"}
+                        # ưu tiên WS, fallback MQTT (verifier sử dụng audio_server nhưng ở đây gọi trực tiếp)
+                        ok = False
+                        r = self.gateway.registry
+                        seq = r.next_seq(node_id)
+                        if hasattr(self.gateway.audio_server, "has_ws") and self.gateway.audio_server.has_ws(node_id):
+                            ok = await self.gateway.audio_server.send_relay_ws(node_id, channel, action, seq) if hasattr(self.gateway.audio_server,"send_relay_ws") else False
+                        if not ok:
+                            ok = await self.gateway.mqtt.send_command(node_id, channel, action, seq=seq)
+                        resp_data = {"success": ok, "node_id": node_id, "channel": channel, "action": action}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
 
-                resp_body = json.dumps(resp_data).encode("utf-8")
-                resp = (
-                    f"HTTP/1.1 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(resp_body)}\r\n"
-                    f"Access-Control-Allow-Origin: *\r\n"
-                    f"Connection: close\r\n"
-                    f"\r\n"
-                ).encode("utf-8") + resp_body
-                writer.write(resp)
-                await writer.drain()
-                writer.close()
-                return
+            # POST /api/provision
+            if method == "POST" and path == "/api/provision":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    mac = d.get("mac","").upper()
+                    if not mac or mac not in self.gateway.registry.get_pending():
+                        resp_data = {"success": False, "error": f"MAC {mac} không nằm trong pending"}
+                    else:
+                        res = await self.gateway.provision_pending(
+                            mac, d.get("room",""), d.get("rl1",""), d.get("rl2",""),
+                            node_short=d.get("node_short")
+                        )
+                        resp_data = res
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
 
-            # 404
-            else:
-                writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
-                await writer.drain()
-                writer.close()
+            # POST /api/node/remove (xoá pending)
+            if method == "POST" and path == "/api/node/remove":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    mac = d.get("mac","").upper()
+                    r = self.gateway.registry
+                    if mac in r.get_pending():
+                        r.data["pending"].pop(mac, None)
+                        r.save()
+                        resp_data = {"success": True}
+                    else:
+                        resp_data = {"success": False, "error": "Không có trong pending"}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
 
+            writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain(); writer.close()
         except Exception as e:
             logger.debug(f"HTTP handler exception: {e}")
-            try:
-                writer.close()
-            except Exception:
-                pass
+            try: writer.close()
+            except Exception: pass
+
+    # backwards compat với old broadcast ở main
+    def _legacy_broadcast(self):
+        pass

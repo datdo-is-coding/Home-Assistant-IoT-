@@ -9,11 +9,15 @@ MQTT_USERNAME = "admin"
 MQTT_PASSWORD = "SmarthomePass2026!"
 MQTT_CLIENT_ID = "smarthome_gateway"
 
-# MQTT Topics
-TOPIC_REGISTER = "smarthome/register"
-TOPIC_TELEMETRY = "smarthome/telemetry/{node_id}"
-TOPIC_COMMAND = "smarthome/command/{node_id}"
-TOPIC_STATUS = "smarthome/status/{node_id}"
+# MQTT Topics (compact v2 — xem Gateway/protocol_spec.md)
+TOPIC_REGISTER = "smarthome/register"      # legacy, giữ tương thích
+TOPIC_HELLO = "smarthome/hello"            # node -> gateway (mới, nhẹ)
+TOPIC_CFG = "smarthome/cfg/{mac_or_id}"    # gateway -> node provision
+TOPIC_TELEMETRY = "smarthome/telemetry/{node_id}"  # legacy
+TOPIC_TELE_SHORT = "smarthome/tele/{node_id}"      # mới, rút gọn
+TOPIC_COMMAND = "smarthome/command/{node_id}"      # legacy {channel, action}
+TOPIC_CMD_SHORT = "smarthome/cmd/{node_id}"        # mới {"t":"rl","ch":1,"s":1,"seq":n}
+TOPIC_STATUS = "smarthome/status/{node_id}"        # legacy + ack mới
 TOPIC_ALERT = "smarthome/alert"
 TOPIC_VOICE_INTENT = "smarthome/voice/intent"
 
@@ -23,6 +27,10 @@ LLAMA_TIMEOUT = 30.0
 LLM_MAX_TOKENS = 80
 LLM_TEMPERATURE = 0.0
 LLM_CONTEXT_SIZE = 512
+# GBNF grammar: ép LLM CHỈ được sinh JSON đúng schema + đúng enum thiết bị/phòng
+# có trong registry. Đây là lớp chống ảo giác mạnh nhất (không thể bịa tên thiết bị).
+LLM_GRAMMAR_ENABLED = True
+LLM_PROMPT_CACHE = True
 
 # ─── ASR (Sherpa-ONNX) ─────────────────────────────
 ASR_MODEL_DIR = "/home/pi4/smarthome/models"
@@ -76,17 +84,13 @@ VAD_MAX_DURATION_S = 10.0         # Maximum recording duration
 VAD_ENERGY_THRESHOLD = 0.01       # RMS energy threshold (float PCM)
 
 # ─── LLM System Prompt ────────────────────────────
-SYSTEM_PROMPT = """Bạn là bộ phân tích lệnh cho Nhà Thông Minh IoT (Smart Home AI).
-Nhiệm vụ: Phân tích khẩu lệnh thành cấu trúc JSON linh hoạt, tự động nhận diện mọi vị trí (khu vực) và phân loại chi tiết từng thiết bị.
+# NLU 2 lớp: LLM chỉ phân tích ý định (intent), Gateway mới là nơi phân giải
+# node_id/channel hợp lệ từ registry. LLM KHÔNG BAO GIỜ tự đặt tên node.
+SYSTEM_PROMPT = """Bạn là bộ phân tích ý định (intent) cho Nhà Thông Minh IoT.
+Nhiệm vụ DUY NHẤT: trích ý định từ khẩu lệnh tiếng Việt thành JSON.
+Bạn KHÔNG biết node nào tồn tại. Bạn KHÔNG được bịa tên phòng hay thiết bị.
+Nếu câu lệnh không nhắc phòng/thiết bị, để null — gateway sẽ tự suy luận.
 
-Định dạng JSON yêu cầu:
-{
-  "voice_reply": "<câu xác nhận ngắn gọn, thân thiện bằng tiếng Việt để phát ra loa>",
-  "command": {
-    "action": "turn_on" | "turn_off" | "open" | "close" | "set_value",
-    "device": "<loại thiết bị cụ thể, ví dụ: den_ngu, den_tran, den_chieu_sang, quat_hut, cua_cong, may_bom, dieu_hoa, rem_cua...>",
-    "location": "<vị trí/khu vực cụ thể, ví dụ: phong_ngu_master, phong_khach, san_vuon, cong_chinh, ban_cong, cau_thang, nha_bep...>",
-    "value": null
-  }
-}
+Định dạng JSON duy nhất được phép:
+{"voice_reply":"<câu xác nhận ngắn gọn, thân thiện>","command":{"action":"turn_on|turn_off","device":"den|quat|...|null","location":"phong_ngu|phong_khach|...|null","value":null}}
 Chỉ xuất DUY NHẤT một chuỗi JSON hợp lệ, không giải thích thêm."""
