@@ -308,23 +308,19 @@ class RegistryManager:
             for ch_id, ch in node.get("channels", {}).items():
                 if matches_channel(ch): return (nid, ch_id)
 
-        # Pass 2: nếu có phòng nhưng không khớp, fallback toàn nhà (để báo lỗi rõ ràng ở tầng trên)
+        # Nếu người dùng nêu rõ phòng nhưng phòng đó không có thiết bị -> Trả về None để thông báo không tìm thấy
         if area_s:
-            for nid, node in self.data["nodes"].items():
-                if node.get("status") != "online": continue
-                for ch_id, ch in node.get("channels", {}).items():
-                    if matches_channel(ch): return (nid, ch_id)
-        else:
-            # không nói phòng → ưu tiên node có ít thiết bị trùng tên nhất? lấy đầu tiên
-            candidates = []
-            for nid, node in self.data["nodes"].items():
-                if node.get("status") != "online": continue
-                for ch_id, ch in node.get("channels", {}).items():
-                    if matches_channel(ch): candidates.append((nid, ch_id))
-            if len(candidates) == 1: return candidates[0]
-            if len(candidates) > 1:
-                # nếu mơ hồ mà LLM không cho phòng → trả None để hỏi lại, tránh bấm nhầm
-                return None
+            return None
+
+        # Nếu không nói phòng -> ưu tiên node duy nhất nếu cả nhà chỉ có 1 thiết bị loại này
+        candidates = []
+        for nid, node in self.data["nodes"].items():
+            if node.get("status") != "online": continue
+            for ch_id, ch in node.get("channels", {}).items():
+                if matches_channel(ch): candidates.append((nid, ch_id))
+        if len(candidates) == 1:
+            return candidates[0]
+        # nếu mơ hồ (có nhiều thiết bị) mà không rõ phòng -> trả None để hỏi lại, tránh bấm nhầm
         return None
 
     def resolve_fullname(self, node_id: str, channel: str) -> str:
