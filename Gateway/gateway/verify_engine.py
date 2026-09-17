@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Optional
 
 import config
+from display_names import get_room_name, get_device_name, clean_voice_text
 
 logger = logging.getLogger("verify")
 
@@ -69,18 +70,25 @@ class CommandVerifier:
         if via == "failed":
             logger.error(f"Dispatch failed: {node_id}/{channel}")
             return VerifyResult.TIMEOUT, before_power, before_power, 0.0
+
+        # Nếu node không có công suất trước đó hoặc không gắn PZEM -> Xác nhận tức thì (0ms)
+        node_info = self.registry.get_all_nodes().get(node_id, {})
+        has_pzem = node_info.get("sensors", {}).get("pzem", False)
+        if before_power == 0.0 and not has_pzem:
+            logger.info(f"Verify: Node {node_id} command confirmed instantly via {via}")
+            return VerifyResult.SUCCESS, 0.0, 0.0, 0.0
         
-        # 3. Wait for telemetry update
-        await asyncio.sleep(config.VERIFY_TIMEOUT_SECONDS)
+        # Nếu có telemetry đang chạy, chỉ đợi tối đa 0.2s để không làm trễ phản hồi giọng nói của loa
+        verify_timeout = min(getattr(config, "VERIFY_TIMEOUT_SECONDS", 0.2), 0.2)
+        if verify_timeout > 0:
+            await asyncio.sleep(verify_timeout)
         
         # 4. Read new power
         after_power = self.mqtt.get_current_power(node_id)
         delta = after_power - before_power
         
         # 5. Analyze result
-        # If no power telemetry is available for this node (both before and after are 0.0W)
         if before_power == 0.0 and after_power == 0.0:
-            logger.info(f"Verify: Node {node_id} has no power sensor — command confirmed via MQTT")
             result = VerifyResult.SUCCESS
         else:
             result = self._analyze(action, delta, rated_watts)
@@ -119,26 +127,28 @@ class CommandVerifier:
     def generate_failure_message(self, action: str, device_type: str,
                                  area: str, result: VerifyResult) -> str:
         """Generate Vietnamese alert message for verification failure."""
-        device_name = device_type.replace("_", " ")
-        area_name = area.replace("_", " ")
+        device_name = get_device_name(device_type)
+        area_name = get_room_name(area)
         
         if result == VerifyResult.FAILED:
             if action == "turn_on":
-                return (
+                msg = (
                     f"Em đã bật công tắc {device_name} ở {area_name}, "
                     f"nhưng không thấy tiêu thụ điện. "
                     f"Có thể thiết bị bị hỏng hoặc chưa cắm điện."
                 )
             else:
-                return (
+                msg = (
                     f"Em đã tắt công tắc {device_name} ở {area_name}, "
                     f"nhưng vẫn thấy tiêu thụ điện. "
                     f"Vui lòng kiểm tra lại."
                 )
+            return clean_voice_text(msg)
         elif result == VerifyResult.PARTIAL:
-            return (
+            msg = (
                 f"{device_name} ở {area_name} có vẻ hoạt động yếu. "
                 f"Tiêu thụ thấp hơn bình thường."
             )
+            return clean_voice_text(msg)
         
         return ""

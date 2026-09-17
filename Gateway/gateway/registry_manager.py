@@ -279,8 +279,11 @@ class RegistryManager:
         dev = canon_device(device_type) if device_type else ""
         area_s = slug(area) if area else ""
 
-        def matches_channel(ch: dict) -> bool:
+        def matches_channel(ch_id: str, ch: dict) -> bool:
             if not dev: return True  # không nói thiết bị → chấp nhận mọi channel
+            cid_s = slug(ch_id)
+            if dev in (cid_s, f"relay_{cid_s[-1]}", f"cong_tac_{cid_s[-1]}", f"ch{cid_s[-1]}", f"relay{cid_s[-1]}", f"kenh_{cid_s[-1]}"):
+                return True
             ct = slug(ch.get("device_type", ""))
             aliases = [slug(a) for a in ch.get("aliases", [])]
             if dev == ct or dev in aliases or ct in dev: return True
@@ -306,7 +309,7 @@ class RegistryManager:
             if node.get("status") != "online": continue
             if not matches_room(node): continue
             for ch_id, ch in node.get("channels", {}).items():
-                if matches_channel(ch): return (nid, ch_id)
+                if matches_channel(ch_id, ch): return (nid, ch_id)
 
         # Nếu người dùng nêu rõ phòng nhưng phòng đó không có thiết bị -> Trả về None để thông báo không tìm thấy
         if area_s:
@@ -317,7 +320,7 @@ class RegistryManager:
         for nid, node in self.data["nodes"].items():
             if node.get("status") != "online": continue
             for ch_id, ch in node.get("channels", {}).items():
-                if matches_channel(ch): candidates.append((nid, ch_id))
+                if matches_channel(ch_id, ch): candidates.append((nid, ch_id))
         if len(candidates) == 1:
             return candidates[0]
         # nếu mơ hồ (có nhiều thiết bị) mà không rõ phòng -> trả None để hỏi lại, tránh bấm nhầm
@@ -378,10 +381,11 @@ class RegistryManager:
         # GBNF cho llama.cpp: https://github.com/ggerganov/llama.cpp/blob/master/grammars/README.md
         return f'''
 root ::= "{{" ws "\\"voice_reply\\"" ws ":" ws string ws "," ws "\\"command\\"" ws ":" ws command ws "}}" 
-command ::= "{{" ws "\\"action\\"" ws ":" ws action ws "," ws "\\"device\\"" ws ":" ws device ws "," ws "\\"location\\"" ws ":" ws location ws "," ws "\\"value\\"" ws ":" ws "null" ws "}}"
-action ::= "\\"turn_on\\"" | "\\"turn_off\\""
+command ::= "{{" ws "\\"action\\"" ws ":" ws action ws "," ws "\\"device\\"" ws ":" ws device ws "," ws "\\"location\\"" ws ":" ws location ws "," ws "\\"value\\"" ws ":" ws value ws "}}"
+action ::= "\\"turn_on\\"" | "\\"turn_off\\"" | "\\"unknown\\""
 device ::= {dev_alt} | "null"
 location ::= {room_alt} | "null"
+value ::= [0-9]+ | "null"
 string ::= "\\"" chars "\\""
 chars ::= [^"\\\\]* 
 ws ::= [ \\t\\n]*

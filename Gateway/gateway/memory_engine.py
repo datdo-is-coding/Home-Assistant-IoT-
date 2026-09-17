@@ -89,6 +89,27 @@ class MemoryEngine:
                 measurement_count INTEGER,
                 last_updated TEXT
             );
+
+            -- Smart Journal: daily & hourly snapshot of house activity (SSD persistent)
+            CREATE TABLE IF NOT EXISTS smart_journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                date TEXT NOT NULL,
+                hour INTEGER NOT NULL,
+                total_power_watts REAL DEFAULT 0.0,
+                active_nodes_count INTEGER DEFAULT 0,
+                active_relays_count INTEGER DEFAULT 0,
+                notes TEXT
+            );
+
+            -- Proactive Speech Log (giao tiếp chủ động như người thật)
+            CREATE TABLE IF NOT EXISTS proactive_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                node_id TEXT
+            );
             
             -- Optimized indexes
             CREATE INDEX IF NOT EXISTS idx_cmd_device_area
@@ -97,6 +118,10 @@ class MemoryEngine:
                 ON learned_patterns(is_active, trigger_hour);
             CREATE INDEX IF NOT EXISTS idx_baselines_node
                 ON power_baselines(node_id, channel);
+            CREATE INDEX IF NOT EXISTS idx_journal_date
+                ON smart_journal(date, hour);
+            CREATE INDEX IF NOT EXISTS idx_proactive_type
+                ON proactive_log(event_type, timestamp);
         """)
         
         conn.commit()
@@ -192,3 +217,71 @@ class MemoryEngine:
         ).fetchone()
         conn.close()
         return row[0] if row else 0
+
+    def record_journal(self, notes: str, total_power: float = 0.0,
+                       active_nodes: int = 0, active_relays: int = 0):
+        """Record periodic snapshot to SSD journal."""
+        now = datetime.now(TZ_VN)
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            """INSERT INTO smart_journal 
+               (timestamp, date, hour, total_power_watts, active_nodes_count, active_relays_count, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (now.isoformat(), now.date().isoformat(), now.hour,
+             total_power, active_nodes, active_relays, notes)
+        )
+        conn.commit()
+        conn.close()
+
+    def record_proactive_speech(self, event_type: str, content: str, node_id: str = None, success: bool = True, **kwargs):
+        """Record proactive utterance to log."""
+        now = datetime.now(TZ_VN)
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            """INSERT INTO proactive_log (timestamp, event_type, content, node_id)
+               VALUES (?, ?, ?, ?)""",
+            (now.isoformat(), event_type, content, node_id)
+        )
+        conn.commit()
+        conn.close()
+
+    def get_recent_journal(self, limit: int = 15) -> list:
+        """Get recent journal snapshots from SSD."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM smart_journal ORDER BY id DESC LIMIT ?""", (limit,)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_recent_proactive_logs(self, limit: int = 10) -> list:
+        """Get recent proactive speeches from SSD."""
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT * FROM proactive_log ORDER BY id DESC LIMIT ?""", (limit,)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_last_proactive_time(self, event_type: str = None) -> Optional[float]:
+        """Get timestamp of last proactive utterance in epoch seconds."""
+        conn = sqlite3.connect(self.db_path)
+        if event_type:
+            row = conn.execute(
+                """SELECT timestamp FROM proactive_log WHERE event_type = ? ORDER BY id DESC LIMIT 1""",
+                (event_type,)
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT timestamp FROM proactive_log ORDER BY id DESC LIMIT 1"""
+            ).fetchone()
+        conn.close()
+        if row and row[0]:
+            try:
+                dt = datetime.fromisoformat(row[0])
+                return dt.timestamp()
+            except Exception:
+                pass
+        return None

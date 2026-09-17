@@ -22,6 +22,7 @@ API endpoints:
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Set, Dict, Any, Optional
 
@@ -97,6 +98,14 @@ input:checked+.slider{background:var(--green)}
 input:checked+.slider:before{transform:translateX(22px)}
 input:disabled+.slider{opacity:.35;cursor:not-allowed}
 
+/* Home Assistant Discovery Banner */
+.discovery-card{background:linear-gradient(135deg,rgba(0,242,254,.15),rgba(139,92,246,.15));border:1px solid rgba(0,242,254,.45);box-shadow:0 0 25px rgba(0,242,254,.15)}
+.disc-item{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:12px;background:rgba(255,255,255,.05);border-radius:12px;border:1px solid rgba(255,255,255,.1)}
+.disc-info{display:flex;flex-direction:column;gap:4px}
+.disc-name{font-size:.95rem;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px}
+.disc-tag{font-size:.7rem;padding:2px 8px;border-radius:10px;background:rgba(0,242,254,.2);color:var(--accent);font-weight:600}
+.disc-entity{display:inline-flex;align-items:center;gap:4px;font-size:.72rem;background:rgba(255,255,255,.08);padding:2px 6px;border-radius:6px;color:#e2e8f0}
+
 /* Pending */
 .pending-card{background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(239,68,68,.06));border-color:rgba(245,158,11,.35)}
 .pend-item{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:10px;background:rgba(255,255,255,.04);border-radius:10px;border:1px solid var(--border)}
@@ -123,16 +132,25 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
   <header>
     <div class="logo"><div class="logo-icon">🏠</div>
       <div class="logo-text"><h1>DTV Smart Home — Node Manager</h1>
-      <p>ESP32 ⇄ Gateway · Voice + Relay · Provision tự động</p></div>
+      <p>ESP32 ⇄ Gateway · Voice + Relay · Home Assistant Discovery</p></div>
     </div>
     <div class="badges">
       <div class="badge" id="bd-gw"><span class="dot dg"></span>Gateway: Online</div>
       <div class="badge" id="bd-mqtt"><span class="dot dg"></span>MQTT</div>
-      <div class="badge" id="bd-ai"><span class="dot dg"></span>AI: Hybrid Ready</div>
+      <div class="badge" id="bd-ai"><span class="dot dg"></span>AI: Hybrid Fast-Path</div>
+      <div class="badge" id="bd-lat"><span class="dot dg"></span>Phản hồi: <b id="lat-val" style="color:var(--accent)">~0.3s</b></div>
+      <div class="badge" id="bd-disc" style="display:none"><span class="dot dp" style="background:#00f2fe"></span>Discovery: <span id="bd-disc-cnt">0</span></div>
       <div class="badge" id="bd-nodes"><span class="dot dg"></span>Nodes: –</div>
       <div class="badge" id="bd-pend"><span class="dot dg"></span>Pending: 0</div>
     </div>
   </header>
+
+  <!-- Home Assistant & Native Discovery Banner -->
+  <div class="card discovery-card" id="discovery-box" style="display:none">
+    <div class="ct">✨ PHÁT HIỆN THIẾT BỊ MỚI (HOME ASSISTANT MQTT DISCOVERY)</div>
+    <div id="discovery-list" style="display:flex;flex-direction:column;gap:10px;margin-top:4px"></div>
+    <div class="hint">Thiết bị ESP32 vừa phát sóng MQTT Discovery chuẩn Home Assistant. Chọn phòng rồi bấm "Thêm vào nhà" để kích hoạt 1-Click Pairing ngay lập tức!</div>
+  </div>
 
   <!-- Pending nodes -->
   <div class="card pending-card" id="pending-box" style="display:none">
@@ -161,6 +179,53 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
     </div>
   </div>
 
+  <!-- Proactive Assistant & Gemini Persona Card -->
+  <div class="card full" id="proactive-card">
+    <div class="ct">✨ TRỢ LÝ AI & GIAO TIẾP CHỦ ĐỘNG (LUMI PERSONA)</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px">
+      <div style="display:flex;flex-direction:column;gap:10px;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px">
+        <div style="font-weight:700;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>🤖 Trạng Thái Giao Tiếp Chủ Động</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <label class="switch">
+            <input type="checkbox" id="proactive-toggle" onchange="toggleProactive(this)">
+            <span class="slider"></span>
+          </label>
+          <span style="font-size:0.85rem;font-weight:600" id="proactive-status-label">Bật giao tiếp chủ động</span>
+        </div>
+        <div class="hint">Tự động chào buổi sáng (7h), nhắc đi ngủ (22h), quan sát an toàn thiết bị (bình nóng lạnh &gt; 35p) và ngẫu hứng đối đáp/hát hò.</div>
+        <div class="hint" style="color:var(--orange)">🌙 Giờ yên lặng: 22:30 - 07:00 (hoàn toàn im lặng, giữ giấc ngủ gia đình).</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px">
+        <div style="font-weight:700;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>🔑 Google Gemini Flash API Key</span>
+        </div>
+        <div class="hint">Nhập API Key để nâng cấp AI đối đáp văn phong con người siêu thực (hoặc để trống để dùng Persona Offline mượt mà).</div>
+        <div style="display:flex;gap:6px">
+          <input type="password" class="inp" id="gemini-key" placeholder="AIzaSy..." style="flex:1">
+          <button class="btn btn-a" onclick="saveGeminiKey()">Lưu Key</button>
+        </div>
+        <div class="hint" id="gemini-status" style="font-weight:600;color:var(--green)">Đang kiểm tra...</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:12px;padding:14px">
+        <div style="font-weight:700;font-size:0.9rem;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>📢 Thử Giọng & Hát Ra Loa ESP32</span>
+        </div>
+        <div class="hint">Bấm để Gateway phát mẫu giọng qua WebSocket trực tiếp ra loa ESP32 (không cần mic):</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-g" onclick="testSpeak('hát')">🎵 Hát một bài</button>
+          <button class="btn btn-o" onclick="testSpeak('hài')">😂 Chuyện cười</button>
+          <button class="btn btn-a" onclick="testSpeak('chào')">👋 Chào hỏi</button>
+          <button class="btn btn-r" onclick="testSpeak('an_toan')">⚠️ Thử báo động</button>
+        </div>
+        <div class="hint" id="proactive-last-action" style="font-style:italic">—</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Rooms / nodes -->
   <div class="card full">
     <div class="ct">💡 THIẾT BỊ THEO PHÒNG (RELAY CONTROL)</div>
@@ -175,8 +240,9 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
 </div>
 
 <script>
-let nodes={}, pending={}, rooms={};
+let nodes={}, pending={}, rooms={}, discovered={};
 let nodeCount=0;
+let speechStartMs=0;
 
 const $=id=>document.getElementById(id);
 function addLog(msg,hl=false){
@@ -202,9 +268,70 @@ async function toggleRelay(nodeId,ch,el){
     const j=await r.json();
     if(!j.success) addLog(`⚠️ ${j.error||'null'}`,true);
   }catch(e){ addLog(`⚠️ Relay error: ${e}`); }
-  // UI sẽ được đồng bộ lại qua SSE ack (không hard-set)
   const watchdog=setTimeout(()=>{el.disabled=false;},4000);
   el._wd=watchdog;
+}
+
+/* ── Render Home Assistant Discovered ── */
+function renderDiscovery(){
+  const box=$('discovery-box'), list=$('discovery-list'), badge=$('bd-disc');
+  const keys=Object.keys(discovered||{});
+  if(!keys.length){
+    box.style.display='none';
+    if(badge) badge.style.display='none';
+    list.innerHTML='';
+    return;
+  }
+  box.style.display='';
+  if(badge){ badge.style.display=''; $('bd-disc-cnt').textContent=keys.length; }
+  list.innerHTML=keys.map(nid=>{
+    const d=discovered[nid]||{};
+    const comps=Object.keys(d.components||{}).map(cid=>`<span class="disc-entity">⚡ ${cid}</span>`).join(' ');
+    const sRoom=d.suggested_room||'phong_khach';
+    return `<div class="disc-item">
+      <div class="disc-info">
+        <div class="disc-name"><span>✨ ${d.name||nid}</span> <span class="disc-tag">${d.model||d.chip||'ESP32'}</span></div>
+        <div class="hint">Node ID: <b style="color:var(--accent)">${nid}</b> · MAC: ${d.mac||'–'} ${d.ip?'· IP: '+d.ip:''}</div>
+        <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">${comps||'<span class="disc-entity">Relay Dual-Channel</span>'}</div>
+      </div>
+      <div class="pend-form">
+        <input class="inp" id="disc-room-${nid}" value="${sRoom}" placeholder="Phòng (e.g. phong_khach)" list="room-opt">
+        <select class="sel" id="disc-r1-${nid}">
+          <option value="light" selected>RL1 = Đèn (light)</option>
+          <option value="fan">RL1 = Quạt (fan)</option>
+          <option value="air_conditioner">RL1 = Điều hòa</option>
+        </select>
+        <select class="sel" id="disc-r2-${nid}">
+          <option value="fan" selected>RL2 = Quạt (fan)</option>
+          <option value="light">RL2 = Đèn (light)</option>
+          <option value="">RL2 = Không dùng</option>
+        </select>
+        <button class="btn btn-a" onclick="pairDiscovered('${nid}')">➕ THÊM VÀO NHÀ</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function pairDiscovered(nodeId){
+  const room=($('disc-room-'+nodeId)?.value||'livingroom').trim();
+  const rl1=$('disc-r1-'+nodeId)?.value||'light';
+  const rl2=$('disc-r2-'+nodeId)?.value||'fan';
+  addLog(`🎉 Ghép nối HA Discovery [${nodeId}]: phòng=${room}, RL1=${rl1}, RL2=${rl2}`,true);
+  try{
+    const r=await fetch('/api/discovery/pair',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({node_id:nodeId,room,rl1,rl2})
+    });
+    const j=await r.json();
+    if(j.success){
+      addLog(`✅ Ghép nối thành công! Đã tích hợp Home Assistant & gán phòng ${room}`,true);
+      delete discovered[nodeId];
+      renderDiscovery();
+      loadAll();
+    }else{
+      addLog(`⚠️ Lỗi ghép nối: ${j.error||'Không xác định'}`,true);
+    }
+  }catch(e){ addLog('⚠️ Lỗi: '+e,true); }
 }
 
 /* ── Render theo phòng ── */
@@ -286,6 +413,7 @@ async function loadAll(){
     const r=await fetch('/api/nodes');
     const j=await r.json();
     nodes=j.nodes||{}; rooms=j.rooms||{}; pending=j.pending||{};
+    if(j.discovered!==undefined){ discovered=j.discovered||{}; renderDiscovery(); }
     nodeCount=Object.keys(nodes).length;
     $('bd-nodes').innerHTML=`<span class="dot dg"></span>Nodes: ${nodeCount}`;
     $('bd-pend').innerHTML=`<span class="dot ${Object.keys(pending).length?'do dp':'dg'}"></span>Pending: ${Object.keys(pending).length}`;
@@ -340,9 +468,27 @@ function connectSSE(){
     // chỉ render telemetry kèm cập nhật relay_state nếu có
   });
 
+  es.addEventListener('device_discovered',e=>{
+    const d=JSON.parse(e.data); if(d.node_id) discovered[d.node_id]=d;
+    renderDiscovery(); addLog(`✨ Phát hiện thiết bị Home Assistant: ${d.name||d.node_id}`,true);
+  });
+  es.addEventListener('device_paired',e=>{
+    const d=JSON.parse(e.data); if(d.node_id) delete discovered[d.node_id];
+    renderDiscovery(); loadAll();
+  });
+  es.addEventListener('discovery_removed',e=>{
+    const d=JSON.parse(e.data); if(d.node_id) delete discovered[d.node_id];
+    renderDiscovery();
+  });
+
   es.addEventListener('command_result',e=>{
     const d=JSON.parse(e.data);
     if(d.voice_reply) $('reply').textContent=`"${d.voice_reply}"`;
+    if(speechStartMs>0){
+      const lat=((Date.now()-speechStartMs)/1000).toFixed(2);
+      $('lat-val').textContent=lat+'s';
+      $('lat-val').style.color=lat<3.0?'#10b981':'#f59e0b';
+    }
     if(d.engine) {
       $('bd-ai').innerHTML=`<span class="dot dg"></span>AI: ${d.engine}`;
       const s4sub=$('s4-sub'); if(s4sub) s4sub.textContent=d.engine;
@@ -355,8 +501,18 @@ function connectSSE(){
     es.addEventListener(ev,e=>{
       const d=JSON.parse(e.data), st=d.state;
       if(st==='RECORDING'){setStep('s2');updMeter(1200);}
-      else if(st==='PROCESSING'){setStep('s3');updMeter(0);}
-      else if(st==='PLAYING'){setStep('s5');}
+      else if(st==='PROCESSING'){
+        speechStartMs=Date.now();
+        setStep('s3');updMeter(0);
+      }
+      else if(st==='PLAYING'){
+        setStep('s5');
+        if(speechStartMs>0){
+          const lat=((Date.now()-speechStartMs)/1000).toFixed(2);
+          $('lat-val').textContent=lat+'s';
+          $('lat-val').style.color=lat<3.0?'#10b981':'#f59e0b';
+        }
+      }
       else if(st==='IDLE'){setStep('');updMeter(0);}
     });
   });
@@ -366,13 +522,73 @@ function connectSSE(){
   es.onerror=()=>{ $('bd-gw').innerHTML='<span class="dot dr"></span>Gateway: Disconnected'; es.close(); setTimeout(connectSSE,3000); };
 }
 
+/* ── Proactive & Persona Controls ── */
+async function loadProactiveStatus(){
+  try{
+    const r=await fetch('/api/proactive/status');
+    const j=await r.json();
+    if(j){
+      const tog=$('proactive-toggle');
+      if(tog) tog.checked = !!j.enabled;
+      if($('proactive-status-label')) $('proactive-status-label').textContent = j.enabled ? 'Đang bật tự động bắt chuyện' : 'Đang tạm dừng tự động bắt chuyện';
+      if($('gemini-status')) $('gemini-status').textContent = j.has_gemini_key ? '✨ Đã kích hoạt Google Gemini Cloud API (Siêu thông minh)' : '⚡ Đang dùng Persona Offline (Dân ca, chuyện cười, thời gian)';
+      if(j.has_gemini_key && $('gemini-key') && !$('gemini-key').value) $('gemini-key').placeholder = '•••••••••••••••••••••••• (Đã lưu key)';
+    }
+  }catch(e){}
+}
+
+async function toggleProactive(el){
+  const en=el.checked;
+  if($('proactive-status-label')) $('proactive-status-label').textContent = en ? 'Đang bật tự động bắt chuyện' : 'Đang tạm dừng tự động bắt chuyện';
+  addLog(`🤖 Chế độ chủ động → ${en?'BẬT':'TẮT'}`);
+  try{
+    await fetch('/api/proactive/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:en})});
+  }catch(e){ addLog('⚠️ Lỗi bật/tắt chủ động: '+e); }
+}
+
+async function saveGeminiKey(){
+  const k=$('gemini-key').value.trim();
+  if(!k){ alert('Vui lòng nhập API Key'); return; }
+  addLog('🔑 Đang lưu Google Gemini API Key...');
+  try{
+    const r=await fetch('/api/settings/gemini_key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:k})});
+    const j=await r.json();
+    if(j.success){
+      addLog('✅ Đã lưu Google Gemini API Key thành công!', true);
+      if($('gemini-status')) $('gemini-status').textContent = '✨ Đã kích hoạt Google Gemini Cloud API (Siêu thông minh)';
+      $('gemini-key').value = '';
+      $('gemini-key').placeholder = '•••••••••••••••••••••••• (Đã lưu key)';
+    } else {
+      addLog('⚠️ Lỗi lưu key: '+(j.error||''), true);
+    }
+  }catch(e){ addLog('⚠️ Lỗi mạng: '+e); }
+}
+
+async function testSpeak(type){
+  const actionLabel = type === 'hát' ? 'hát một bài' : (type === 'hài' ? 'kể chuyện cười' : (type === 'chào' ? 'chào hỏi' : 'cảnh báo an toàn'));
+  addLog(`📢 Yêu cầu Gateway phát loa: ${actionLabel}...`);
+  if($('proactive-last-action')) $('proactive-last-action').textContent = `Đang phát loa: ${actionLabel}...`;
+  try{
+    const r=await fetch('/api/proactive/test_speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:type})});
+    const j=await r.json();
+    if(j.success){
+      addLog(`🔊 Đã phát ra loa ESP32: "${j.text}"`, true);
+      if($('proactive-last-action')) $('proactive-last-action').textContent = `Đã phát: "${j.text}"`;
+    } else {
+      addLog(`⚠️ Loa chưa kết nối WebSocket hoặc bận: ${j.error||''}`, true);
+      if($('proactive-last-action')) $('proactive-last-action').textContent = `Chưa phát được (ESP32 chưa nối WebSocket audio)`;
+    }
+  }catch(e){ addLog('⚠️ Lỗi phát loa: '+e); }
+}
+
 // doanh nghiệp: 1 datalist phòng phổ biến
 window.addEventListener('DOMContentLoaded',()=>{
   document.body.insertAdjacentHTML('beforeend',`<datalist id="room-opt">
     <option value="livingroom"><option value="bedroom"><option value="kitchen"><option value="bathroom"><option value="balcony"><option value="garden">
     <option value="phong_khach"><option value="phong_ngu"><option value="phong_bep"></datalist>`);
-  loadAll(); connectSSE();
+  loadAll(); connectSSE(); loadProactiveStatus();
   setInterval(loadAll,15000); // refresh định kỳ cho node tới
+  setInterval(loadProactiveStatus,30000);
 });
 </script>
 </body>
@@ -419,10 +635,12 @@ class WebServer:
     # ── helpers ──
     def _nodes_snapshot(self) -> dict:
         r = self.gateway.registry
+        disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
         return {
             "nodes": r.get_all_nodes(),
             "rooms": r.get_rooms(),
             "pending": r.get_pending(),
+            "discovered": disc,
         }
 
     async def _handle_client(self, reader, writer):
@@ -465,6 +683,38 @@ class WebServer:
                         f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
                         f"Connection: close\r\n\r\n").encode()+body
                 writer.write(resp); await writer.drain(); writer.close(); return
+
+            # GET /api/discovery
+            if method == "GET" and path == "/api/discovery":
+                disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
+                body = json.dumps({"discovered": disc}, ensure_ascii=False).encode()
+                resp = (f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                        f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                        f"Connection: close\r\n\r\n").encode()+body
+                writer.write(resp); await writer.drain(); writer.close(); return
+
+            # POST /api/discovery/pair
+            if method == "POST" and path == "/api/discovery/pair":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    node_id = d.get("node_id")
+                    room = d.get("room", "livingroom")
+                    rl1 = d.get("rl1", "light")
+                    rl2 = d.get("rl2", "fan")
+                    if not node_id:
+                        resp_data = {"success": False, "error": "Thiếu node_id"}
+                    elif not hasattr(self.gateway, "discovery"):
+                        resp_data = {"success": False, "error": "DiscoveryManager not initialized"}
+                    else:
+                        resp_data = await self.gateway.discovery.pair_device(node_id, room, rl1, rl2)
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
 
             # GET /api/events (SSE)
             if method == "GET" and path.startswith("/api/events"):
@@ -560,6 +810,125 @@ class WebServer:
                 body = json.dumps(resp_data).encode()
                 writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
+
+            # GET /api/proactive/status
+            if method == "GET" and path == "/api/proactive/status":
+                has_gemini = bool(getattr(self.gateway, "persona", None) and self.gateway.persona.has_api_key)
+                proactive_en = bool(getattr(self.gateway, "proactive", None) and self.gateway.proactive.enabled)
+                recent_logs = []
+                recent_journal = []
+                if hasattr(self.gateway, "memory") and self.gateway.memory:
+                    recent_logs = self.gateway.memory.get_recent_proactive_logs(5)
+                    recent_journal = self.gateway.memory.get_recent_journal(5)
+                resp_data = {
+                    "enabled": proactive_en,
+                    "has_gemini_key": has_gemini,
+                    "last_speech_time": getattr(self.gateway.proactive, "last_speech_time", 0) if hasattr(self.gateway, "proactive") else 0,
+                    "cooldown_hours": getattr(config, "PROACTIVE_COOLDOWN_HOURS", 2.0),
+                    "quiet_start": getattr(config, "PROACTIVE_QUIET_START", 22),
+                    "quiet_end": getattr(config, "PROACTIVE_QUIET_END", 7),
+                    "recent_logs": recent_logs,
+                    "recent_journal": recent_journal
+                }
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
+
+            # POST /api/proactive/toggle
+            if method == "POST" and path == "/api/proactive/toggle":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    enabled = bool(d.get("enabled", True))
+                    if hasattr(self.gateway, "proactive") and self.gateway.proactive:
+                        self.gateway.proactive.enabled = enabled
+                    config.PROACTIVE_ENABLED = enabled
+                    # Save to local_config.json
+                    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
+                    cfg_data = {}
+                    if os.path.exists(cfg_path):
+                        try:
+                            with open(cfg_path, "r", encoding="utf-8") as f:
+                                cfg_data = json.load(f)
+                        except Exception: pass
+                    cfg_data["PROACTIVE_ENABLED"] = enabled
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(cfg_data, f, indent=2)
+                    resp_data = {"success": True, "enabled": enabled}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
+
+            # POST /api/settings/gemini_key
+            if method == "POST" and path == "/api/settings/gemini_key":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    key = str(d.get("key", "")).strip()
+                    config.GEMINI_API_KEY = key
+                    if hasattr(self.gateway, "persona") and self.gateway.persona:
+                        self.gateway.persona.api_key = key
+                    # Save to local_config.json
+                    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
+                    cfg_data = {}
+                    if os.path.exists(cfg_path):
+                        try:
+                            with open(cfg_path, "r", encoding="utf-8") as f:
+                                cfg_data = json.load(f)
+                        except Exception: pass
+                    cfg_data["GEMINI_API_KEY"] = key
+                    with open(cfg_path, "w", encoding="utf-8") as f:
+                        json.dump(cfg_data, f, indent=2)
+                    resp_data = {"success": True, "has_key": bool(key)}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
+                await writer.drain(); writer.close(); return
+
+            # POST /api/proactive/test_speak
+            if method == "POST" and path == "/api/proactive/test_speak":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    t = d.get("type", "chào")
+                    custom_text = d.get("text")
+                    if custom_text:
+                        text = custom_text
+                    elif t == "hát":
+                        import random
+                        songs = getattr(self.gateway.persona, "_songs", []) if hasattr(self.gateway, "persona") else []
+                        text = random.choice(songs) if songs else "Một con vịt xòe ra hai cái cánh, nó kêu rằng quác quác quác quạc quạc quác!"
+                    elif t == "hài":
+                        import random
+                        jokes = getattr(self.gateway.persona, "_jokes", []) if hasattr(self.gateway, "persona") else []
+                        text = random.choice(jokes) if jokes else "Tại sao con cua không bao giờ đi thẳng? Vì nó thích đi ngang đó nha!"
+                    elif t == "an_toan":
+                        text = "Dạ xin lưu ý, bình nóng lạnh ở phòng tắm đã bật hơn 35 phút rồi ạ. Nhà mình chú ý tắt để đảm bảo an toàn và tiết kiệm điện nhé."
+                    else:
+                        text = "Chào bạn! Mình là Lumi, trợ lý nhà thông minh của bạn đây ạ."
+
+                    ok = False
+                    if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:
+                        ok = await self.gateway.audio_server.speak_proactive(text)
+                    if hasattr(self.gateway, "memory") and self.gateway.memory:
+                        self.gateway.memory.record_proactive_speech(f"test_{t}", text, success=ok)
+                    resp_data = {"success": ok, "text": text, "type": t}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode()+body)
                 await writer.drain(); writer.close(); return
 
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")

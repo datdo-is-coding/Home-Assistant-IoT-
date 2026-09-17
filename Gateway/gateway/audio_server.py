@@ -128,6 +128,13 @@ class AudioServer:
         client_addr = websocket.remote_address
         logger.info(f"🔗 ESP32 client connected from {client_addr}")
 
+        client_node_id = None
+        # Default physical master node mapping for connected hardware (non-localhost)
+        if client_addr and client_addr[0] != "127.0.0.1":
+            self._ws_nodes["esp32s3_master"] = websocket
+            client_node_id = "esp32s3_master"
+            logger.info(f"📢 Mapped physical hardware node {client_addr} to 'esp32s3_master' speaker")
+
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
         pcm_chunks = []
@@ -136,7 +143,6 @@ class AudioServer:
         record_start_time = 0.0
         total_frames = 0
         client_mac = None
-        client_node_id = None
         installed = {}  # channel -> device_fullname for WS-commandable node
 
         try:
@@ -215,6 +221,8 @@ class AudioServer:
                             recording = True
                             record_start_time = time.monotonic()
                             total_frames = 0
+                            if cmd.get("node_id"):
+                                client_node_id = cmd.get("node_id")
                             curr_node = client_node_id or "esp32s3_master"
                             self.arbiter.register_start(curr_node)
 
@@ -243,6 +251,17 @@ class AudioServer:
                                 f"{len(pcm_chunks)} chunks, "
                                 f"{elapsed:.2f}s (detected_room={detected_room})"
                             )
+
+                            if dominant_nid and dominant_nid != curr_node:
+                                logger.info(f"🔇 Spatial Arbiter: Suppressed weaker stream '{curr_node}' in favor of dominant '{dominant_nid}' ({detected_room})")
+                                await websocket.send(json.dumps({
+                                    "type": "suppressed",
+                                    "dominant_node": dominant_nid,
+                                    "detected_room": detected_room
+                                }))
+                                pcm_chunks.clear()
+                                continue
+
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                 self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
                             await websocket.send(json.dumps({
@@ -391,22 +410,39 @@ class AudioServer:
             logger.error("Gateway ASR engine not available")
             return
 
-        # ─── Step 1: Speech-to-Text ───
-        text = self.gateway.asr.transcribe(pcm_samples, sample_rate)
+        # ─── Step 1: Speech-to-Text with confidence scoring ───
+        text, confidence = self.gateway.asr.transcribe_with_confidence(pcm_samples, sample_rate)
+
         if not text:
             logger.warning("ASR returned empty transcript")
             reply = "Em không nghe rõ. Bạn nói lại được không?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": ""
             }))
-            await self._send_voice_reply(websocket, reply, follow_up=False)
+            await self._send_voice_reply(websocket, reply, follow_up=True)
             return
 
-        logger.info(f"📝 Recognized voice: '{text}'")
+        # If confidence is very low, ask user to repeat (don't blindly execute)
+        from asr_engine import ASREngine
+        if confidence < ASREngine.CONFIDENCE_LOW:
+            logger.warning(f"ASR confidence too low ({confidence:.2f}): '{text}' — asking user to repeat")
+            reply = f"Em nghe không rõ lắm. Bạn nói lại lần nữa được không ạ?"
+            await websocket.send(json.dumps({
+                "type": "transcript", "text": text, "confidence": round(confidence, 2)
+            }))
+            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2), "status": "low_confidence"})
+            await self._send_voice_reply(websocket, reply, follow_up=True)
+            return
+
+        if confidence < ASREngine.CONFIDENCE_MEDIUM:
+            logger.warning(f"ASR confidence medium ({confidence:.2f}): '{text}' — proceeding with caution")
+
+        logger.info(f"📝 Recognized voice: '{text}' (confidence={confidence:.2f})")
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
-            self.gateway.broadcast_event("transcript", {"text": text})
+            self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2)})
         await websocket.send(json.dumps({
-            "type": "transcript", "text": text
+            "type": "transcript", "text": text, "confidence": round(confidence, 2)
         }))
 
         # ─── Step 2-4: Process command through Gateway ───
@@ -426,6 +462,43 @@ class AudioServer:
         if voice_reply:
             await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up)
 
+    async def speak_proactive(self, text: str, node_id: str = None) -> bool:
+        """
+        Chủ động phát âm thanh ra loa ESP32 (không cần user gọi trước).
+        Ưu tiên node_id chỉ định, nếu không tìm loa esp32s3_master hoặc node đang online.
+        """
+        if not self.gateway or not hasattr(self.gateway, "tts"):
+            logger.warning("TTS engine not available for proactive speech")
+            return False
+
+        target_ws = None
+        if node_id and node_id in self._ws_nodes:
+            target_ws = self._ws_nodes[node_id]
+        elif "esp32s3_master" in self._ws_nodes:
+            target_ws = self._ws_nodes["esp32s3_master"]
+        elif self._ws_nodes:
+            target_ws = next(iter(self._ws_nodes.values()))
+
+        if not target_ws:
+            logger.debug("No active WebSocket speaker connected to receive proactive audio")
+            return False
+
+        try:
+            pcm_audio = await self.gateway.tts.synthesize_pcm(
+                text, sample_rate=config.AUDIO_SAMPLE_RATE
+            )
+            if pcm_audio:
+                await self._send_pcm_stream(target_ws, pcm_audio, follow_up=False)
+                return True
+            else:
+                mp3_audio = await self.gateway.tts.synthesize(text)
+                if mp3_audio:
+                    await self._send_audio_stream_mp3(target_ws, mp3_audio, follow_up=False)
+                    return True
+        except Exception as e:
+            logger.error(f"Failed to speak proactive audio: {e}")
+        return False
+
     async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False):
         """Synthesize text to PCM and stream to ESP32 speaker."""
         if not self.gateway or not hasattr(self.gateway, "tts"):
@@ -439,6 +512,13 @@ class AudioServer:
 
         if pcm_audio:
             await self._send_pcm_stream(websocket, pcm_audio, follow_up=follow_up)
+            # Đọc kết quả ra loa thật: Phát ra ESP32 vật lý (esp32s3_master)
+            real_spk = self._ws_nodes.get("esp32s3_master")
+            if real_spk and real_spk != websocket:
+                try:
+                    await self._send_pcm_stream(real_spk, pcm_audio, follow_up=follow_up)
+                except Exception as e:
+                    logger.debug(f"Forward to real speaker failed: {e}")
         else:
             # Fallback: try sending MP3 if PCM conversion failed
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")

@@ -35,10 +35,10 @@ static const char *TAG = "WS_AUDIO";
 #define WS_SEND_BUF_SIZE       (640)      /* 20ms frame: 320 samples × 2 bytes */
 #define SPK_PLAY_BUF_SIZE      (1024)     /* Speaker write chunk */
 
-/* VAD (Voice Activity Detection) configuration */
+/* VAD (Voice Activity Detection) configuration — Optimized for low latency (<0.6s) */
 #define VAD_SILENCE_ENERGY     (40000)    /* Mean-square threshold (~RMS 200) */
-#define VAD_SILENCE_FRAMES     (75)       /* 75 × 20ms = 1.5 seconds */
-#define VAD_IGNORE_FRAMES      (25)       /* Ignore first 0.5s for speech onset */
+#define VAD_SILENCE_FRAMES     (30)       /* 30 × 20ms = 600ms of silence to end recording */
+#define VAD_IGNORE_FRAMES      (15)       /* Ignore first 0.3s for speech onset */
 #define MAX_STREAM_FRAMES      (500)      /* 500 × 20ms = 10 seconds max recording */
 
 /* ─── State ──────────────────────────────────────────────────────────── */
@@ -446,9 +446,9 @@ static void audio_stream_task(void *arg)
                 silence_count++;
             }
 
-            /* End recording if silence > 1.5 seconds (after speech was detected) */
+            /* End recording if silence > 0.6 seconds (after speech was detected) */
             if (speech_detected && silence_count >= VAD_SILENCE_FRAMES) {
-                ESP_LOGI(TAG, "VAD: Silence detected for 1.5s — ending recording");
+                ESP_LOGI(TAG, "VAD: Silence detected for 0.6s — ending recording");
                 break;
             }
 
