@@ -93,17 +93,23 @@ class SmartHomeGateway:
     async def process_voice_command(self, user_text: str) -> dict:
         result = {
             "user_text": user_text, "intent": None,
+            "engine": None,
             "node_id": None, "channel": None, "fullname": None,
             "verify": None, "voice_reply": None, "tts_audio": None,
         }
         logger.info(f'Voice: "{user_text}"')
         intent = await self.intent.extract(user_text)
+        result["engine"] = getattr(self.intent, "active_engine", "unknown")
+        logger.info(f'Engine selected: {result["engine"]}')
 
         if not intent or not self.intent.validate_intent(intent):
             reply = "Xin lỗi, em không hiểu lệnh. Bạn nói lại được không?"
             result["voice_reply"] = reply
             result["tts_audio"] = await self.tts.synthesize(reply)
-            self.broadcast_event("command_result", {"voice_reply": reply, "verify": "parse_error"})
+            self.broadcast_event("command_result", {
+                "voice_reply": reply, "verify": "parse_error",
+                "engine": result["engine"]
+            })
             return result
 
         result["intent"] = intent
@@ -171,8 +177,9 @@ class SmartHomeGateway:
         self.broadcast_event("command_result", {
             "voice_reply": voice_reply, "verify": verify_result.value,
             "node_id": node_id, "channel": channel, "fullname": fullname, "action": action,
+            "engine": result.get("engine", "local"),
         })
-        logger.info(f"Done: {action} {fullname} → {verify_result.value} Δ{delta:+.1f}W")
+        logger.info(f"Done: {action} {fullname} via [{result.get('engine')}] → {verify_result.value} Δ{delta:+.1f}W")
         return result
 
     def broadcast_event(self, event_name: str, data: dict):

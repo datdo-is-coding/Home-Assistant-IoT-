@@ -128,6 +128,7 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
     <div class="badges">
       <div class="badge" id="bd-gw"><span class="dot dg"></span>Gateway: Online</div>
       <div class="badge" id="bd-mqtt"><span class="dot dg"></span>MQTT</div>
+      <div class="badge" id="bd-ai"><span class="dot dg"></span>AI: Hybrid Ready</div>
       <div class="badge" id="bd-nodes"><span class="dot dg"></span>Nodes: –</div>
       <div class="badge" id="bd-pend"><span class="dot dg"></span>Pending: 0</div>
     </div>
@@ -147,7 +148,7 @@ input:disabled+.slider{opacity:.35;cursor:not-allowed}
       <div class="step" id="s1"><div class="sn">1</div><div class="sm">WakeNet</div><div class="ss">"Hi ESP"</div></div>
       <div class="step" id="s2"><div class="sn">2</div><div class="sm">PCM Stream</div><div class="ss">Mic 16kHz → WS</div></div>
       <div class="step" id="s3"><div class="sn">3</div><div class="sm">Sherpa ASR</div><div class="ss">Speech→Text</div></div>
-      <div class="step" id="s4"><div class="sn">4</div><div class="sm">Qwen LLM</div><div class="ss">Intent + Registry</div></div>
+      <div class="step" id="s4"><div class="sn">4</div><div class="sm">AI Engine</div><div class="ss" id="s4-sub">Gemini / Qwen 3B</div></div>
       <div class="step" id="s5"><div class="sn">5</div><div class="sm">TTS Playback</div><div class="ss">EdgeTTS → Loa</div></div>
     </div>
     <div class="meter">
@@ -342,7 +343,11 @@ function connectSSE(){
   es.addEventListener('command_result',e=>{
     const d=JSON.parse(e.data);
     if(d.voice_reply) $('reply').textContent=`"${d.voice_reply}"`;
-    if(d.fullname) addLog(`🤖 ${d.fullname}: ${d.action} → ${d.verify}`);
+    if(d.engine) {
+      $('bd-ai').innerHTML=`<span class="dot dg"></span>AI: ${d.engine}`;
+      const s4sub=$('s4-sub'); if(s4sub) s4sub.textContent=d.engine;
+    }
+    if(d.fullname) addLog(`🤖 [${d.engine||'AI'}] ${d.fullname}: ${d.action} → ${d.verify}`);
     loadAll();
   });
 

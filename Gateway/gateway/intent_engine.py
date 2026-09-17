@@ -38,6 +38,7 @@ class IntentEngine:
         self.url = config.LLAMA_URL
         self.registry = registry  # set later via set_registry() if not available at init
         self._base_prompt = config.SYSTEM_PROMPT
+        self.active_engine = "local"
 
     def set_registry(self, registry):
         self.registry = registry
@@ -67,7 +68,77 @@ class IntentEngine:
             return None
 
     async def extract(self, user_text: str) -> Optional[dict]:
+        """
+        Trích xuất ý định khẩu lệnh bằng kiến trúc Hybrid:
+        1. Thử gửi lên Gemini Cloud nếu có API key và mạng Internet (phản hồi siêu tốc 0.3s).
+        2. Nếu mất mạng, lỗi hoặc timeout -> Tự động chuyển mượt mà về Qwen2.5-3B chạy nội bộ trên Pi 4.
+        """
+        mode = getattr(config, "LLM_MODE", "hybrid").lower()
+        api_key = getattr(config, "GEMINI_API_KEY", "").strip()
+
+        # ── 1. Cloud Gemini Flash ──
+        if mode in ("hybrid", "cloud") and api_key:
+            res = await self._extract_gemini(user_text, api_key)
+            if res:
+                self.active_engine = f"Gemini ({config.GEMINI_MODEL})"
+                return res
+            if mode == "cloud":
+                logger.error("Cloud-only mode: Gemini failed and local fallback is disabled")
+                return None
+            logger.info("⚡ Cloud Gemini failed/timed out, seamlessly falling back to Local Qwen 3B...")
+
+        # ── 2. Local Qwen 3B Offline Fallback ──
+        self.active_engine = "Qwen2.5-3B (Local Offline)"
+        return await self._extract_local(user_text)
+
+    async def _extract_gemini(self, user_text: str, api_key: str) -> Optional[dict]:
+        """Gửi yêu cầu tới Google Gemini Flash API qua REST API siêu nhẹ."""
         system_prompt = self._build_system_prompt()
+        url = f"{config.GEMINI_URL}?key={api_key}"
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "contents": [
+                {"parts": [{"text": user_text}]}
+            ],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 120,
+                "responseMimeType": "application/json"
+            }
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json=payload, timeout=config.GEMINI_TIMEOUT)
+                resp.raise_for_status()
+                data = resp.json()
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    return None
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if not parts:
+                    return None
+                content = parts[0].get("text", "").strip()
+                logger.info(f"⚡ [Gemini Flash] raw: {content}")
+                result = self._parse_json(content)
+                if result:
+                    result = self._sanitize(result)
+                    if result and self.validate_intent(result):
+                        logger.info(f"⚡ [Gemini Flash] Intent OK: {json.dumps(result, ensure_ascii=False)}")
+                        return result
+        except httpx.TimeoutException:
+            logger.warning(f"Gemini API timeout after {config.GEMINI_TIMEOUT}s")
+        except Exception as e:
+            logger.warning(f"Gemini API error: {e}")
+        return None
+
+    async def _extract_local(self, user_text: str) -> Optional[dict]:
+        """Xử lý cục bộ trên Pi 4 bằng Qwen2.5-3B-Instruct qua llama-server."""
+        system_prompt = (
+            self._build_system_prompt()
+            + "\n\nBẮT BUỘC: Chỉ xuất DUY NHẤT một chuỗi JSON hợp lệ, KHÔNG viết bất kỳ lời dẫn giải nào."
+        )
         grammar = self._build_grammar()
 
         payload = {
@@ -89,10 +160,10 @@ class IntentEngine:
                 data = resp.json()
                 choices = data.get("choices", [])
                 if not choices:
-                    logger.warning("No choices from LLM")
+                    logger.warning("No choices from local LLM")
                     return None
                 content = choices[0].get("message", {}).get("content", "").strip()
-                logger.info(f"LLM raw: {content[:300]}")
+                logger.info(f"🏠 [Local Qwen 3B] raw: {content[:300]}")
                 result = self._parse_json(content)
                 if not result:
                     logger.warning(f"Parse failed: {content[:200]}")
@@ -100,19 +171,18 @@ class IntentEngine:
                 # post-validate + sanitize
                 result = self._sanitize(result)
                 if result and self.validate_intent(result):
-                    logger.info(f"Intent OK: {json.dumps(result, ensure_ascii=False)}")
+                    logger.info(f"🏠 [Local Qwen 3B] Intent OK: {json.dumps(result, ensure_ascii=False)}")
                     return result
                 # hallucinated → try correction once
                 if result:
                     logger.warning(f"Intent failed validation (hallucinated?), retrying without grammar: {result}")
-                    # retry without grammar, with stricter prompt
                     return await self._retry(user_text, system_prompt)
                 return None
         except httpx.TimeoutException:
-            logger.error("LLM timeout")
+            logger.error(f"Local Qwen 3B timeout after {config.LLAMA_TIMEOUT}s")
             return None
         except Exception as e:
-            logger.error(f"Intent error: {e}", exc_info=True)
+            logger.error(f"Local Qwen 3B error: {e}", exc_info=True)
             return None
 
     async def _retry(self, user_text: str, system_prompt: str) -> Optional[dict]:

@@ -2,6 +2,26 @@
 DTV Smart Home Gateway — Centralized Configuration
 """
 
+import os
+from pathlib import Path
+
+# Tự động nạp cấu hình từ file .env nếu có (ở Gateway/.env hoặc /home/pi4/.env)
+for env_candidate in [
+    Path(__file__).resolve().parent.parent / ".env",
+    Path("/home/pi4/.env"),
+    Path(".env")
+]:
+    if env_candidate.exists():
+        try:
+            with open(env_candidate, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        except Exception:
+            pass
+
 # ─── MQTT ───────────────────────────────────────────
 MQTT_BROKER = "127.0.0.1"
 MQTT_PORT = 1883
@@ -21,14 +41,24 @@ TOPIC_STATUS = "smarthome/status/{node_id}"        # legacy + ack mới
 TOPIC_ALERT = "smarthome/alert"
 TOPIC_VOICE_INTENT = "smarthome/voice/intent"
 
-# ─── LLM (llama-server) ────────────────────────────
+# ─── LLM Orchestration & Hybrid Engine ────────────────
+# Chế độ: "hybrid" (Ưu tiên Gemini Cloud siêu nhanh 0.3s, tự động fallback về Qwen 3B nội bộ khi mất mạng)
+#         "local"  (Luôn dùng Qwen 3B nội bộ trên Pi 4)
+#         "cloud"  (Luôn dùng Cloud Gemini)
+LLM_MODE = os.environ.get("LLM_MODE", "hybrid")
+
+# Cloud LLM: Google Gemini 1.5 Flash (Miễn phí, phản hồi 0.3s, ngữ cảnh 1M tokens)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+GEMINI_TIMEOUT = 3.5   # Giây tối đa chờ Cloud trước khi tự động chuyển sang Qwen 3B
+
+# Local LLM: llama-server trên Pi 4 (Qwen2.5-3B-Instruct)
 LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
-LLAMA_TIMEOUT = 30.0
-LLM_MAX_TOKENS = 80
+LLAMA_TIMEOUT = 65.0   # Tăng lên 65s để model 3B trên Pi 4 có đủ thời gian hoàn thành khi offline
+LLM_MAX_TOKENS = 60
 LLM_TEMPERATURE = 0.0
-LLM_CONTEXT_SIZE = 512
-# GBNF grammar: ép LLM CHỈ được sinh JSON đúng schema + đúng enum thiết bị/phòng
-# có trong registry. Đây là lớp chống ảo giác mạnh nhất (không thể bịa tên thiết bị).
+LLM_CONTEXT_SIZE = 1024
 LLM_GRAMMAR_ENABLED = True
 LLM_PROMPT_CACHE = True
 
