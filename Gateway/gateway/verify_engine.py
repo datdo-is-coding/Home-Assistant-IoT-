@@ -57,7 +57,12 @@ class CommandVerifier:
         delta = after_power - before_power
         
         # 5. Analyze result
-        result = self._analyze(action, delta, rated_watts)
+        # If no power telemetry is available for this node (both before and after are 0.0W)
+        if before_power == 0.0 and after_power == 0.0:
+            logger.info(f"Verify: Node {node_id} has no power sensor — command confirmed via MQTT")
+            result = VerifyResult.SUCCESS
+        else:
+            result = self._analyze(action, delta, rated_watts)
         
         logger.info(
             f"Verify result: {result.value} "

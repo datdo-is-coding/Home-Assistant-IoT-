@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 
 static const char *TAG = "AUDIO_FEEDBACK";
@@ -17,12 +18,29 @@ static const char *TAG = "AUDIO_FEEDBACK";
 extern void speaker_enable(bool enable);
 
 static i2s_chan_handle_t spk_tx_handle = NULL;
+static SemaphoreHandle_t spk_hw_mutex = NULL;
 
 esp_err_t audio_feedback_init(i2s_chan_handle_t spk_handle)
 {
     spk_tx_handle = spk_handle;
+    if (!spk_hw_mutex) {
+        spk_hw_mutex = xSemaphoreCreateMutex();
+    }
     ESP_LOGI(TAG, "Audio Feedback Synthesizer initialized");
     return ESP_OK;
+}
+
+bool audio_feedback_lock(TickType_t timeout)
+{
+    if (!spk_hw_mutex) return true;
+    return (xSemaphoreTake(spk_hw_mutex, timeout) == pdTRUE);
+}
+
+void audio_feedback_unlock(void)
+{
+    if (spk_hw_mutex) {
+        xSemaphoreGive(spk_hw_mutex);
+    }
 }
 
 /**
@@ -66,6 +84,11 @@ void audio_feedback_play(audio_feedback_type_t type)
 {
     if (!spk_tx_handle) {
         ESP_LOGW(TAG, "Cannot play feedback: speaker handle is NULL");
+        return;
+    }
+
+    if (!audio_feedback_lock(pdMS_TO_TICKS(500))) {
+        ESP_LOGW(TAG, "Speaker hardware is busy, skipping feedback tone %d", type);
         return;
     }
 
@@ -114,4 +137,6 @@ void audio_feedback_play(audio_feedback_type_t type)
 
     /* 3. Shut down / mute MAX98357A amplifier into 0.01uA sleep */
     speaker_enable(false);
+
+    audio_feedback_unlock();
 }

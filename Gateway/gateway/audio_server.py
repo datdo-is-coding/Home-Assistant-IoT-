@@ -298,10 +298,9 @@ class AudioServer:
         for i in range(0, total_len, chunk_size):
             chunk = pcm_bytes[i:i + chunk_size]
             await websocket.send(chunk)
-            chunks_sent += 1
-            # Slight throttle to prevent ESP32 buffer overrun
-            # 2048 bytes = 64ms of audio → send at ~2x real-time
-            await asyncio.sleep(0.005)
+            # Throttle to match playback speed: 2048 bytes = 64ms of audio
+            # Sleep 35ms (~1.8x real-time) so ESP32 buffers smoothly without overflow
+            await asyncio.sleep(0.035)
 
         # Send end marker
         await websocket.send(json.dumps({"type": "audio_end"}))

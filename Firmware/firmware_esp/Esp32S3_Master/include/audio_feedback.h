@@ -16,6 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
+#include "freertos/FreeRTOS.h"
 #include "driver/i2s_std.h"
 
 #ifdef __cplusplus
@@ -43,6 +44,16 @@ esp_err_t audio_feedback_init(i2s_chan_handle_t spk_handle);
  * @param type Feedback sound type to play
  */
 void audio_feedback_play(audio_feedback_type_t type);
+
+/**
+ * @brief Acquire speaker hardware lock (mutex) for exclusive access.
+ */
+bool audio_feedback_lock(TickType_t timeout);
+
+/**
+ * @brief Release speaker hardware lock.
+ */
+void audio_feedback_unlock(void);
 
 #ifdef __cplusplus
 }

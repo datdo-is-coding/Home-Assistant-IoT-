@@ -21,7 +21,7 @@ extern "C" {
  */
 #define RELAY_CH1_GPIO    4
 #define RELAY_CH2_GPIO    5
-#define RELAY_ACTIVE_LOW  false   /* Set true if relay module is active-low */
+#define RELAY_ACTIVE_LOW  true    /* Active-LOW: Driven by PC817 Cathode (Pin 2) on GPIO 4 & 5 */
 
 /**
  * @brief Initialize MQTT client and relay GPIOs.

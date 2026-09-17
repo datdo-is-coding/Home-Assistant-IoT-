@@ -31,7 +31,7 @@ static const char *TAG = "WS_AUDIO";
 /* ─── Configuration ──────────────────────────────────────────────────── */
 
 #define MIC_STREAM_BUF_SIZE    (16000)    /* 500ms of 16kHz/16-bit PCM in PSRAM */
-#define SPK_STREAM_BUF_SIZE    (64000)    /* 2 seconds of 16kHz/16-bit PCM in PSRAM */
+#define SPK_STREAM_BUF_SIZE    (192000)   /* 6 seconds of 16kHz/16-bit PCM in Octal PSRAM */
 #define WS_SEND_BUF_SIZE       (640)      /* 20ms frame: 320 samples × 2 bytes */
 #define SPK_PLAY_BUF_SIZE      (1024)     /* Speaker write chunk */
 
@@ -98,7 +98,7 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
     } else {
         ESP_LOGW(TAG, "PSRAM alloc failed, falling back to internal SRAM buffers");
         mic_stream_buf = xStreamBufferCreate(3200, 1);
-        spk_stream_buf = xStreamBufferCreate(16000, 1);
+        spk_stream_buf = xStreamBufferCreate(32000, 1);
     }
 
     if (!mic_stream_buf || !spk_stream_buf) {
@@ -227,18 +227,24 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
         audio_feedback_play(AUDIO_FB_CONNECTED);
         break;
 
-    case WEBSOCKET_EVENT_DISCONNECTED:
-        if (ws_connected) {
-            audio_feedback_play(AUDIO_FB_ERROR);
-        }
+    case WEBSOCKET_EVENT_DISCONNECTED: {
+        bool was_conn = ws_connected;
         ws_connected = false;
-        if (ws_state == WS_STATE_STREAMING || ws_state == WS_STATE_PROCESSING) {
+        if (ws_state != WS_STATE_IDLE) {
+            ESP_LOGW(TAG, "WebSocket disconnected during state %d! Resetting to IDLE.", ws_state);
             ws_state = WS_STATE_IDLE;
-            ESP_LOGW(TAG, "WebSocket disconnected during operation! Resetting state.");
+            spk_audio_complete = true;
+            if (spk_stream_buf) {
+                xStreamBufferReset(spk_stream_buf);
+            }
         }
         set_rgb_led_color(255, 50, 0);   /* Orange = disconnected */
         ESP_LOGW(TAG, "⚠️ WebSocket disconnected from Pi");
+        if (was_conn) {
+            audio_feedback_play(AUDIO_FB_ERROR);
+        }
         break;
+    }
 
     case WEBSOCKET_EVENT_DATA:
         if (data->op_code == 0x01) {
@@ -248,8 +254,9 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
         else if (data->op_code == 0x02) {
             /* Binary frame — PCM audio data for speaker */
             if (ws_state == WS_STATE_PLAYING && spk_stream_buf) {
+                /* Non-blocking write: never stall the WebSocket client task! */
                 xStreamBufferSend(spk_stream_buf, data->data_ptr,
-                                  data->data_len, pdMS_TO_TICKS(50));
+                                  data->data_len, 0);
             }
         }
         break;
@@ -437,6 +444,12 @@ static void audio_stream_task(void *arg)
 
         /* ─── End of Recording ─── */
         if (ws_state == WS_STATE_STREAMING) {
+            ESP_LOGI(TAG, "🛑 Recording ended after %d frames (%.1fs).",
+                     frame_count, frame_count * 0.02f);
+
+            /* Play audio feedback confirming speech recording ended BEFORE notifying Pi */
+            audio_feedback_play(AUDIO_FB_RECORDING_DONE);
+
             /* Send STOP message to Pi */
             const char *stop_msg = "{\"type\":\"stop\"}";
             esp_websocket_client_send_text(ws_client, stop_msg,
@@ -444,13 +457,8 @@ static void audio_stream_task(void *arg)
                                            pdMS_TO_TICKS(2000));
             ws_state = WS_STATE_PROCESSING;
 
-            ESP_LOGI(TAG, "🛑 Recording ended after %d frames (%.1fs). Waiting for Pi response...",
-                     frame_count, frame_count * 0.02f);
-
             set_rgb_led_color(0, 50, 255);  /* Blue = processing on Pi */
-
-            /* Play audio feedback confirming speech recording ended */
-            audio_feedback_play(AUDIO_FB_RECORDING_DONE);
+            ESP_LOGI(TAG, "Waiting for Pi response...");
         }
 
         /* If we broke out due to error, reset to idle */
@@ -489,6 +497,13 @@ static void speaker_playback_task(void *arg)
                                                 pdMS_TO_TICKS(500));
                 if (n == 0 && spk_audio_complete) break;
             }
+            ws_state = WS_STATE_IDLE;
+            set_rgb_led_color(0, 0, 30);
+            continue;
+        }
+
+        if (!audio_feedback_lock(pdMS_TO_TICKS(1000))) {
+            ESP_LOGW(TAG, "Could not acquire speaker lock for playback");
             ws_state = WS_STATE_IDLE;
             set_rgb_led_color(0, 0, 30);
             continue;
@@ -541,6 +556,7 @@ static void speaker_playback_task(void *arg)
 
         /* ── Put MAX98357A into hardware SHUTDOWN (mute) to eliminate idle hum/hiss ── */
         speaker_enable(false);
+        audio_feedback_unlock();
 
         /* Return to idle state */
         ws_state = WS_STATE_IDLE;
