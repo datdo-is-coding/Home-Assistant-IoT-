@@ -11,6 +11,7 @@
  */
 
 #include "mqtt_relay.h"
+#include "audio_feedback.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -22,6 +23,8 @@
 #include "driver/gpio.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 static const char *TAG = "MQTT_RELAY";
 
@@ -29,9 +32,12 @@ static const char *TAG = "MQTT_RELAY";
 
 #define NODE_ID             "esp32s3_master"
 #define TOPIC_REGISTER      "smarthome/register"
-#define TOPIC_COMMAND        "smarthome/command/" NODE_ID
-#define TOPIC_STATUS         "smarthome/status/" NODE_ID
-#define TOPIC_TELEMETRY      "smarthome/telemetry/" NODE_ID
+#define TOPIC_COMMAND       "smarthome/command/" NODE_ID
+#define TOPIC_STATUS        "smarthome/status/" NODE_ID
+#define TOPIC_TELEMETRY     "smarthome/telemetry/" NODE_ID
+#define TOPIC_HELLO         "smarthome/hello"
+#define TOPIC_DISCOVERY     "smarthome/discovery/" NODE_ID
+#define TOPIC_CONFIG        "smarthome/config/" NODE_ID
 
 #define HEARTBEAT_INTERVAL_S  30
 
@@ -174,6 +180,28 @@ void mqtt_relay_publish_status(void)
                            status_json, 0, 1, 0);
 }
 
+bool mqtt_relay_is_provisioned(void)
+{
+    nvs_handle_t h;
+    uint8_t prov = 0;
+    if (nvs_open("dtv_cfg", NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u8(h, "prov", &prov);
+        nvs_close(h);
+    }
+    return (prov == 1);
+}
+
+void mqtt_relay_set_provisioned(bool prov)
+{
+    nvs_handle_t h;
+    if (nvs_open("dtv_cfg", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "prov", prov ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGI(TAG, "💾 NVS provisioned flag updated to: %d", prov ? 1 : 0);
+    }
+}
+
 /* ─── MQTT Event Handler ─────────────────────────────────────────────── */
 
 static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
@@ -186,9 +214,14 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         mqtt_connected = true;
         ESP_LOGI(TAG, "✅ MQTT connected to broker");
 
-        /* Subscribe to command topic */
+        /* Stop any disconnection reminder loop and play gentle 'ting' */
+        audio_feedback_stop_disconnect_loop();
+        audio_feedback_play(AUDIO_FB_TING);
+
+        /* Subscribe to command topic and gateway config topic */
         esp_mqtt_client_subscribe(mqtt_client, TOPIC_COMMAND, 1);
-        ESP_LOGI(TAG, "Subscribed to: %s", TOPIC_COMMAND);
+        esp_mqtt_client_subscribe(mqtt_client, TOPIC_CONFIG, 1);
+        ESP_LOGI(TAG, "Subscribed to: %s & %s", TOPIC_COMMAND, TOPIC_CONFIG);
 
         /* Publish registration */
         publish_registration();
@@ -200,6 +233,9 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
     case MQTT_EVENT_DISCONNECTED:
         mqtt_connected = false;
         ESP_LOGW(TAG, "⚠️ MQTT disconnected from broker");
+
+        /* Start soft periodic reminder tone (every 8s) to gently alert user to check */
+        audio_feedback_start_disconnect_loop(8);
         break;
 
     case MQTT_EVENT_DATA:
@@ -207,6 +243,11 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
             /* Check if this is a command message */
             if (strncmp(event->topic, TOPIC_COMMAND, event->topic_len) == 0) {
                 handle_command(event->data, event->data_len);
+            } else if (strncmp(event->topic, TOPIC_CONFIG, event->topic_len) == 0) {
+                ESP_LOGI(TAG, "📥 Received Gateway provision configuration!");
+                mqtt_relay_set_provisioned(true);
+                audio_feedback_stop_disconnect_loop();
+                audio_feedback_play(AUDIO_FB_TING);
             }
         }
         break;
@@ -299,6 +340,26 @@ static void publish_registration(void)
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
 
+    bool is_prov = mqtt_relay_is_provisioned();
+
+    if (!is_prov) {
+        /* 1. Emit unprovisioned hello beacon so Gateway & App immediately detect this new node */
+        char hello_json[256];
+        snprintf(hello_json, sizeof(hello_json),
+                 "{\"t\":\"hello\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"cfg\":null,\"status\":\"unprovisioned\"}",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        esp_mqtt_client_publish(mqtt_client, TOPIC_HELLO, hello_json, 0, 1, 0);
+
+        char disc_json[384];
+        snprintf(disc_json, sizeof(disc_json),
+                 "{\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"chip\":\"ESP32-S3\",\"name\":\"ESP32-S3 Voice Master\","
+                 "\"channels\":{\"ch1\":\"light\",\"ch2\":\"fan\"},\"status\":\"unprovisioned\"}",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        esp_mqtt_client_publish(mqtt_client, TOPIC_DISCOVERY, disc_json, 0, 1, 0);
+
+        ESP_LOGW(TAG, "📢 Emitted FIRST-RUN UNPROVISIONED beacon to %s and %s", TOPIC_HELLO, TOPIC_DISCOVERY);
+    }
+
     char reg_json[512];
     snprintf(reg_json, sizeof(reg_json),
              "{"
@@ -311,15 +372,17 @@ static void publish_registration(void)
                "\"ch1\":{\"device_type\":\"den\",\"description\":\"Đèn phòng ngủ\",\"gpio\":%d},"
                "\"ch2\":{\"device_type\":\"quat\",\"description\":\"Quạt phòng ngủ\",\"gpio\":%d}"
              "},"
-             "\"capabilities\":[\"voice\",\"relay\",\"speaker\"]"
+             "\"capabilities\":[\"voice\",\"relay\",\"speaker\"],"
+             "\"provisioned\":%s"
              "}",
              NODE_ID,
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-             RELAY_CH1_GPIO, RELAY_CH2_GPIO);
+             RELAY_CH1_GPIO, RELAY_CH2_GPIO,
+             is_prov ? "true" : "false");
 
     esp_mqtt_client_publish(mqtt_client, TOPIC_REGISTER,
                            reg_json, 0, 1, 0);
-    ESP_LOGI(TAG, "📡 Published node registration (phong_ngu: RL1=den, RL2=quat) to %s", TOPIC_REGISTER);
+    ESP_LOGI(TAG, "📡 Published node registration (prov=%s) to %s", is_prov ? "yes" : "no", TOPIC_REGISTER);
 }
 
 /* ─── Heartbeat Task ─────────────────────────────────────────────────── */

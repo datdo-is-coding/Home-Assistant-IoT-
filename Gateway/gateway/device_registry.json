@@ -1,0 +1,42 @@
+{
+  "nodes": {
+    "esp32s3_master": {
+      "mac": "30:ED:A0:BD:69:D4",
+      "ip": "192.168.11.181",
+      "room": "phong_ngu",
+      "aliases": [
+        "phong_ngu",
+        "phong_ngu_chinh"
+      ],
+      "description": "ESP32-S3 Voice Master (Phòng Ngủ)",
+      "channels": {
+        "ch1": {
+          "device_type": "den",
+          "description": "Đèn phòng ngủ",
+          "gpio": 4
+        },
+        "ch2": {
+          "device_type": "quat",
+          "description": "Quạt phòng ngủ",
+          "gpio": 5
+        }
+      },
+      "sensors": {
+        "pzem": true
+      },
+      "cfg_version": 1,
+      "relay_state": [
+        0,
+        0
+      ],
+      "status": "online",
+      "last_seen": "2026-09-17T22:23:42.816260+07:00"
+    }
+  },
+  "pending": {},
+  "rooms": {
+    "phong_ngu": [
+      "esp32s3_master"
+    ]
+  }
+}

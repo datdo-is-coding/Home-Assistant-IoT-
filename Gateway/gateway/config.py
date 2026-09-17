@@ -3,6 +3,7 @@ DTV Smart Home Gateway — Centralized Configuration
 """
 
 import os
+import json
 from pathlib import Path
 
 # Tự động nạp cấu hình từ file .env nếu có (ở Gateway/.env hoặc /home/pi4/.env)
@@ -69,6 +70,12 @@ if os.path.exists(_cfg_file):
                 TTS_RATE = str(_loaded["TTS_RATE"]).strip()
             if "TTS_PITCH" in _loaded:
                 TTS_PITCH = str(_loaded["TTS_PITCH"]).strip()
+            if "TTS_PROVIDER" in _loaded:
+                TTS_PROVIDER = str(_loaded["TTS_PROVIDER"]).strip()
+            if "VIENEU_MODE" in _loaded:
+                VIENEU_MODE = str(_loaded["VIENEU_MODE"]).strip()
+            if "VIENEU_VOICE" in _loaded:
+                VIENEU_VOICE = str(_loaded["VIENEU_VOICE"]).strip()
     except Exception:
         pass
 
@@ -91,11 +98,31 @@ ASR_MODEL_DIR = "/home/pi4/smarthome/models"
 ASR_NUM_THREADS = 2
 ASR_SAMPLE_RATE = 16000
 
-# ─── TTS (EdgeTTS: Nữ tính, ngọt ngào, ấm áp, luyến láy) ─────────────────
+# ─── TTS Architecture (Dual Engine: EdgeTTS Cloud vs VieNeu-TTS Local) ──
+# TTS_PROVIDER: "edgetts" (Mặc định giọng Hoài My Neural ngọt ngào, dịu dàng) hoặc "vieneu" (Local 0 token)
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edgetts")
+
+# EdgeTTS Settings (Ngọt ngào, êm dịu, chuẩn phong cách trợ lý gia đình)
 TTS_VOICE = os.environ.get("TTS_VOICE", "vi-VN-HoaiMyNeural")
 TTS_FALLBACK_VOICE = "vi-VN-NamMinhNeural"
 TTS_RATE = os.environ.get("TTS_RATE", "-4%")     # Nhịp độ thong thả hơn 4% để giọng ấm, dịu dàng, thủ thỉ
 TTS_PITCH = os.environ.get("TTS_PITCH", "+2Hz")   # Nâng cao độ nhẹ 2Hz để giọng nữ trong trẻo, ngọt ngào
+
+# VieNeu-TTS Settings (Local on-device CPU)
+VIENEU_MODE = os.environ.get("VIENEU_MODE", "v3nano")
+VIENEU_VOICE = os.environ.get("VIENEU_VOICE", "Ái Hân")
+
+# ─── OTA Firmware Repository ─────────────────────────
+FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/home/pi4/Home-Assistant-IoT-/Gateway/firmware")
+if not os.path.exists(FIRMWARE_DIR):
+    _loc_fw = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "firmware")
+    os.makedirs(_loc_fw, exist_ok=True)
+    FIRMWARE_DIR = _loc_fw
+
+# ─── Auth & Multi-tenant Security ────────────────────
+AUTH_ENABLED = True
+AUTH_DB = os.environ.get("AUTH_DB", "/home/pi4/smarthome/auth.db")
+
 
 
 # ─── WebSocket Audio Server ────────────────────────

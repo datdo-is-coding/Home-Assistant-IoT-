@@ -52,6 +52,16 @@ bool mqtt_relay_get_state(int channel);
  */
 void mqtt_relay_publish_status(void);
 
+/**
+ * @brief Check if this node has been provisioned into the system.
+ */
+bool mqtt_relay_is_provisioned(void);
+
+/**
+ * @brief Mark this node as provisioned (or unprovisioned) in NVS.
+ */
+void mqtt_relay_set_provisioned(bool prov);
+
 #ifdef __cplusplus
 }
 #endif

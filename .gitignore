@@ -4,6 +4,11 @@ Thumbs.db
 *.lck
 ~*.lck
 *.log
+*.bak
+*.orig
+.history/
+.vscode/
+.idea/
 
 # Python
 __pycache__/
@@ -14,10 +19,23 @@ __pycache__/
 venv/
 *.venv/
 *.egg-info/
+local_config.json
 
-# Databases
+# PlatformIO & Embedded Builds
+.pio/
+build/
+target/
+
+# Mobile (Flutter)
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Databases & Cache
 *.sqlite3
 *.db
+auth.db
+memory.db
 
 # KiCad backup & temporary
 *-save.kicad_pcb

@@ -51,10 +51,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   Map<String, dynamic> _tinyMlData = {};
+  Map<String, dynamic> _nodesData = {};
+  final Set<String> _togglingRelays = {};
 
   Future<void> _fetchMetrics() async {
     final data = await _service.fetchLiveMetrics();
     final tinyMl = await _service.fetchTinyML();
+    final nodesRes = await _service.fetchNodes();
     if (mounted) {
       setState(() {
         _voltage = EnergyService.parseDouble(data['voltage'], 0.0);
@@ -65,6 +68,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         _pf = EnergyService.parseDouble(data['pf'], 1.0);
         _isOnline = data['is_online'] == true || data['voltage'] != null;
         _tinyMlData = tinyMl;
+        _nodesData = (nodesRes['nodes'] as Map<String, dynamic>?) ?? {};
       });
 
       // 🔔 Auto push notification if TinyML detects anomaly or voltage spike
@@ -102,6 +106,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               _header(),
               const SizedBox(height: 14),
               _heroMetric(),
+              const SizedBox(height: 14),
+              _smartSwitchesSection(),
               const SizedBox(height: 14),
               _tinyMlCard(),
               const SizedBox(height: 14),
@@ -566,5 +572,280 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         ),
       ]),
     );
+  }
+
+  // === SMART SWITCHES / RELAYS CONTROL SECTION ===
+  Widget _smartSwitchesSection() {
+    final List<Widget> switchTiles = [];
+
+    _nodesData.forEach((nodeId, nodeVal) {
+      if (nodeVal is! Map<String, dynamic>) return;
+      final room = nodeVal['room']?.toString() ?? 'Phòng';
+      final channels = nodeVal['channels'] as Map<String, dynamic>? ?? {};
+      final relayStates = (nodeVal['relay_state'] as List<dynamic>?) ?? [0, 0];
+
+      int idx = 0;
+      channels.forEach((chKey, chVal) {
+        if (chVal is! Map<String, dynamic>) return;
+        final chDesc = chVal['description']?.toString() ?? chKey.toUpperCase();
+        final devType = chVal['device_type']?.toString().toLowerCase() ?? 'light';
+        final isOn = idx < relayStates.length ? (relayStates[idx] == 1) : false;
+
+        switchTiles.add(_relaySwitchTile(
+          nodeId: nodeId,
+          room: room,
+          chKey: chKey,
+          title: chDesc,
+          deviceType: devType,
+          isOn: isOn,
+        ));
+        idx++;
+      });
+    });
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131B2E).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF00F2FE).withOpacity(0.2), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00F2FE).withOpacity(0.06),
+            blurRadius: 16,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFF00F2FE), Color(0xFF3B82F6)]),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.toggle_on_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "CÔNG TẮC THÔNG MINH (RELAYS)",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    Text(
+                      "Điều khiển tức thì qua MQTT Verifier",
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                ),
+                child: Text(
+                  "${switchTiles.length} Kênh",
+                  style: const TextStyle(
+                    color: Color(0xFF10B981),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (switchTiles.isEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFF090D16).withOpacity(0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00F2FE)),
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    "Đang đồng bộ thiết bị hoặc chưa gán kênh...",
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                  ),
+                ],
+              ),
+            )
+          else
+            Column(
+              children: switchTiles.map((tile) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: tile,
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _relaySwitchTile({
+    required String nodeId,
+    required String room,
+    required String chKey,
+    required String title,
+    required String deviceType,
+    required bool isOn,
+  }) {
+    final key = "$nodeId:$chKey";
+    final isToggling = _togglingRelays.contains(key);
+
+    IconData iconData = Icons.power_settings_new_rounded;
+    if (deviceType.contains("den") || deviceType.contains("light")) {
+      iconData = Icons.lightbulb_rounded;
+    } else if (deviceType.contains("quat") || deviceType.contains("fan")) {
+      iconData = Icons.air_rounded;
+    } else if (deviceType.contains("nong_lanh") || deviceType.contains("heater") || deviceType.contains("water")) {
+      iconData = Icons.water_drop_rounded;
+    }
+
+    final activeColor = isOn ? const Color(0xFF00F2FE) : const Color(0xFF475569);
+    final glowColor = isOn ? const Color(0xFF00F2FE).withOpacity(0.25) : Colors.transparent;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: isOn ? const Color(0xFF111E38) : const Color(0xFF0F172A).withOpacity(0.6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isOn ? const Color(0xFF00F2FE).withOpacity(0.4) : const Color(0xFF1E293B),
+          width: 1.2,
+        ),
+        boxShadow: isOn
+            ? [BoxShadow(color: glowColor, blurRadius: 10, spreadRadius: 1)]
+            : [],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: isOn ? const Color(0xFF00F2FE).withOpacity(0.15) : const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(iconData, color: activeColor, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: isOn ? Colors.white : const Color(0xFFCBD5E1),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "$room · ${chKey.toUpperCase()}",
+                  style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          if (isToggling)
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.2, color: Color(0xFF00F2FE)),
+            )
+          else
+            GestureDetector(
+              onTap: () => _toggleRelayAction(nodeId, chKey, !isOn),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: isOn ? const Color(0xFF00F2FE) : const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: isOn
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFF00F2FE).withOpacity(0.4),
+                            blurRadius: 8,
+                            spreadRadius: 1,
+                          )
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isOn ? Icons.check_circle_rounded : Icons.power_settings_new_rounded,
+                      color: isOn ? const Color(0xFF07090E) : const Color(0xFF94A3B8),
+                      size: 15,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      isOn ? "ON" : "OFF",
+                      style: TextStyle(
+                        color: isOn ? const Color(0xFF07090E) : const Color(0xFF94A3B8),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _toggleRelayAction(String nodeId, String chKey, bool turnOn) async {
+    final key = "$nodeId:$chKey";
+    if (mounted) {
+      setState(() => _togglingRelays.add(key));
+    }
+    final action = turnOn ? "turn_on" : "turn_off";
+    final ok = await _service.toggleRelay(nodeId: nodeId, channel: chKey, action: action);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Không thể điều khiển $chKey trên $nodeId"),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+    await _fetchMetrics();
+    if (mounted) {
+      setState(() => _togglingRelays.remove(key));
+    }
   }
 }

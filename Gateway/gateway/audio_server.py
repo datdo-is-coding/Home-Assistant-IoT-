@@ -415,6 +415,8 @@ class AudioServer:
 
         if not text:
             logger.warning("ASR returned empty transcript")
+            if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
+                await self.gateway.sound.play_sound("wrong_sound", websocket=websocket)
             reply = "Em không nghe rõ. Bạn nói lại được không?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": ""
@@ -426,6 +428,8 @@ class AudioServer:
         from asr_engine import ASREngine
         if confidence < ASREngine.CONFIDENCE_LOW:
             logger.warning(f"ASR confidence too low ({confidence:.2f}): '{text}' — asking user to repeat")
+            if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
+                await self.gateway.sound.play_sound("wrong_sound", websocket=websocket)
             reply = f"Em nghe không rõ lắm. Bạn nói lại lần nữa được không ạ?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": text, "confidence": round(confidence, 2)
@@ -439,6 +443,9 @@ class AudioServer:
             logger.warning(f"ASR confidence medium ({confidence:.2f}): '{text}' — proceeding with caution")
 
         logger.info(f"📝 Recognized voice: '{text}' (confidence={confidence:.2f})")
+        # 🎵 Play listen_success sound cue to acknowledge command reception!
+        if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
+            await self.gateway.sound.play_sound("listen_success", websocket=websocket)
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2)})
         await websocket.send(json.dumps({

@@ -134,6 +134,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _themeSelectorCard(),
           const SizedBox(height: 14),
 
+          // ── SOUNDSCAPES ACOUSTIC EFFECTS ───
+          _soundscapesCard(),
+          const SizedBox(height: 14),
+
           // ── RUST SERVER URL (only config app needs) ───
           _buildCard(
             icon: Icons.dns,
@@ -421,6 +425,121 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _soundscapesCard() {
+    final sounds = [
+      {
+        'id': 'morning_sound',
+        'icon': Icons.wb_sunny_rounded,
+        'title': 'Báo Thức & Buổi Sáng',
+        'desc': 'Phát khi báo thức hoặc chào buổi sáng sớm (34.8s)',
+        'color': const Color(0xFFF59E0B),
+      },
+      {
+        'id': 'bootup_sound',
+        'icon': Icons.power_rounded,
+        'title': 'Khởi Động Hệ Thống',
+        'desc': 'Phát khi Gateway & Node khởi động ổn định (1.9s)',
+        'color': const Color(0xFF10B981),
+      },
+      {
+        'id': 'listen_success',
+        'icon': Icons.mic_none_rounded,
+        'title': 'Nhận Dạng Thành Công',
+        'desc': 'Phát khi ASR nghe rõ khẩu lệnh hợp lệ (1.1s)',
+        'color': const Color(0xFF00F2FE),
+      },
+      {
+        'id': 'new_noti',
+        'icon': Icons.notifications_active_rounded,
+        'title': 'Cảnh Báo & Thông Báo',
+        'desc': 'Phát trước khi Lumi đọc cảnh báo an toàn (2.4s)',
+        'color': const Color(0xFF8B5CF6),
+      },
+      {
+        'id': 'wrong_sound',
+        'icon': Icons.error_outline_rounded,
+        'title': 'Lệnh Chưa Hiểu / Lỗi',
+        'desc': 'Phát khi câu lệnh không rõ hoặc chưa hiểu (1.3s)',
+        'color': const Color(0xFFEF4444),
+      },
+    ];
+
+    return LiquidGlassCard(
+      padding: const EdgeInsets.all(14),
+      borderColor: const Color(0xFF00F2FE).withOpacity(0.3),
+      glowColor: const Color(0xFF00F2FE).withOpacity(0.08),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.music_note_rounded, color: Color(0xFF00F2FE), size: 20),
+              SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text("Âm Thanh Báo Hiệu (Soundscapes)",
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text("Bộ 5 âm thanh hệ thống độc quyền mã hóa PCM",
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Column(
+            children: sounds.map((s) {
+              final color = s['color'] as Color;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF090D16).withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: color.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(s['icon'] as IconData, color: color, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(s['title'] as String,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                          Text(s['desc'] as String,
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 10)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.volume_up_rounded, color: Color(0xFF00F2FE), size: 18),
+                      tooltip: "Phát ra loa ESP32",
+                      onPressed: () async {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Đang phát "${s['title']}" ra loa ESP32...')),
+                        );
+                        final ok = await _service.playSoundOnSpeaker(s['id'] as String);
+                        if (!ok && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Loa ESP32 chưa kết nối WebSocket audio')),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
     );
   }
 }

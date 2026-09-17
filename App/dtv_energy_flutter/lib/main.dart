@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
-import 'screens/analytics_screen.dart';
-import 'screens/alerts_screen.dart';
+import 'screens/provisioning_screen.dart';
 import 'screens/ota_update_screen.dart';
+import 'screens/analytics_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/energy_service.dart';
 import 'services/notification_service.dart';
@@ -11,14 +12,15 @@ import 'widgets/weather_glass_overlay.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await EnergyService().loadSettings();
+  final hasSession = await EnergyService().loadSettings();
   await NotificationService().init();
   await ThemeService().loadTheme();
-  runApp(const DTVEnergyApp());
+  runApp(DTVEnergyApp(hasValidSession: hasSession));
 }
 
 class DTVEnergyApp extends StatelessWidget {
-  const DTVEnergyApp({super.key});
+  final bool hasValidSession;
+  const DTVEnergyApp({super.key, required this.hasValidSession});
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +29,7 @@ class DTVEnergyApp extends StatelessWidget {
       builder: (context, child) {
         final currentTheme = ThemeService().currentTheme;
         return MaterialApp(
-          title: 'DTV Energy Hub - Echo Nightly Edition',
+          title: 'AETHERIA OS — Spatial Smart Home',
           debugShowCheckedModeBanner: false,
           theme: ThemeData(
             brightness: Brightness.dark,
@@ -39,7 +41,7 @@ class DTVEnergyApp extends StatelessWidget {
             ),
             useMaterial3: true,
           ),
-          home: const MainTabNavigator(),
+          home: hasValidSession ? const MainTabNavigator() : const LoginScreen(),
         );
       },
     );
@@ -58,9 +60,9 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
 
   final List<Widget> _screens = const [
     DashboardScreen(),
-    AnalyticsScreen(),
-    AlertsScreen(),
+    ProvisioningScreen(),
     OTAUpdateScreen(),
+    AnalyticsScreen(),
     SettingsScreen(),
   ];
 
@@ -95,9 +97,9 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _navItem(0, Icons.grid_view_rounded, "Tổng Quan", theme),
-            _navItem(1, Icons.show_chart_rounded, "Phân Tích", theme),
-            _navItem(2, Icons.notifications_active_rounded, "Cảnh Báo", theme),
-            _navItem(3, Icons.system_update_rounded, "OTA", theme),
+            _navItem(1, Icons.sensors_rounded, "Gán Thiết Bị", theme),
+            _navItem(2, Icons.system_update_rounded, "OTA", theme),
+            _navItem(3, Icons.show_chart_rounded, "Phân Tích", theme),
             _navItem(4, Icons.settings_rounded, "Cài Đặt", theme),
           ],
         ),
@@ -112,34 +114,33 @@ class _MainTabNavigatorState extends State<MainTabNavigator> {
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: isSelected
             ? BoxDecoration(
                 gradient: LinearGradient(
                   colors: [theme.primary.withOpacity(0.25), theme.secondary.withOpacity(0.25)],
                 ),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: theme.primary.withOpacity(0.6), width: 1),
+                border: Border.all(color: theme.primary.withOpacity(0.5)),
               )
             : null,
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
               size: 20,
-              color: isSelected ? theme.primary : const Color(0xFF64748B),
+              color: isSelected ? theme.primary : Colors.white.withOpacity(0.5),
             ),
-            if (isSelected) ...[
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 11.5,
-                ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
               ),
-            ],
+            ),
           ],
         ),
       ),

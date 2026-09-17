@@ -27,6 +27,8 @@
 #include "esp_http_server.h"
 #include "esp_timer.h"
 #include "esp_ota_ops.h"
+#include "lwip/sockets.h"
+#include "lwip/netdb.h"
 
 /* ─── Audio Streaming & MQTT Relay Modules ─── */
 #include "ws_audio_client.h"
@@ -34,6 +36,7 @@
 #include "audio_feedback.h"
 
 static void add_cors_headers(httpd_req_t *req);
+static esp_err_t api_provision_post_handler(httpd_req_t *req);
 
 
 #ifndef MIN
@@ -477,7 +480,7 @@ static httpd_handle_t start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 16;
     httpd_handle_t server = NULL;
 
     if (httpd_start(&server, &config) == ESP_OK) {
@@ -517,9 +520,69 @@ static httpd_handle_t start_web_server(void)
         httpd_uri_t update_uri = { .uri = "/update", .method = HTTP_POST, .handler = update_post_handler };
         httpd_register_uri_handler(server, &update_uri);
 
-        ESP_LOGI(TAG, "Standalone ESP32-S3 Server & Web OTA Handlers registered on port 80");
+        httpd_uri_t ota_uri = { .uri = "/ota", .method = HTTP_POST, .handler = update_post_handler };
+        httpd_register_uri_handler(server, &ota_uri);
+
+        httpd_uri_t prov_uri = { .uri = "/api/provision", .method = HTTP_POST, .handler = api_provision_post_handler };
+        httpd_register_uri_handler(server, &prov_uri);
+
+        ESP_LOGI(TAG, "Standalone ESP32-S3 Server & Web OTA Handlers registered on port 80 (/update & /ota & /api/provision)");
     }
     return server;
+}
+
+static esp_err_t api_provision_post_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    mqtt_relay_set_provisioned(true);
+    audio_feedback_stop_disconnect_loop();
+    audio_feedback_play(AUDIO_FB_TING);
+
+    const char *resp = "{\"success\":true,\"message\":\"Node provisioned successfully\",\"status\":\"provisioned\"}";
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+}
+
+static void udp_beacon_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "📡 LAN UDP Beacon Broadcast Task started on Port 8888...");
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create UDP socket: errno %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int broadcast = 1;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast));
+
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(8888);
+
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+
+    while (1) {
+        bool is_prov = mqtt_relay_is_provisioned();
+        int interval_s = is_prov ? 30 : 3;
+
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "{\"type\":\"dtv_beacon\",\"event\":\"%s\",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"chip\":\"ESP32-S3\",\"status\":\"%s\"}",
+                 is_prov ? "heartbeat" : "new_device",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                 is_prov ? "provisioned" : "unprovisioned");
+
+        sendto(sock, msg, strlen(msg), 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+        vTaskDelay(pdMS_TO_TICKS(interval_s * 1000));
+    }
+
+    close(sock);
+    vTaskDelete(NULL);
 }
 
 static void esp_now_send_callback(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -540,6 +603,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *dis = (wifi_event_sta_disconnected_t*) event_data;
         ESP_LOGW(TAG, "Wi-Fi disconnected (reason: %d), retrying connection to 'XIAOMI'...", dis->reason);
+        /* Gentle disconnect reminder tone loop (every 8s) */
+        audio_feedback_start_disconnect_loop(8);
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
@@ -547,6 +612,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "🌐 ESP32-S3 CONNECTED TO WIFI 'XIAOMI'!");
         ESP_LOGI(TAG, "📌 GOT IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "=================================================");
+        static bool beacon_task_started = false;
+        if (!beacon_task_started) {
+            beacon_task_started = true;
+            xTaskCreate(udp_beacon_task, "udp_beacon", 3072, NULL, 3, NULL);
+        }
     }
 }
 
@@ -973,6 +1043,11 @@ void app_main(void)
 
     // 7. Initialize WebSocket Audio Client (connects to Pi 4 Gateway)
     ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
+
+    ESP_LOGI(TAG, "=============================================================");
+    ESP_LOGI(TAG, "🚀 ESP32-S3 Master Hub Boot Completed! Playing bootup_sound...");
+    ESP_LOGI(TAG, "=============================================================");
+    audio_feedback_play(AUDIO_FB_BOOTUP);
 
     ESP_LOGI(TAG, "System ready. Say 'Hi ESP' to wake up the system.");
 }

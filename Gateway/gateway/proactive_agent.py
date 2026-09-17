@@ -233,6 +233,17 @@ class ProactiveAgent:
         if not hasattr(audio_server, "speak_proactive"):
             return False
 
+        # 🎵 Acoustic Intro Sound Effects: morning_sound for morning, new_noti for safety alert
+        if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
+            if event_type == "morning_greeting":
+                logger.info("🌅 Playing morning_sound acoustic intro...")
+                await self.gateway.sound.play_sound("morning_sound", target_node=node_id)
+                await asyncio.sleep(0.4)
+            elif event_type in ("safety_alert", "notification"):
+                logger.info("🔔 Playing new_noti chime before safety alert...")
+                await self.gateway.sound.play_sound("new_noti", target_node=node_id)
+                await asyncio.sleep(0.3)
+
         logger.info(f"🗣️ [Proactive Speech] ({event_type}): {text}")
         success = await audio_server.speak_proactive(text, node_id=node_id)
         if success:

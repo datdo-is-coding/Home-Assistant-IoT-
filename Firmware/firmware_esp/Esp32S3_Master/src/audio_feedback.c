@@ -4,8 +4,8 @@
  */
 
 #include "audio_feedback.h"
+#include "esp_sound_assets.h"
 
-#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 #include "freertos/FreeRTOS.h"
@@ -26,7 +26,7 @@ esp_err_t audio_feedback_init(i2s_chan_handle_t spk_handle)
     if (!spk_hw_mutex) {
         spk_hw_mutex = xSemaphoreCreateMutex();
     }
-    ESP_LOGI(TAG, "Audio Feedback Synthesizer initialized");
+    ESP_LOGI(TAG, "Studio Acoustic Soundscapes Audio System initialized");
     return ESP_OK;
 }
 
@@ -44,40 +44,25 @@ void audio_feedback_unlock(void)
 }
 
 /**
- * @brief Synthesize and write a pure sine tone with linear attack/decay envelope.
+ * @brief Play a raw 16kHz 16-bit Mono PCM soundscape asset from flash via DMA SRAM bounce buffer.
  */
-static void play_tone(float freq_hz, int duration_ms, float volume)
+static void play_pcm_asset(const uint8_t *pcm_data, size_t pcm_len)
 {
-    if (!spk_tx_handle || freq_hz <= 0.0f || duration_ms <= 0) return;
+    if (!spk_tx_handle || !pcm_data || pcm_len == 0) return;
 
-    int num_samples = (16000 * duration_ms) / 1000;
-    if (num_samples <= 0) return;
-
-    int16_t *buf = (int16_t *)malloc(num_samples * sizeof(int16_t));
-    if (!buf) {
-        ESP_LOGE(TAG, "Failed to allocate buffer for tone generation");
-        return;
-    }
-
-    float step = 2.0f * 3.1415926535f * freq_hz / 16000.0f;
-    int ramp_len = num_samples / 4;
-    if (ramp_len > 80) ramp_len = 80; /* ~5ms ramp attack / decay */
-
-    for (int i = 0; i < num_samples; i++) {
-        float sample = sinf(step * (float)i) * volume * 32767.0f;
-        if (i < ramp_len) {
-            sample *= ((float)i / (float)ramp_len);
-        } else if (i > num_samples - ramp_len) {
-            sample *= ((float)(num_samples - i) / (float)ramp_len);
+    uint8_t ram_chunk[1024];
+    size_t offset = 0;
+    while (offset < pcm_len) {
+        size_t to_write = (pcm_len - offset > sizeof(ram_chunk)) ? sizeof(ram_chunk) : (pcm_len - offset);
+        memcpy(ram_chunk, &pcm_data[offset], to_write);
+        size_t bytes_written = 0;
+        esp_err_t err = i2s_channel_write(spk_tx_handle, ram_chunk, to_write, &bytes_written, pdMS_TO_TICKS(500));
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "I2S write warning: %s", esp_err_to_name(err));
+            break;
         }
-        buf[i] = (int16_t)sample;
+        offset += bytes_written;
     }
-
-    size_t written = 0;
-    i2s_channel_write(spk_tx_handle, buf, num_samples * sizeof(int16_t),
-                      &written, pdMS_TO_TICKS(duration_ms + 100));
-
-    free(buf);
 }
 
 void audio_feedback_play(audio_feedback_type_t type)
@@ -88,7 +73,7 @@ void audio_feedback_play(audio_feedback_type_t type)
     }
 
     if (!audio_feedback_lock(pdMS_TO_TICKS(500))) {
-        ESP_LOGW(TAG, "Speaker hardware is busy, skipping feedback tone %d", type);
+        ESP_LOGW(TAG, "Speaker hardware is busy, skipping sound type %d", type);
         return;
     }
 
@@ -97,32 +82,24 @@ void audio_feedback_play(audio_feedback_type_t type)
     vTaskDelay(pdMS_TO_TICKS(25)); /* Allow Amp output stage to settle smoothly */
 
     switch (type) {
-    case AUDIO_FB_CONNECTED:
-        /* Upward arpeggio: C5 (523Hz) -> E5 (659Hz) -> G5 (784Hz) */
-        ESP_LOGI(TAG, "🔔 Playing feedback: CONNECTED (Chime)");
-        play_tone(523.25f, 70, 0.40f);
-        play_tone(659.25f, 70, 0.40f);
-        play_tone(783.99f, 150, 0.45f);
+    case AUDIO_FB_BOOTUP:
+        ESP_LOGI(TAG, "🚀 Playing sound: BOOTUP_SOUND (1.92s raw PCM, %d bytes)", (int)bootup_sound_pcm_len);
+        play_pcm_asset(bootup_sound_pcm, bootup_sound_pcm_len);
         break;
 
-    case AUDIO_FB_WAKEUP:
-        /* Prompt "Ding!": A5 (880Hz) -> C6 (1046Hz) */
-        ESP_LOGI(TAG, "🔔 Playing feedback: WAKEUP (Ding!)");
-        play_tone(880.0f, 50, 0.45f);
-        play_tone(1046.5f, 90, 0.50f);
+    case AUDIO_FB_SUCCESS:
+        ESP_LOGI(TAG, "✨ Playing sound: LISTEN_SUCCESS (1.15s raw PCM, %d bytes)", (int)listen_success_pcm_len);
+        play_pcm_asset(listen_success_pcm, listen_success_pcm_len);
         break;
 
-    case AUDIO_FB_RECORDING_DONE:
-        /* Gentle confirmation blip: E5 (659Hz) */
-        ESP_LOGI(TAG, "🔔 Playing feedback: RECORDING_DONE (Tick)");
-        play_tone(659.25f, 60, 0.35f);
+    case AUDIO_FB_NOTI:
+        ESP_LOGI(TAG, "🔔 Playing sound: NEW_NOTI (2.40s raw PCM, %d bytes)", (int)new_noti_pcm_len);
+        play_pcm_asset(new_noti_pcm, new_noti_pcm_len);
         break;
 
-    case AUDIO_FB_ERROR:
-        /* Descending warning tone: 330Hz -> 220Hz */
-        ESP_LOGI(TAG, "⚠️ Playing feedback: ERROR (Warning)");
-        play_tone(329.6f, 100, 0.45f);
-        play_tone(220.0f, 160, 0.45f);
+    case AUDIO_FB_WRONG:
+        ESP_LOGI(TAG, "⚠️ Playing sound: WRONG_SOUND (1.27s raw PCM, %d bytes)", (int)wrong_sound_pcm_len);
+        play_pcm_asset(wrong_sound_pcm, wrong_sound_pcm_len);
         break;
     }
 
@@ -140,3 +117,41 @@ void audio_feedback_play(audio_feedback_type_t type)
 
     audio_feedback_unlock();
 }
+
+/* ─── Disconnect Periodic Reminder Loop (FreeRTOS Timer) ────────────────── */
+#include "freertos/timers.h"
+static TimerHandle_t disconnect_timer = NULL;
+
+static void disconnect_timer_callback(TimerHandle_t xTimer)
+{
+    audio_feedback_play(AUDIO_FB_DISCONNECT_REMIND);
+}
+
+void audio_feedback_start_disconnect_loop(int interval_sec)
+{
+    if (interval_sec < 3) interval_sec = 8;
+    if (!disconnect_timer) {
+        disconnect_timer = xTimerCreate(
+            "disc_remind_tmr",
+            pdMS_TO_TICKS(interval_sec * 1000),
+            pdTRUE,
+            NULL,
+            disconnect_timer_callback
+        );
+    } else {
+        xTimerChangePeriod(disconnect_timer, pdMS_TO_TICKS(interval_sec * 1000), 0);
+    }
+    if (disconnect_timer && !xTimerIsTimerActive(disconnect_timer)) {
+        xTimerStart(disconnect_timer, 0);
+        ESP_LOGI(TAG, "🔔 Started disconnect periodic reminder loop (%d s)", interval_sec);
+    }
+}
+
+void audio_feedback_stop_disconnect_loop(void)
+{
+    if (disconnect_timer && xTimerIsTimerActive(disconnect_timer)) {
+        xTimerStop(disconnect_timer, 0);
+        ESP_LOGI(TAG, "✅ Stopped disconnect periodic reminder loop (Connection restored)");
+    }
+}
+

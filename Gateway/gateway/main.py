@@ -33,6 +33,9 @@ from web_server import WebServer
 from discovery_manager import DiscoveryManager
 from persona_engine import PersonaEngine
 from proactive_agent import ProactiveAgent
+from ota_manager import OTAManager
+from auth_manager import AuthManager
+from sound_manager import SoundManager
 
 try:
     from telemetry_writer import TelemetryWriter
@@ -61,6 +64,9 @@ class SmartHomeGateway:
         self.discovery = DiscoveryManager(self)
         self.persona = PersonaEngine()
         self.proactive = ProactiveAgent(self)
+        self.ota = OTAManager(self)
+        self.auth = AuthManager()
+        self.sound = SoundManager(self)
         self.web_server = WebServer(self)
 
         self.telemetry_writer = None
@@ -99,11 +105,14 @@ class SmartHomeGateway:
         self.mqtt.on_message("smarthome/telemetry/#", self._on_telemetry)
         self.mqtt.on_message("smarthome/tele/#", self._on_telemetry)
         self.mqtt.on_message("smarthome/status/#", self._on_status)
+        self.mqtt.on_message("smarthome/ota/progress/#", self._on_ota_progress)
 
         self._running = True
         asyncio.create_task(self._announce_all_nodes())
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.start()
+        if hasattr(self, "sound") and self.sound:
+            asyncio.create_task(self._play_bootup_sound())
         logger.info("Starting MQTT client...")
         try:
             await self.mqtt.connect()
@@ -111,6 +120,13 @@ class SmartHomeGateway:
             logger.error(f"MQTT connection failed: {e}")
             await asyncio.sleep(5)
             await self.start()
+
+    async def _play_bootup_sound(self):
+        try:
+            await asyncio.sleep(2.5)
+            await self.sound.play_sound(SoundManager.SOUND_BOOTUP)
+        except Exception as e:
+            logger.debug(f"Bootup sound task error: {e}")
 
     # ── Voice pipeline (2 lớp, chống ảo giác + Multi-Turn Dialog) ─────────
     async def process_voice_command(
@@ -143,6 +159,24 @@ class SmartHomeGateway:
             self.broadcast_event("command_result", {
                 "voice_reply": reply, "verify": "cancelled", "follow_up": False
             })
+            return result
+
+        # Xử lý lệnh báo thức / nhạc buổi sáng (Morning Alarm / Wakeup Sound)
+        is_alarm = any(w in user_text.lower() for w in (
+            "báo thức", "đặt báo thức", "đánh thức", "chuông báo thức",
+            "bật nhạc buổi sáng", "nhạc buổi sáng", "morning sound", "âm thanh buổi sáng"
+        ))
+        if is_alarm:
+            self.dialog.clear_session(client_node_id)
+            reply = "Dạ, em phát giai điệu báo thức buổi sáng cho anh ngay đây ạ~ Chúc anh một ngày mới ngập tràn năng lượng nha anh!"
+            result["voice_reply"] = reply
+            result["verify"] = "alarm_played"
+            result["follow_up"] = False
+            self.broadcast_event("command_result", {
+                "voice_reply": reply, "verify": "alarm_played", "follow_up": False
+            })
+            if hasattr(self, "sound") and self.sound:
+                asyncio.create_task(self.sound.play_sound_and_speak(SoundManager.SOUND_MORNING, reply, target_node=client_node_id))
             return result
 
         # ─── BƯỚC 0: Hội thoại người thật / Hát hò / Hỏi thăm (Persona Engine) ───
@@ -191,6 +225,8 @@ class SmartHomeGateway:
             logger.info(f'Engine selected: {result["engine"]}')
 
             if not intent or not self.intent.validate_intent(intent):
+                if hasattr(self, "sound") and self.sound:
+                    asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
                 reply = "Dạ, em nghe chưa hiểu ý anh lắm. Anh nói lại với em nha~"
                 result["voice_reply"] = reply
                 result["follow_up"] = True
@@ -204,6 +240,8 @@ class SmartHomeGateway:
             # ─── BƯỚC 1.5: Kiểm tra nếu intent là unknown (câu nói không rõ hoặc bị từ chối) ───
             cmd = intent.get("command", {})
             if cmd.get("action") == "unknown":
+                if hasattr(self, "sound") and self.sound:
+                    asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
                 reply = intent.get("voice_reply") or "Dạ em nghe chưa rõ khẩu lệnh. Anh muốn em bật tắt thiết bị nào ở phòng nào vậy anh?"
                 reply = clean_voice_text(reply)
                 result["voice_reply"] = reply
@@ -267,6 +305,8 @@ class SmartHomeGateway:
         # Lớp 2: phân giải node_id/channel TỪ REGISTRY THỰC TẾ — không bao giờ bịa
         lookup = self.registry.find_node_by_device(device, location)
         if not lookup:
+            if hasattr(self, "sound") and self.sound:
+                asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
             # Phân biệt: mơ hồ (nhiều node cùng tên) vs không tồn tại
             all_online = self.registry.get_online_nodes()
             if not all_online:
@@ -424,6 +464,17 @@ class SmartHomeGateway:
             else:
                 self.broadcast_event("node_status", payload)
 
+    async def _on_ota_progress(self, topic: str, payload: Any):
+        """Broadcast OTA flashing progress from ESP32 nodes to Web UI."""
+        node_id = topic.split("/")[-1]
+        data = payload if isinstance(payload, dict) else {}
+        self.broadcast_event("ota_progress", {
+            "node_id": node_id,
+            "progress": data.get("progress", 0),
+            "status": data.get("status", "flashing"),
+            "message": data.get("msg", "")
+        })
+
     async def _on_ha_discovery(self, topic: str, payload: Any):
         """Home Assistant discovery config received over MQTT."""
         self.discovery.handle_ha_discovery(topic, payload)
@@ -431,6 +482,22 @@ class SmartHomeGateway:
     async def _on_native_discovery(self, topic: str, payload: Any):
         """Native ESP32 discovery announcement received over MQTT."""
         self.discovery.handle_native_discovery(topic, payload)
+
+    async def _on_ota_progress(self, topic: str, payload: Any):
+        """Handle OTA flashing progress updates from nodes."""
+        node_id = topic.split("/")[-1] if "/" in topic else "unknown"
+        data = payload if isinstance(payload, dict) else {}
+        if isinstance(payload, str):
+            try:
+                data = json.loads(payload)
+            except Exception:
+                data = {"raw": payload}
+        self.broadcast_event("ota_progress", {
+            "node_id": node_id,
+            "progress": data.get("progress", 0),
+            "status": data.get("status", "progress"),
+            "message": data.get("message") or data.get("msg", "")
+        })
 
     async def _announce_all_nodes(self):
         """Broadcast Home Assistant discovery configs for all registered nodes."""

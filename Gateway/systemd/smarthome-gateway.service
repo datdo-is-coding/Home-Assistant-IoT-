@@ -1,7 +1,7 @@
 [Unit]
-Description=DTV Smart Home Gateway
-After=network.target llama-server.service
-Wants=llama-server.service
+Description=AETHERIA OS Smart Home Gateway
+After=network-online.target docker.service llama-server.service
+Wants=network-online.target docker.service llama-server.service
 
 [Service]
 Type=simple
