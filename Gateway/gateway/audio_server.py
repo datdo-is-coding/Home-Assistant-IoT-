@@ -22,7 +22,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional
+from typing import Optional, Tuple
 import websockets
 import numpy as np
 
@@ -37,6 +37,57 @@ import config
 logger = logging.getLogger("audio_server")
 
 
+class StreamArbiter:
+    """Đo lường năng lượng âm thanh (RMS) đa node để định vị phòng người dùng đang đứng."""
+
+    def __init__(self, gateway=None):
+        self.gateway = gateway
+        # node_id -> {"rms_values": [...], "start_time": float}
+        self.active_streams: dict = {}
+
+    def register_start(self, node_id: str):
+        now = time.time()
+        # Dọn các stream cũ hơn 5 giây
+        self.active_streams = {nid: d for nid, d in self.active_streams.items() if (now - d["start_time"]) < 5.0}
+        self.active_streams[node_id] = {"rms_values": [], "start_time": now}
+
+    def add_rms(self, node_id: str, rms: float):
+        if node_id in self.active_streams:
+            self.active_streams[node_id]["rms_values"].append(rms)
+
+    def determine_dominant_room(self, current_node_id: str) -> Tuple[str, Optional[str]]:
+        """
+        Xác định node và phòng chiếm ưu thế về âm lượng (nơi phát ra giọng nói lớn nhất).
+        Returns: (dominant_node_id, dominant_room)
+        """
+        if not self.active_streams:
+            return current_node_id, self._get_room(current_node_id)
+
+        now = time.time()
+        candidates = {}
+        for nid, data in self.active_streams.items():
+            if (now - data["start_time"]) <= 3.0 and data["rms_values"]:
+                top_rms = sorted(data["rms_values"], reverse=True)[:10]
+                avg_top = sum(top_rms) / len(top_rms) if top_rms else 0
+                candidates[nid] = avg_top
+
+        if not candidates or current_node_id not in candidates:
+            return current_node_id, self._get_room(current_node_id)
+
+        dominant_nid = max(candidates, key=candidates.get)
+        dominant_room = self._get_room(dominant_nid)
+        logger.info(f"📍 Spatial Audio Arbiter: {candidates} -> Dominant node '{dominant_nid}' in room '{dominant_room}'")
+        return dominant_nid, dominant_room
+
+    def _get_room(self, node_id: str) -> Optional[str]:
+        if self.gateway and hasattr(self.gateway, "registry") and self.gateway.registry:
+            node = self.gateway.registry.get_all_nodes().get(node_id, {})
+            room = node.get("room")
+            if room and room != "unknown":
+                return room
+        return None
+
+
 class AudioServer:
     """WebSocket server handling ESP32 two-way audio streaming."""
 
@@ -48,6 +99,7 @@ class AudioServer:
         self._running = False
         # node_id -> websocket, cho phép gửi relay command trực tiếp trên socket audio
         self._ws_nodes: dict = {}
+        self.arbiter = StreamArbiter(gateway=self.gateway)
 
     async def start(self):
         """Start the WebSocket server."""
@@ -163,13 +215,15 @@ class AudioServer:
                             recording = True
                             record_start_time = time.monotonic()
                             total_frames = 0
+                            curr_node = client_node_id or "esp32s3_master"
+                            self.arbiter.register_start(curr_node)
 
                             # Setup Opus decoder if needed
                             if codec == "opus" and HAS_OPUS:
                                 decoder = opuslib.Decoder(sample_rate, 1)
 
                             logger.info(
-                                f"🎙️ Voice recording STARTED "
+                                f"🎙️ Voice recording STARTED from {curr_node} "
                                 f"(codec={codec}, sr={sample_rate}Hz)"
                             )
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
@@ -181,11 +235,13 @@ class AudioServer:
                         elif msg_type == "stop":
                             recording = False
                             elapsed = time.monotonic() - record_start_time
+                            curr_node = client_node_id or "esp32s3_master"
+                            dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             logger.info(
                                 f"🛑 Voice recording ENDED — "
                                 f"{total_frames} frames, "
                                 f"{len(pcm_chunks)} chunks, "
-                                f"{elapsed:.2f}s"
+                                f"{elapsed:.2f}s (detected_room={detected_room})"
                             )
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                 self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
@@ -197,7 +253,9 @@ class AudioServer:
                             if pcm_chunks:
                                 full_pcm = np.concatenate(pcm_chunks)
                                 await self._process_audio(
-                                    websocket, full_pcm, sample_rate
+                                    websocket, full_pcm, sample_rate,
+                                    client_node_id=curr_node,
+                                    detected_room=detected_room
                                 )
                             else:
                                 logger.warning("No audio data received")
@@ -237,9 +295,11 @@ class AudioServer:
                         pcm_float = raw_i16.astype(np.float32) / 32768.0
                         pcm_chunks.append(pcm_float)
 
-                        if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
-                            if len(raw_i16) > 0:
-                                rms = int(np.sqrt(np.mean(np.square(raw_i16.astype(np.float32)))))
+                        if len(raw_i16) > 0:
+                            rms = int(np.sqrt(np.mean(np.square(raw_i16.astype(np.float32)))))
+                            curr_node = client_node_id or "esp32s3_master"
+                            self.arbiter.add_rms(curr_node, rms)
+                            if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
                                 self.gateway.broadcast_event("audio_meter", {"rms": rms, "frames": total_frames})
 
                     # ─── Server-side max duration check ───
@@ -255,8 +315,12 @@ class AudioServer:
                         }))
                         if pcm_chunks:
                             full_pcm = np.concatenate(pcm_chunks)
+                            curr_node = client_node_id or "esp32s3_master"
+                            dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             await self._process_audio(
-                                websocket, full_pcm, sample_rate
+                                websocket, full_pcm, sample_rate,
+                                client_node_id=curr_node,
+                                detected_room=detected_room
                             )
                         pcm_chunks.clear()
 
@@ -303,7 +367,12 @@ class AudioServer:
             return False
 
     async def _process_audio(
-        self, websocket, pcm_samples: np.ndarray, sample_rate: int
+        self,
+        websocket,
+        pcm_samples: np.ndarray,
+        sample_rate: int,
+        client_node_id: str = "esp32s3_master",
+        detected_room: Optional[str] = None
     ):
         """
         Full voice pipeline:
@@ -314,7 +383,8 @@ class AudioServer:
         """
         duration_s = len(pcm_samples) / sample_rate
         logger.info(
-            f"📊 Processing speech: {len(pcm_samples)} samples ({duration_s:.2f}s)"
+            f"📊 Processing speech: {len(pcm_samples)} samples ({duration_s:.2f}s) "
+            f"from {client_node_id} (detected_room={detected_room})"
         )
 
         if not self.gateway or not hasattr(self.gateway, "asr"):
@@ -329,7 +399,7 @@ class AudioServer:
             await websocket.send(json.dumps({
                 "type": "transcript", "text": ""
             }))
-            await self._send_voice_reply(websocket, reply)
+            await self._send_voice_reply(websocket, reply, follow_up=False)
             return
 
         logger.info(f"📝 Recognized voice: '{text}'")
@@ -340,19 +410,23 @@ class AudioServer:
         }))
 
         # ─── Step 2-4: Process command through Gateway ───
-        result = await self.gateway.process_voice_command(text)
+        result = await self.gateway.process_voice_command(
+            text, client_node_id=client_node_id, detected_room=detected_room
+        )
+        follow_up = result.get("follow_up", False)
         await websocket.send(json.dumps({
             "type": "command_result",
             "verify": result.get("verify"),
             "voice_reply": result.get("voice_reply"),
+            "follow_up": follow_up,
         }))
 
         # ─── Step 5: Stream TTS audio back to ESP32 speaker ───
         voice_reply = result.get("voice_reply")
         if voice_reply:
-            await self._send_voice_reply(websocket, voice_reply)
+            await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up)
 
-    async def _send_voice_reply(self, websocket, text: str):
+    async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False):
         """Synthesize text to PCM and stream to ESP32 speaker."""
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available")
@@ -364,15 +438,15 @@ class AudioServer:
         )
 
         if pcm_audio:
-            await self._send_pcm_stream(websocket, pcm_audio)
+            await self._send_pcm_stream(websocket, pcm_audio, follow_up=follow_up)
         else:
             # Fallback: try sending MP3 if PCM conversion failed
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")
             mp3_audio = await self.gateway.tts.synthesize(text)
             if mp3_audio:
-                await self._send_audio_stream_mp3(websocket, mp3_audio)
+                await self._send_audio_stream_mp3(websocket, mp3_audio, follow_up=follow_up)
 
-    async def _send_pcm_stream(self, websocket, pcm_bytes: bytes):
+    async def _send_pcm_stream(self, websocket, pcm_bytes: bytes, follow_up: bool = False):
         """
         Stream raw PCM audio data back to ESP32 in chunks.
         Format: 16kHz, 16-bit signed, little-endian, mono.
@@ -384,7 +458,7 @@ class AudioServer:
 
         logger.info(
             f"🔊 Streaming {total_len} bytes PCM to ESP32 speaker "
-            f"({duration_s:.2f}s audio)"
+            f"({duration_s:.2f}s audio, follow_up={follow_up})"
         )
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
@@ -409,14 +483,18 @@ class AudioServer:
             await asyncio.sleep(0.035)
 
         # Send end marker
-        await websocket.send(json.dumps({"type": "audio_end"}))
+        await websocket.send(json.dumps({
+            "type": "audio_end",
+            "follow_up": follow_up,
+            "timeout_ms": 6000 if follow_up else 0
+        }))
         logger.info(
             f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to ESP32"
         )
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
 
-    async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes):
+    async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes, follow_up: bool = False):
         """
         Fallback: Stream MP3 audio data back to ESP32.
         ESP32 would need an MP3 decoder for this path.
@@ -438,5 +516,9 @@ class AudioServer:
             await asyncio.sleep(0.005)
 
         # Send end marker
-        await websocket.send(json.dumps({"type": "audio_end"}))
+        await websocket.send(json.dumps({
+            "type": "audio_end",
+            "follow_up": follow_up,
+            "timeout_ms": 6000 if follow_up else 0
+        }))
         logger.info(f"Streamed {total_len} bytes MP3 to ESP32 (fallback)")

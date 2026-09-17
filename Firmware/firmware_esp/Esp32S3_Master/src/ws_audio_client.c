@@ -47,6 +47,7 @@ static esp_websocket_client_handle_t ws_client = NULL;
 static volatile ws_audio_state_t ws_state = WS_STATE_IDLE;
 static volatile bool ws_connected = false;
 static volatile bool spk_audio_complete = false;
+static volatile bool pending_followup = false;
 
 /* FreeRTOS stream buffers */
 static StreamBufferHandle_t mic_stream_buf = NULL;   /* audio_feed_task → stream_task */
@@ -212,6 +213,11 @@ ws_audio_state_t ws_audio_get_state(void)
     return ws_state;
 }
 
+bool ws_audio_is_followup_pending(void)
+{
+    return pending_followup;
+}
+
 /* ─── WebSocket Event Handler ────────────────────────────────────────── */
 
 static void ws_event_handler(void *arg, esp_event_base_t event_base,
@@ -315,9 +321,15 @@ static void handle_ws_text_message(const char *data, int len)
     else if (strcmp(type_str, "command_result") == 0) {
         const cJSON *verify = cJSON_GetObjectItem(root, "verify");
         const cJSON *reply = cJSON_GetObjectItem(root, "voice_reply");
-        ESP_LOGI(TAG, "🎯 Command result: verify=%s, reply=%s",
+        const cJSON *follow_up_item = cJSON_GetObjectItem(root, "follow_up");
+        if (cJSON_IsBool(follow_up_item)) {
+            pending_followup = cJSON_IsTrue(follow_up_item);
+            ESP_LOGI(TAG, "Follow-up required from command_result: %s", pending_followup ? "YES" : "NO");
+        }
+        ESP_LOGI(TAG, "🎯 Command result: verify=%s, reply=%s, follow_up=%s",
                  cJSON_IsString(verify) ? verify->valuestring : "null",
-                 cJSON_IsString(reply) ? reply->valuestring : "null");
+                 cJSON_IsString(reply) ? reply->valuestring : "null",
+                 pending_followup ? "true" : "false");
     }
     else if (strcmp(type_str, "audio_start") == 0) {
         /* Pi is about to send TTS audio for speaker playback */
@@ -336,8 +348,13 @@ static void handle_ws_text_message(const char *data, int len)
     }
     else if (strcmp(type_str, "audio_end") == 0) {
         ESP_LOGI(TAG, "🔊 TTS audio transmission complete");
+        const cJSON *follow_up_item = cJSON_GetObjectItem(root, "follow_up");
+        if (cJSON_IsBool(follow_up_item)) {
+            pending_followup = cJSON_IsTrue(follow_up_item);
+            ESP_LOGI(TAG, "Follow-up required from audio_end: %s", pending_followup ? "YES" : "NO");
+        }
         spk_audio_complete = true;
-        /* Speaker task will drain remaining buffer and go idle */
+        /* Speaker task will drain remaining buffer and check follow_up */
     }
     else if (strcmp(type_str, "pong") == 0) {
         /* Heartbeat response, ignore */
@@ -432,6 +449,12 @@ static void audio_stream_task(void *arg)
             /* End recording if silence > 1.5 seconds (after speech was detected) */
             if (speech_detected && silence_count >= VAD_SILENCE_FRAMES) {
                 ESP_LOGI(TAG, "VAD: Silence detected for 1.5s — ending recording");
+                break;
+            }
+
+            /* End recording if no speech detected after 5 seconds */
+            if (!speech_detected && frame_count >= 250) {
+                ESP_LOGI(TAG, "VAD: No speech detected for 5s — ending recording");
                 break;
             }
 
@@ -560,7 +583,17 @@ static void speaker_playback_task(void *arg)
 
         /* Return to idle state */
         ws_state = WS_STATE_IDLE;
-        set_rgb_led_color(0, 0, 30);  /* Dim blue = idle */
-        ESP_LOGI(TAG, "🎙️ Ready for next voice command. Say 'Hi ESP'...");
+
+        if (pending_followup) {
+            pending_followup = false;
+            ESP_LOGW(TAG, "🔄 Follow-Up Active: Continuous listening without 'Hi ESP'...");
+            set_rgb_led_color(0, 200, 255);  /* Cyan = active listening */
+            audio_feedback_play(AUDIO_FB_WAKEUP);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            ws_audio_start_stream();
+        } else {
+            set_rgb_led_color(0, 0, 30);  /* Dim blue = idle */
+            ESP_LOGI(TAG, "🎙️ Ready for next voice command. Say 'Hi ESP'...");
+        }
     }
 }

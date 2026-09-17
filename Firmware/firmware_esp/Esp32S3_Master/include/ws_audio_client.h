@@ -60,6 +60,12 @@ bool ws_audio_is_streaming(void);
  */
 ws_audio_state_t ws_audio_get_state(void);
 
+/**
+ * @brief Check if a follow-up conversation turn is currently pending.
+ * @return true if follow-up active
+ */
+bool ws_audio_is_followup_pending(void);
+
 #ifdef __cplusplus
 }
 #endif

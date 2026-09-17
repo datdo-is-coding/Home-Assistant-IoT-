@@ -21,6 +21,7 @@ import config
 from registry_manager import RegistryManager
 from mqtt_handler import MQTTHandler
 from intent_engine import IntentEngine
+from dialog_manager import DialogManager, DialogSession
 from tts_engine import TTSEngine
 from asr_engine import ASREngine
 from audio_server import AudioServer
@@ -44,6 +45,7 @@ class SmartHomeGateway:
         self.intent = IntentEngine(registry=self.registry)
         # đảm bảo intent luôn có registry mới nhất
         self.intent.set_registry(self.registry)
+        self.dialog = DialogManager(registry=self.registry)
         self.tts = TTSEngine()
         self.asr = ASREngine()
         self.audio_server = AudioServer(self)
@@ -89,28 +91,60 @@ class SmartHomeGateway:
             await asyncio.sleep(5)
             await self.start()
 
-    # ── Voice pipeline (2 lớp, chống ảo giác) ──────────────────────────
-    async def process_voice_command(self, user_text: str) -> dict:
+    # ── Voice pipeline (2 lớp, chống ảo giác + Multi-Turn Dialog) ─────────
+    async def process_voice_command(
+        self,
+        user_text: str,
+        client_node_id: str = "default",
+        detected_room: Optional[str] = None
+    ) -> dict:
         result = {
             "user_text": user_text, "intent": None,
             "engine": None,
             "node_id": None, "channel": None, "fullname": None,
             "verify": None, "voice_reply": None, "tts_audio": None,
+            "follow_up": False,
         }
-        logger.info(f'Voice: "{user_text}"')
-        intent = await self.intent.extract(user_text)
-        result["engine"] = getattr(self.intent, "active_engine", "unknown")
-        logger.info(f'Engine selected: {result["engine"]}')
+        logger.info(f'Voice: "{user_text}" [client={client_node_id}, detected_room={detected_room}]')
 
-        if not intent or not self.intent.validate_intent(intent):
-            reply = "Xin lỗi, em không hiểu lệnh. Bạn nói lại được không?"
-            result["voice_reply"] = reply
-            result["tts_audio"] = await self.tts.synthesize(reply)
-            self.broadcast_event("command_result", {
-                "voice_reply": reply, "verify": "parse_error",
-                "engine": result["engine"]
-            })
-            return result
+        # ─── BƯỚC 1: Kiểm tra xem client có đang trong phiên đối thoại dở dang không ───
+        active_session = self.dialog.get_active_session(client_node_id)
+        if active_session:
+            logger.info(f"🔄 Follow-Up detected for {client_node_id} (filling slot: {active_session.missing_slot})")
+            intent = self.dialog.fill_slot(active_session, user_text)
+            self.dialog.clear_session(client_node_id)
+            result["engine"] = f"{getattr(self.intent, 'active_engine', 'Hybrid')} (Follow-Up)"
+        else:
+            intent = await self.intent.extract(user_text)
+            result["engine"] = getattr(self.intent, "active_engine", "unknown")
+            logger.info(f'Engine selected: {result["engine"]}')
+
+            if not intent or not self.intent.validate_intent(intent):
+                reply = "Xin lỗi, em không hiểu lệnh. Bạn nói lại được không?"
+                result["voice_reply"] = reply
+                result["tts_audio"] = await self.tts.synthesize(reply)
+                self.broadcast_event("command_result", {
+                    "voice_reply": reply, "verify": "parse_error",
+                    "engine": result["engine"], "follow_up": False
+                })
+                return result
+
+            # ─── BƯỚC 2: Kiểm tra thiếu slot / mơ hồ cần hỏi lại người dùng ───
+            needs_clarify, clarify_q, missing_slot, intent = self.dialog.inspect_intent(
+                intent, detected_room=detected_room, client_key=client_node_id
+            )
+            if needs_clarify:
+                result["intent"] = intent
+                result["voice_reply"] = clarify_q
+                result["follow_up"] = True
+                result["verify"] = "clarification_needed"
+                result["tts_audio"] = await self.tts.synthesize(clarify_q)
+                self.broadcast_event("command_result", {
+                    "voice_reply": clarify_q, "verify": "clarification_needed",
+                    "engine": result["engine"], "follow_up": True
+                })
+                logger.info(f"❓ Clarification requested: {clarify_q} (Follow-Up ACTIVE)")
+                return result
 
         result["intent"] = intent
         cmd = intent["command"]
@@ -125,17 +159,32 @@ class SmartHomeGateway:
             all_online = self.registry.get_online_nodes()
             if not all_online:
                 reply = "Hiện chưa có thiết bị nào được đăng ký. Vui lòng thêm node mới ở giao diện web."
+                follow_up = False
             elif device and location:
                 reply = f"Em không tìm thấy {device} ở {location}. Vui lòng kiểm tra lại hoặc đăng ký thiết bị ở web."
+                follow_up = False
             elif device and not location:
-                # mơ hồ: có nhiều node cùng device nhưng không nói phòng
+                # mơ hồ: có nhiều node cùng device nhưng không nói phòng -> Hỏi lại và mở mic!
                 reply = f"Bạn muốn điều khiển {device} ở phòng nào ạ? Hiện có {', '.join(self.registry.allowed_rooms())}."
+                follow_up = True
+                self.dialog._sessions[client_node_id] = DialogSession(
+                    node_id=client_node_id, client_id=client_node_id,
+                    pending_intent=intent, missing_slot="location"
+                )
             else:
                 reply = intent.get("voice_reply") or "Bạn muốn điều khiển thiết bị nào và ở phòng nào ạ?"
+                follow_up = True
+                self.dialog._sessions[client_node_id] = DialogSession(
+                    node_id=client_node_id, client_id=client_node_id,
+                    pending_intent=intent, missing_slot="device"
+                )
             result["voice_reply"] = reply
+            result["follow_up"] = follow_up
             result["tts_audio"] = await self.tts.synthesize(reply)
-            self.broadcast_event("command_result", {"voice_reply": reply, "verify": "not_found"})
-            logger.warning(f"Resolver miss: device={device} location={location}")
+            self.broadcast_event("command_result", {
+                "voice_reply": reply, "verify": "not_found", "follow_up": follow_up
+            })
+            logger.warning(f"Resolver miss: device={device} location={location} (follow_up={follow_up})")
             return result
 
         node_id, channel = lookup
