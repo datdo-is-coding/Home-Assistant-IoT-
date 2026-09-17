@@ -55,7 +55,7 @@ GEMINI_TIMEOUT = 3.5   # Giây tối đa chờ Cloud trước khi tự động c
 
 # Local LLM: llama-server trên Pi 4 (Qwen2.5-3B-Instruct)
 LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
-LLAMA_TIMEOUT = 65.0   # Tăng lên 65s để model 3B trên Pi 4 có đủ thời gian hoàn thành khi offline
+LLAMA_TIMEOUT = 90.0   # 90s để model 3B trên Pi 4 hoàn thành ngay cả khi cold prompt eval
 LLM_MAX_TOKENS = 60
 LLM_TEMPERATURE = 0.0
 LLM_CONTEXT_SIZE = 1024
