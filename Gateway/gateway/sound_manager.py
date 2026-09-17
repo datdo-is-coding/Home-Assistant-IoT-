@@ -195,7 +195,7 @@ class SoundManager:
 
         try:
             logger.info(f"🔊 Playing sound '{sound_name}' ({len(pcm)} bytes PCM) to speaker...")
-            await audio_server._send_pcm_stream(target_ws, pcm, follow_up=False)
+            asyncio.create_task(audio_server._send_pcm_stream(target_ws, pcm, follow_up=False))
             return True
         except Exception as e:
             logger.error(f"Error streaming sound '{sound_name}': {e}")

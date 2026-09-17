@@ -163,7 +163,7 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
 
   Widget _buildPendingCard(String mac, Map<String, dynamic> node) {
     return Container(
-      margin: const EdgeInsets.bottom(16),
+      margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF0E131F),

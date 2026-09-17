@@ -7,7 +7,6 @@ plugins {
 android {
     namespace = "com.example.dtv_energy_flutter"
     compileSdk = 36
-    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true

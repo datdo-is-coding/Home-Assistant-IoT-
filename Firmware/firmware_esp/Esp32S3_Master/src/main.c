@@ -612,6 +612,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "🌐 ESP32-S3 CONNECTED TO WIFI 'XIAOMI'!");
         ESP_LOGI(TAG, "📌 GOT IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "=================================================");
+
+        /* Connect WebSocket audio client to Gateway now that network route is active */
+        ws_audio_client_reconnect();
+
         static bool beacon_task_started = false;
         if (!beacon_task_started) {
             beacon_task_started = true;

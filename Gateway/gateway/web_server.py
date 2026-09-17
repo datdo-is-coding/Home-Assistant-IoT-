@@ -1978,6 +1978,33 @@ class WebServer:
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
+            # ── API: Download Mobile Android APK ──
+            if method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"):
+                apk_paths = [
+                    "/home/pi4/smarthome/apk/app-release.apk",
+                    "/home/pi4/apk/app-release.apk",
+                    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "apk", "app-release.apk"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "apk", "app-release.apk"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "app-release.apk"),
+                    "/home/tuan/Home-Assistant-IoT-/apk/app-release.apk",
+                ]
+                apk_path = next((p for p in apk_paths if os.path.exists(p)), None)
+                if apk_path:
+                    fsize = os.path.getsize(apk_path)
+                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.android.package-archive\r\n"
+                                  f"Content-Length: {fsize}\r\n"
+                                  f"Content-Disposition: attachment; filename=\"aetheria_home_assistant.apk\"\r\n"
+                                  f"Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n").encode())
+                    if method == "GET":
+                        with open(apk_path, "rb") as af:
+                            while chunk := af.read(65536):
+                                writer.write(chunk)
+                                await writer.drain()
+                    writer.close(); return
+                else:
+                    writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                    await writer.drain(); writer.close(); return
+
             # 404 Fallthrough
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
             await writer.drain(); writer.close()

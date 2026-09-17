@@ -66,6 +66,11 @@ ws_audio_state_t ws_audio_get_state(void);
  */
 bool ws_audio_is_followup_pending(void);
 
+/**
+ * @brief Force reconnect WebSocket client (called upon Wi-Fi IP acquisition).
+ */
+void ws_audio_client_reconnect(void);
+
 #ifdef __cplusplus
 }
 #endif

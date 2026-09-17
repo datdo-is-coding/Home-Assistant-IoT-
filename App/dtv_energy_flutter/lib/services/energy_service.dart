@@ -343,10 +343,12 @@ class EnergyService {
     }
   }
 
-  /// Upload a firmware file directly from device storage to Gateway.
+  /// Upload a firmware file directly from device storage to Gateway or direct node OTA.
   Future<bool> uploadOtaFirmware({
     required PlatformFile file,
     required Function(double progress) onProgress,
+    String? targetIp,
+    bool isS3Master = true,
   }) async {
     try {
       List<int>? bytes = file.bytes;
@@ -356,7 +358,10 @@ class EnergyService {
       if (bytes == null || bytes.isEmpty) return false;
 
       onProgress(0.2);
-      final req = http.Request('POST', Uri.parse('$_serverUrl/api/ota/upload'));
+      final url = (targetIp != null && targetIp.isNotEmpty)
+          ? 'http://$targetIp/update'
+          : '$_serverUrl/api/ota/upload';
+      final req = http.Request('POST', Uri.parse(url));
       req.headers.addAll(authHeaders);
       req.headers['X-Filename'] = file.name;
       req.headers['Content-Type'] = 'application/octet-stream';
@@ -430,5 +435,115 @@ class EnergyService {
       return double.tryParse(cleaned) ?? defaultVal;
     }
     return defaultVal;
+  }
+
+  static int parseInt(dynamic val, [int defaultVal = 0]) {
+    if (val == null) return defaultVal;
+    if (val is num) return val.toInt();
+    if (val is String) {
+      final cleaned = val.replaceAll(RegExp(r'[^0-9-]'), '');
+      return int.tryParse(cleaned) ?? defaultVal;
+    }
+    return defaultVal;
+  }
+
+  /// Test connectivity to the Gateway server.
+  Future<bool> testServerConnection() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/status'),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Fetch active alerts / anomalies.
+  Future<List<dynamic>> fetchAlerts() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/alerts'),
+        headers: authHeaders,
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return (data['alerts'] as List<dynamic>?) ?? [];
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  /// Fetch weather data from Gateway.
+  Future<Map<String, dynamic>> fetchWeather() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/weather'),
+        headers: authHeaders,
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) return jsonDecode(res.body);
+    } catch (_) {}
+    return {'temp': 28.5, 'humidity': 65, 'condition': 'Clear'};
+  }
+
+  /// Fetch system config.
+  Future<Map<String, dynamic>> fetchConfig() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/config'),
+        headers: authHeaders,
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) return jsonDecode(res.body);
+    } catch (_) {}
+    return {};
+  }
+
+  /// Update system config.
+  Future<bool> updateConfig({
+    Map<String, dynamic>? config,
+    String? espS3Ip,
+    String? espWroomIp,
+  }) async {
+    try {
+      final payload = config != null ? Map<String, dynamic>.from(config) : <String, dynamic>{};
+      if (espS3Ip != null) payload['esp_s3_ip'] = espS3Ip;
+      if (espWroomIp != null) payload['esp_wroom_ip'] = espWroomIp;
+      final res = await http.post(
+        Uri.parse('$_serverUrl/api/config'),
+        headers: authHeaders,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Fetch app version info.
+  Future<Map<String, dynamic>> fetchAppVersion() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/version'),
+        headers: authHeaders,
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) return jsonDecode(res.body);
+    } catch (_) {}
+    return {'version': '1.0.10', 'build': 10};
+  }
+
+  /// Fetch analytics data list.
+  Future<List<dynamic>> fetchAnalytics() async {
+    try {
+      final res = await http.get(
+        Uri.parse('$_serverUrl/api/analytics'),
+        headers: authHeaders,
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data is List) return data;
+        if (data is Map && data['analytics'] is List) return data['analytics'] as List<dynamic>;
+      }
+    } catch (_) {}
+    return [];
   }
 }

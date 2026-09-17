@@ -560,14 +560,20 @@ class AudioServer:
             "size": total_len,
         }))
 
-        # Send binary PCM chunks
+        # Send binary PCM chunks with real-time playback pacing
         chunks_sent = 0
+        bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH  # 32,000 bytes/sec
         for i in range(0, total_len, chunk_size):
             chunk = pcm_bytes[i:i + chunk_size]
             await websocket.send(chunk)
-            # Throttle to match playback speed: 2048 bytes = 64ms of audio
-            # Sleep 35ms (~1.8x real-time) so ESP32 buffers smoothly without overflow
-            await asyncio.sleep(0.035)
+            chunks_sent += 1
+            # Pre-buffer first 3 chunks (~192ms) quickly for instant start,
+            # then pace at 95% real-time playback speed to prevent buffer overflow/sample drop!
+            if chunks_sent <= 3:
+                await asyncio.sleep(0.010)
+            else:
+                chunk_duration = len(chunk) / bytes_per_sec
+                await asyncio.sleep(chunk_duration * 0.95)
 
         # Send end marker
         await websocket.send(json.dumps({

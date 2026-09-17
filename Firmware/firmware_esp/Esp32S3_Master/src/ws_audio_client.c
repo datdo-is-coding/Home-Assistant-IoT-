@@ -31,7 +31,7 @@ static const char *TAG = "WS_AUDIO";
 /* ─── Configuration ──────────────────────────────────────────────────── */
 
 #define MIC_STREAM_BUF_SIZE    (16000)    /* 500ms of 16kHz/16-bit PCM in PSRAM */
-#define SPK_STREAM_BUF_SIZE    (192000)   /* 6 seconds of 16kHz/16-bit PCM in Octal PSRAM */
+#define SPK_STREAM_BUF_SIZE    (512000)   /* 16 seconds of 16kHz/16-bit PCM in Octal PSRAM */
 #define WS_SEND_BUF_SIZE       (640)      /* 20ms frame: 320 samples × 2 bytes */
 #define SPK_PLAY_BUF_SIZE      (1024)     /* Speaker write chunk */
 
@@ -92,8 +92,8 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
     }
 
     if (mic_buf_storage && spk_buf_storage) {
-        mic_stream_buf = xStreamBufferCreateStatic(MIC_STREAM_BUF_SIZE, 1, mic_buf_storage, &mic_buf_struct);
-        spk_stream_buf = xStreamBufferCreateStatic(SPK_STREAM_BUF_SIZE, 1, spk_buf_storage, &spk_buf_struct);
+        mic_stream_buf = xStreamBufferCreateStatic(MIC_STREAM_BUF_SIZE, 2, mic_buf_storage, &mic_buf_struct);
+        spk_stream_buf = xStreamBufferCreateStatic(SPK_STREAM_BUF_SIZE, 2, spk_buf_storage, &spk_buf_struct);
         ESP_LOGI(TAG, "Stream buffers allocated in Octal PSRAM (mic=%d KB, spk=%d KB)",
                  MIC_STREAM_BUF_SIZE / 1024, SPK_STREAM_BUF_SIZE / 1024);
     } else {
@@ -259,10 +259,13 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
         }
         else if (data->op_code == 0x02) {
             /* Binary frame — PCM audio data for speaker */
-            if (ws_state == WS_STATE_PLAYING && spk_stream_buf) {
-                /* Non-blocking write: never stall the WebSocket client task! */
-                xStreamBufferSend(spk_stream_buf, data->data_ptr,
-                                  data->data_len, 0);
+            if (ws_state == WS_STATE_PLAYING && spk_stream_buf && data->data_len > 0) {
+                /* Strictly enforce 16-bit 2-byte sample alignment so audio never shifts phase / hisses */
+                size_t aligned_len = data->data_len & ~1;
+                if (aligned_len > 0) {
+                    xStreamBufferSend(spk_stream_buf, data->data_ptr,
+                                      aligned_len, pdMS_TO_TICKS(50));
+                }
             }
         }
         break;
@@ -546,14 +549,17 @@ static void speaker_playback_task(void *arg)
                                                     pdMS_TO_TICKS(200));
             if (received > 0) {
                 empty_wait_count = 0;
-                size_t bytes_written = 0;
-                esp_err_t err = i2s_channel_write(spk_i2s_handle, play_buf,
-                                                   received, &bytes_written,
-                                                   pdMS_TO_TICKS(1000));
-                if (err != ESP_OK) {
-                    ESP_LOGW(TAG, "I2S speaker write error: %s", esp_err_to_name(err));
+                size_t aligned_to_write = received & ~1;
+                if (aligned_to_write > 0) {
+                    size_t bytes_written = 0;
+                    esp_err_t err = i2s_channel_write(spk_i2s_handle, play_buf,
+                                                       aligned_to_write, &bytes_written,
+                                                       pdMS_TO_TICKS(1000));
+                    if (err != ESP_OK) {
+                        ESP_LOGW(TAG, "I2S speaker write error: %s", esp_err_to_name(err));
+                    }
+                    total_played += bytes_written;
                 }
-                total_played += bytes_written;
             } else {
                 /* Timeout — no more data in buffer */
                 if (spk_audio_complete) {
@@ -597,3 +603,12 @@ static void speaker_playback_task(void *arg)
         }
     }
 }
+
+void ws_audio_client_reconnect(void)
+{
+    if (ws_client && !ws_connected) {
+        ESP_LOGI(TAG, "🔄 Starting WebSocket connection to Gateway...");
+        esp_websocket_client_start(ws_client);
+    }
+}
+
