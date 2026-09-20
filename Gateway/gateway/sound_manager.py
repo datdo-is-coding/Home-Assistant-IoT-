@@ -164,10 +164,10 @@ class SoundManager:
             })
         return {"status": "success", "sounds": items}
 
-    async def play_sound(self, sound_name: str, target_node: str = "esp32s3_master", websocket=None) -> bool:
+    async def play_sound(self, sound_name: str, target_node: str = "all", websocket=None) -> bool:
         """
-        Play a sound effect through the ESP32 physical speaker.
-        If websocket is provided, sends to it. Otherwise sends to target_node or all connected speakers.
+        Play a sound effect through the ESP32 physical speaker(s).
+        If websocket is provided, sends only to it. Otherwise broadcasts to all connected speakers.
         """
         pcm = self.get_pcm_data(sound_name)
         if not pcm:
@@ -179,33 +179,44 @@ class SoundManager:
             return False
 
         audio_server = self.gateway.audio_server
-        target_ws = websocket
 
-        if not target_ws:
-            if target_node and target_node in audio_server._ws_nodes:
-                target_ws = audio_server._ws_nodes[target_node]
-            elif "esp32s3_master" in audio_server._ws_nodes:
-                target_ws = audio_server._ws_nodes["esp32s3_master"]
-            elif audio_server._ws_nodes:
-                target_ws = next(iter(audio_server._ws_nodes.values()))
+        if websocket:
+            # Gửi đến 1 websocket cụ thể (e.g. listen_success chỉ phát trên node vừa nói)
+            try:
+                logger.info(f"🔊 Playing sound '{sound_name}' ({len(pcm)} bytes PCM) to single speaker...")
+                await audio_server._send_pcm_stream(websocket, pcm, follow_up=False)
+                return True
+            except Exception as e:
+                logger.error(f"Error streaming sound '{sound_name}': {e}")
+                return False
+        else:
+            # Broadcast đến TẤT CẢ loa đang kết nối (đồng bộ)
+            targets = [ws for ws in audio_server._active_speakers if audio_server._is_ws_alive(ws)]
+            if not targets:
+                # Fallback: tìm node cụ thể
+                target_ws = audio_server._ws_nodes.get(target_node) if target_node != "all" else None
+                if not target_ws and audio_server._ws_nodes:
+                    target_ws = next(iter(audio_server._ws_nodes.values()))
+                if target_ws:
+                    targets = [target_ws]
 
-        if not target_ws:
-            logger.debug(f"No active speaker WebSocket found to play sound '{sound_name}'")
-            return False
+            if not targets:
+                logger.debug(f"No active speaker WebSocket found to play sound '{sound_name}'")
+                return False
 
-        try:
-            logger.info(f"🔊 Playing sound '{sound_name}' ({len(pcm)} bytes PCM) to speaker...")
-            asyncio.create_task(audio_server._send_pcm_stream(target_ws, pcm, follow_up=False))
-            return True
-        except Exception as e:
-            logger.error(f"Error streaming sound '{sound_name}': {e}")
-            return False
+            try:
+                logger.info(f"🔊 Broadcasting sound '{sound_name}' ({len(pcm)} bytes PCM) to {len(targets)} speaker(s)...")
+                await audio_server._broadcast_pcm_stream(targets, pcm, follow_up=False)
+                return True
+            except Exception as e:
+                logger.error(f"Error broadcasting sound '{sound_name}': {e}")
+                return False
 
     async def play_sound_and_speak(
         self,
         sound_name: str,
         speech_text: str,
-        target_node: str = "esp32s3_master",
+        target_node: str = "all",
         websocket=None,
         follow_up: bool = False
     ) -> bool:

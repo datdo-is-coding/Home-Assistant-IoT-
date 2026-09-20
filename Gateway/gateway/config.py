@@ -42,6 +42,18 @@ TOPIC_STATUS = "smarthome/status/{node_id}"        # legacy + ack mới
 TOPIC_ALERT = "smarthome/alert"
 TOPIC_VOICE_INTENT = "smarthome/voice/intent"
 
+# ─── Device OS v1.0 Industrial MQTT Topics (Spec Section 14) ───
+TOPIC_DEV_STATUS = "home/devices/{device_id}/status"
+TOPIC_DEV_TELEMETRY = "home/devices/{device_id}/telemetry"
+TOPIC_DEV_COMMAND = "home/devices/{device_id}/command"
+TOPIC_DEV_CONFIG_DESIRED = "home/devices/{device_id}/config/desired"
+TOPIC_DEV_CONFIG_REPORTED = "home/devices/{device_id}/config/reported"
+TOPIC_DEV_RELAY_SET = "home/devices/{device_id}/relay/{channel}/set"
+TOPIC_DEV_RELAY_STATE = "home/devices/{device_id}/relay/{channel}/state"
+TOPIC_DEV_OTA_TRIGGER = "home/devices/{device_id}/ota/trigger"
+TOPIC_DEV_OTA_PROGRESS = "home/devices/{device_id}/ota/progress"
+TOPIC_DEV_UNCLAIMED = "home/discovery/unclaimed"
+
 # ─── LLM Orchestration & Hybrid Engine ────────────────
 # Chế độ: "hybrid" (Ưu tiên Gemini Cloud siêu nhanh 0.3s, tự động fallback về Qwen 3B nội bộ khi mất mạng)
 #         "local"  (Luôn dùng Qwen 3B nội bộ trên Pi 4)
@@ -57,13 +69,17 @@ PROACTIVE_QUIET_START = int(os.environ.get("PROACTIVE_QUIET_START", "22"))   # 2
 PROACTIVE_QUIET_END = int(os.environ.get("PROACTIVE_QUIET_END", "7"))        # 07h sáng kết thúc im lặng
 PERSONA_NAME = os.environ.get("PERSONA_NAME", "Lumi")
 
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+
 _cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
 if os.path.exists(_cfg_file):
     try:
         with open(_cfg_file, "r", encoding="utf-8") as _f:
             _loaded = json.load(_f)
-            if "GEMINI_API_KEY" in _loaded and not GEMINI_API_KEY:
+            if "GEMINI_API_KEY" in _loaded and _loaded["GEMINI_API_KEY"].strip():
                 GEMINI_API_KEY = _loaded["GEMINI_API_KEY"].strip()
+            if "GEMINI_MODEL" in _loaded and _loaded["GEMINI_MODEL"].strip():
+                GEMINI_MODEL = _loaded["GEMINI_MODEL"].strip()
             if "PROACTIVE_ENABLED" in _loaded:
                 PROACTIVE_ENABLED = bool(_loaded["PROACTIVE_ENABLED"])
             if "TTS_RATE" in _loaded:
@@ -79,13 +95,12 @@ if os.path.exists(_cfg_file):
     except Exception:
         pass
 
-GEMINI_MODEL = "gemini-1.5-flash"
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 GEMINI_TIMEOUT = 3.5   # Giây tối đa chờ Cloud trước khi tự động chuyển sang Qwen 3B
 
 # Local LLM: llama-server trên Pi 4 (Qwen2.5-3B-Instruct)
 LLAMA_URL = "http://127.0.0.1:8080/v1/chat/completions"
-LLAMA_TIMEOUT = 4.0   # Tối đa 4s để đảm bảo phản hồi dứt khoát, không để người dùng chờ quá 5s
+LLAMA_TIMEOUT = 10.0   # 10s cho CPU Pi 4 phản hồi an toàn
 LLM_MAX_TOKENS = 60
 LLM_TEMPERATURE = 0.0
 LLM_CONTEXT_SIZE = 1024
@@ -139,8 +154,14 @@ INFLUX_TOKEN = ""  # Will be set after InfluxDB setup
 INFLUX_ORG = "myhome"
 INFLUX_BUCKET = "telemetry"
 
-# ─── Device Registry ──────────────────────────────
-REGISTRY_FILE = "/home/pi4/smarthome/device_registry.json"
+# ─── Device Registry (SQLite v1.0 Spec) ─────────────
+REGISTRY_FILE = os.environ.get("REGISTRY_FILE", "/home/pi4/smarthome/device_registry.json")
+if not os.path.exists(os.path.dirname(REGISTRY_FILE)) and not os.path.isabs(REGISTRY_FILE):
+    REGISTRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_registry.json")
+
+GATEWAY_DB = os.environ.get("GATEWAY_DB", "/var/lib/smarthome/gateway.db")
+if not os.path.exists(os.path.dirname(GATEWAY_DB)):
+    GATEWAY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gateway.db")
 
 # ─── Memory (SQLite) ──────────────────────────────
 MEMORY_DB = "/home/pi4/smarthome/memory.db"

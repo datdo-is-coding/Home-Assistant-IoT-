@@ -88,11 +88,25 @@ ASR_PHONETIC_CORRECTIONS = [
     # "phòng bếp" family
     (r"\bphong bep\b", "phòng bếp"),
     (r"\bphòng bep\b", "phòng bếp"),
+    # Acoustic confusions from Zipformer phonetics
+    (r"\bban đêm không ngủ\b", "bật quạt phòng ngủ"),
+    (r"\bđêm qua không ngủ\b", "bật quạt phòng ngủ"),
+    (r"\bđêm qua\b", "bật quạt"),
+    (r"\bban đêm\b", "bật đèn"),
+    (r"\bkhông ngủ\b", "phòng ngủ"),
+    (r"\bkhong ngu\b", "phòng ngủ"),
+    (r"\bhòng ngủ\b", "phòng ngủ"),
+    (r"\bphòng ngũ\b", "phòng ngủ"),
+    (r"\bbật qua\b", "bật quạt"),
+    (r"\bbắt quạt\b", "bật quạt"),
+    (r"\btắt qua\b", "tắt quạt"),
+    (r"\btác quạt\b", "tắt quạt"),
     # Device synonyms
     (r"\bquạt điện\b", "quạt"),
     (r"\bbóng đèn\b", "đèn"),
     (r"\bmáy lạnh\b", "điều hòa"),
     (r"\bmáy điều hòa\b", "điều hòa"),
+    (r"\bổ cắm\b", "ổ cắm"),
     # Common garbage / noise words the ASR hallucinates
     (r"\b(ừm|ơ|à|ờ|hmm|uh)\b", ""),
 ]
@@ -149,29 +163,39 @@ class ASREngine:
         # Generate hotwords file
         self._hotwords_path = self._generate_hotwords_file()
 
+        # Check for BPE vocab (required for Zipformer Vietnamese BPE models)
+        bpe_vocab_path = self._find_file(model_dir, "bpe.vocab")
+
         # Try modified_beam_search with hotwords first (better accuracy)
         if self._hotwords_path:
             try:
                 logger.info(f"Loading ASR with modified_beam_search + hotwords boosting")
-                self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-                    encoder=encoder_path,
-                    decoder=decoder_path,
-                    joiner=joiner_path,
-                    tokens=tokens_path,
-                    hotwords_file=self._hotwords_path,
-                    hotwords_score=2.0,
-                    num_threads=config.ASR_NUM_THREADS,
-                    sample_rate=self.sample_rate,
-                    feature_dim=80,
-                    decoding_method="modified_beam_search",
-                    max_active_paths=4,
-                )
+                kwargs = {
+                    "encoder": encoder_path,
+                    "decoder": decoder_path,
+                    "joiner": joiner_path,
+                    "tokens": tokens_path,
+                    "hotwords_file": self._hotwords_path,
+                    "hotwords_score": 3.5,
+                    "num_threads": config.ASR_NUM_THREADS,
+                    "sample_rate": self.sample_rate,
+                    "feature_dim": 80,
+                    "decoding_method": "modified_beam_search",
+                    "max_active_paths": 4,
+                }
+                if bpe_vocab_path and os.path.exists(bpe_vocab_path):
+                    kwargs["modeling_unit"] = "bpe"
+                    kwargs["bpe_vocab"] = bpe_vocab_path
+                    logger.info(f"Using BPE vocabulary for hotwords: {bpe_vocab_path}")
+
+                self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(**kwargs)
                 self._using_beam_search = True
                 self._initialized = True
                 logger.info("✅ ASR initialized: modified_beam_search + hotwords (best accuracy)")
                 return True
             except Exception as e:
                 logger.warning(f"modified_beam_search failed ({e}), falling back to greedy_search")
+
 
         # Fallback: greedy_search (faster but no hotwords boosting)
         try:

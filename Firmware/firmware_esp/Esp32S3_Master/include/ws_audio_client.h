@@ -34,6 +34,12 @@ typedef enum {
 esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle);
 
 /**
+ * @brief Start WebSocket client transport once network IP is acquired.
+ * @return ESP_OK on success
+ */
+esp_err_t ws_audio_client_start(void);
+
+/**
  * @brief Start streaming mic audio to Pi.
  *        Called after WakeNet detects wake word.
  * @return ESP_OK on success, ESP_ERR_INVALID_STATE if not connected or already streaming
@@ -70,6 +76,21 @@ bool ws_audio_is_followup_pending(void);
  * @brief Force reconnect WebSocket client (called upon Wi-Fi IP acquisition).
  */
 void ws_audio_client_reconnect(void);
+
+/**
+ * @brief Reset audio client state to IDLE and flush buffers.
+ */
+void ws_audio_reset_state(void);
+
+/**
+ * @brief Manually set audio client state.
+ */
+void ws_audio_set_state(ws_audio_state_t state);
+
+/**
+ * @brief Check if any speaker in the house is actively playing audio (suppress mic).
+ */
+bool ws_audio_is_speaker_busy(void);
 
 #ifdef __cplusplus
 }

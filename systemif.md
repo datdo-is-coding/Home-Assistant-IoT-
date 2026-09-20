@@ -63,7 +63,13 @@ Hệ thống được thiết kế theo mô hình **Điện toán phân tán (Ed
 | | **GPIO 2** | `SP_SD` | **Hardware Shutdown / Mute**. Mức `1`: Bật Amply; Mức `0`: Ngắt Amply về chế độ ngủ 0.01 µA để chống ù xì. |
 | **Relay Kênh 1 (RL1)** | **GPIO 4** | GPIO Output | **Đèn phòng ngủ**. Kích vào Chân 2 (Cathode) Opto PC817 $\rightarrow$ **Active-LOW** (`0`: Bật, `1`: Tắt). |
 | **Relay Kênh 2 (RL2)** | **GPIO 5** | GPIO Output | **Quạt phòng ngủ**. Kích vào Chân 2 (Cathode) Opto PC817 $\rightarrow$ **Active-LOW** (`0`: Bật, `1`: Tắt). |
-| **LED RGB Thông Minh** | **GPIO 48** | RMT Driver | WS2812B NeoPixel tích hợp trên board hiển thị trạng thái hệ thống. |
+| **Nút bấm 1 (BUT1)** | **GPIO 1** | GPIO Input (Pull-up) | Bấm nút cứng bật/tắt trực tiếp Relay 1 tại chỗ. |
+| **Nút bấm 2 (BUT2)** | **GPIO 3** | GPIO Input (Pull-up) | Bấm nút cứng bật/tắt trực tiếp Relay 2 tại chỗ. |
+| **Đèn LED1** | **GPIO 48** | GPIO Output | Chỉ thị trạng thái Hệ thống / Nguồn / Wi-Fi & MQTT. |
+| **Đèn LED2** | **GPIO 47** | GPIO Output | Chỉ thị Giọng nói / Đang nghe / Nhận diện WakeNet. |
+| **Giao tiếp I2C** | **GPIO 41 (SDA), GPIO 42 (SCL)** | I2C Master | Chân dự phòng mở rộng cảm biến I2C. |
+| **Mắt Hồng Ngoại (IR)** | **GPIO 7 (IR_RX), GPIO 40 (IR_TX)** | RMT / GPIO | Thu phát hồng ngoại điều khiển điều hòa, quạt. |
+
 
 ---
 
@@ -329,3 +335,90 @@ d:\Home-Assistant-IoT-\
    - Đã cấu hình chính xác `RELAY_ACTIVE_LOW true` phù hợp với tầng kích cực âm Opto PC817 trên PCB, relay không bị nhảy sai khi khởi động.
 4. **Xác thực lệnh thông minh trên Gateway:**
    - Gateway tự động phân biệt các node có cảm biến đo dòng và node không có cảm biến đo dòng để phản hồi thành công ngay lập tức, không gây báo lỗi giả.
+5. **Kiến Trúc Định Danh Thiết Bị Thương Mại (Commercial Device Architecture) & Vòng Đời Thiết Bị:**
+   - Tách bạch hoàn toàn giữa **Hardware Identity** (bất biến, sinh từ eFuse MAC của chip) và **User Identity** (gán bởi người dùng khi Claim thiết bị).
+   - Loại bỏ triệt để chuỗi cứng prototype (`esp32s3_master`), cho phép nạp hàng loạt (Mass Flash) cùng một file firmware factory mà không bao giờ bị trùng tên.
+   - Cơ chế Factory Reset 10 giây: giữ nguyên `device_id` và phần cứng, xóa sạch Wi-Fi và User Identity để chuyển về trạng thái `FACTORY_NEW`.
+   - Chuẩn hóa phần cứng đèn báo trạng thái: dùng 2 LED đơn rời rạc (LED1: GPIO 48 - Hệ thống/Mạng; LED2: GPIO 47 - Giọng nói/OTA), loại bỏ hoàn toàn các mã liên quan đến LED RGB.
+
+---
+
+## 8. Chuẩn Kiến Trúc Định Danh & Vòng Đời Thiết Bị (Device OS & Registry)
+
+### 8.1. Sơ Đồ Khối Thực Thể (Entity Architecture)
+```
+┌──────────────────────────────────────────────┐
+│           RASPBERRY PI 4 GATEWAY             │
+│                                              │
+│  Device Registry                             │
+│  ├── device_id (Primary Key, e.g. node_xxxx) │
+│  ├── name ("Loa phòng ngủ")                 │
+│  ├── room ("bedroom")                        │
+│  ├── address (ip, mac, rssi, last_seen)      │
+│  ├── capabilities (voice, audio, relay, ota) │
+│  ├── firmware (version, hardware, serial)    │
+│  ├── configuration (relays, audio, cfg_ver)  │
+│  └── security (state, claimed_at)            │
+└──────────────────────┬───────────────────────┘
+                       │ WebSocket / MQTT
+                       ▼
+┌──────────────────────────────────────────────┐
+│                   ESP32-S3                   │
+│                                              │
+│  Device OS Modules:                          │
+│  ├── Identity (Hardware ID & User ID)        │
+│  ├── Provisioning (Pending & Claim Handshake)│
+│  ├── Config (NVS Preserved / Erased)         │
+│  ├── OTA (Dual-Channel Safe Pull)            │
+│  ├── Network (Wi-Fi STA + AP Fallback)       │
+│  ├── Audio (WakeNet + I2S DMA Voice/Speaker) │
+│  └── Application (Relays, Energy, TinyML)    │
+└──────────────────────────────────────────────┘
+```
+
+### 8.2. Cấu Trúc Định Danh (Identity Schemas)
+- **Hardware Identity (Bất biến, lưu NVS namespace `hw_id`):**
+  ```json
+  {
+    "device_id": "node_7f3a91c2",
+    "hardware": "esp32s3",
+    "serial": "S3-2026-000183"
+  }
+  ```
+  *(Sinh tự động từ eFuse MAC của chip ESP32-S3; 10,000 thiết bị nạp chung 1 file firmware factory vẫn sở hữu `device_id` và `serial` duy nhất toàn cầu)*.
+
+- **User Identity (Tùy biến, lưu NVS namespace `user_id`):**
+  ```json
+  {
+    "name": "Loa phòng ngủ",
+    "room": "bedroom",
+    "location": "Tầng 2 - Phòng ngủ",
+    "description": "Voice node"
+  }
+  ```
+
+### 8.3. Máy Trạng Thái Vòng Đời Thiết Bị (Lifecycle State Machine)
+```
+  [ FACTORY_NEW ] ──(setup)──> [ PROVISIONING ] ──(user assigns)──> [ CLAIMED ] ──(boot)──> [ READY ]
+                                                                                                 │
+                                                        ┌────────────────────────────────────────┴───────────────────┐
+                                                        ▼                                                            ▼
+                                                [ OTA / RECOVERY ]                                          [ READY (Normal) ]
+```
+
+### 8.4. Quy Trình Khôi Phục Cài Đặt Gốc (Factory Reset Flow)
+```
+  [ READY ]
+     │ (Nhấn giữ Nút BUT1 trong 10 giây)
+     ▼
+  [ FACTORY_RESET ]
+     ├── Erase user config (Xóa tên, phòng, mô tả)
+     ├── Erase Wi-Fi credentials
+     ├── Erase Gateway binding
+     ├── Erase credentials
+     └── KEEP device_id & hardware_identity (Bảo toàn ID phần cứng)
+     │
+     ▼
+  [ FACTORY_NEW ] (Khởi động lại về trạng thái xuất xưởng chờ gán mới)
+```
+

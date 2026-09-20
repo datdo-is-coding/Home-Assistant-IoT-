@@ -8940,16 +8940,6 @@
 	)
 	(wire
 		(pts
-			(xy 204.47 240.03) (xy 204.47 237.49)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "5fd7707f-ddf4-455d-bf15-f932760e81fa")
-	)
-	(wire
-		(pts
 			(xy 74.93 44.45) (xy 83.82 44.45)
 		)
 		(stroke
@@ -10000,7 +9990,7 @@
 	)
 	(wire
 		(pts
-			(xy 204.47 237.49) (xy 201.93 237.49)
+			(xy 203.2 237.49) (xy 201.93 237.49)
 		)
 		(stroke
 			(width 0)
@@ -10891,7 +10881,7 @@
 		(uuid "3a732688-8c13-4cb1-8f30-1c46c5d0a186")
 	)
 	(label "MIC_DIN"
-		(at 204.47 240.03 0)
+		(at 203.2 237.49 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -21971,7 +21961,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 205.74 236.474 90)
+			(at 211.074 234.95 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -22035,10 +22025,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "b9c00d30-e921-4453-b671-398037a77805")
 		(property "Reference" "INMP_441"
-			(at 195.58 226.06 0)
+			(at 180.086 228.6 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects

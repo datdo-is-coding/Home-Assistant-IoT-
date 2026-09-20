@@ -87,7 +87,14 @@ class VieNeuEngine:
 
 class TTSEngine:
     """Vietnamese text-to-speech with dual engine support (VieNeu-TTS local + EdgeTTS cloud)."""
-    
+
+    # Precompiled regex patterns for text sanitization (class-level for performance)
+    _RE_EMOJI_SUPP = re.compile(r'[\U00010000-\U0010ffff]')       # Supplementary plane emoji
+    _RE_EMOJI_MISC = re.compile(r'[\u2600-\u27bf\u2300-\u23ff]')  # Misc symbols & dingbats
+    _RE_EMOJI_VAR  = re.compile(r'[\ufe00-\ufe0f\u200d]')         # Variation selectors & ZWJ
+    _RE_MULTI_DOT  = re.compile(r'\s*\.\s*\.+')                   # Multiple dots
+    _RE_MULTI_SP   = re.compile(r'\s+')                            # Multiple spaces
+
     def __init__(self):
         self.voice = getattr(config, "TTS_VOICE", "vi-VN-HoaiMyNeural")
         self.fallback_voice = getattr(config, "TTS_FALLBACK_VOICE", "vi-VN-HoaiMyNeural")
@@ -103,6 +110,24 @@ class TTSEngine:
         except Exception:
             pass
         self._mem_cache = {}
+
+    @classmethod
+    def _sanitize_text(cls, text: str) -> str:
+        """
+        Strip emojis, tildes, musical notes, and other characters that cause
+        EdgeTTS to return "No audio received". Applied BEFORE caching and
+        beautify_prosody() so every downstream consumer gets clean text.
+        """
+        if not text:
+            return ""
+        t = text
+        t = cls._RE_EMOJI_SUPP.sub('', t)      # 🎶 🎵 😀 etc.
+        t = cls._RE_EMOJI_MISC.sub('', t)       # ☀ ⛅ ✨ etc.
+        t = cls._RE_EMOJI_VAR.sub('', t)        # variation selectors
+        t = t.replace('~', ' ').replace('!', '.')
+        t = cls._RE_MULTI_DOT.sub('.', t)
+        t = cls._RE_MULTI_SP.sub(' ', t).strip()
+        return t
 
     def beautify_prosody(self, text: str) -> str:
         """
@@ -142,23 +167,23 @@ class TTSEngine:
         elif t.startswith("Anh ơi ") and not t.startswith("Anh ơi, "):
             t = "Anh ơi, " + t[7:]
 
-        # 3. Luyến láy đuôi câu nhẹ nhàng
+        # 3. Luyến láy đuôi câu nhẹ nhàng (chuẩn tiếng Việt, không dùng ký tự lạ)
         if t.endswith("nè.") or t.endswith("nè"):
-            t = t.rstrip(".").rstrip() + "~"
+            t = t.rstrip(".").rstrip() + " nè."
         elif t.endswith("nha.") or t.endswith("nha"):
             t = t.rstrip(".").rstrip()
             if not t.endswith("anh"):
-                t += " anh~"
+                t += " nha anh."
             else:
-                t += "~"
+                t += "."
         elif t.endswith("nhé.") or t.endswith("nhé"):
             t = t.rstrip(".").rstrip()
             if not t.endswith("anh"):
-                t += " nha anh~"
+                t += " nha anh."
             else:
-                t += "~"
-        elif t.endswith("ạ."):
-            t = t.rstrip(".") + "~"
+                t += "."
+        elif t.endswith("ạ.") or t.endswith("ạ"):
+            t = t.rstrip(".").rstrip() + " ạ."
 
         return t
 
@@ -172,35 +197,44 @@ class TTSEngine:
         return hashlib.md5(f"{norm}_{provider}_{self.voice}_{rate}_{pitch}_{vieneu_voice}_{vieneu_mode}_{suffix}".encode("utf-8")).hexdigest()
 
     async def synthesize_edgetts(self, text: str, rate: str = "-4%", pitch: str = "+2Hz") -> Optional[bytes]:
-        """EdgeTTS synthesis with fallback voice."""
-        try:
-            # Ensure sign prefix for edge-tts
-            rate_str = str(rate or "-4%").strip()
-            if not rate_str.startswith(("+", "-")):
-                rate_str = f"+{rate_str}"
-            pitch_str = str(pitch or "+2Hz").strip()
-            if not pitch_str.startswith(("+", "-")):
-                pitch_str = f"+{pitch_str}"
+        """EdgeTTS synthesis with fallback voice, retry logic, and character sanitization."""
+        # Text should already be sanitized by _sanitize_text(), but apply minimal safety strip
+        clean_text = self._sanitize_text(text)
+        if not clean_text:
+            return None
 
-            communicate = edge_tts.Communicate(text, self.voice, rate=rate_str, pitch=pitch_str)
-            audio_data = b""
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_data += chunk["data"]
-            if audio_data:
-                logger.info(f"EdgeTTS synthesized: \"{text[:45]}...\" [rate={rate}, pitch={pitch}] → {len(audio_data)} bytes")
-                return audio_data
-        except Exception as e:
-            logger.error(f"EdgeTTS primary error: {e}")
+        # Ensure sign prefix for edge-tts
+        rate_str = str(rate or "-4%").strip()
+        if not rate_str.startswith(("+", "-")):
+            rate_str = f"+{rate_str}"
+        pitch_str = str(pitch or "+2Hz").strip()
+        if not pitch_str.startswith(("+", "-")):
+            pitch_str = f"+{pitch_str}"
+
+        voices_to_try = [self.voice, self.fallback_voice]
+        max_retries = 2  # Total attempts = voices × retries
+
+        for attempt in range(max_retries):
+            voice = voices_to_try[0] if attempt == 0 else voices_to_try[-1]
             try:
-                communicate = edge_tts.Communicate(text, self.fallback_voice, rate=rate, pitch=pitch)
+                communicate = edge_tts.Communicate(clean_text, voice, rate=rate_str, pitch=pitch_str)
                 audio_data = b""
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
                         audio_data += chunk["data"]
-                return audio_data if audio_data else None
-            except Exception as e2:
-                logger.error(f"EdgeTTS fallback failed: {e2}")
+                if audio_data:
+                    logger.info(f"EdgeTTS synthesized: \"{clean_text[:45]}...\" [rate={rate_str}, pitch={pitch_str}] → {len(audio_data)} bytes")
+                    return audio_data
+                else:
+                    logger.warning(f"EdgeTTS returned empty audio (attempt {attempt+1}/{max_retries}, voice={voice})")
+            except Exception as e:
+                logger.error(f"EdgeTTS error (attempt {attempt+1}/{max_retries}, voice={voice}): {e}")
+
+            # Brief pause before retry — EdgeTTS intermittent failures often resolve within 1s
+            if attempt < max_retries - 1:
+                await asyncio.sleep(1.0)
+
+        logger.error(f"EdgeTTS: all {max_retries} attempts failed for text: \"{clean_text[:50]}...\"")
         return None
 
     async def synthesize(self, text: str) -> Optional[bytes]:
@@ -209,6 +243,11 @@ class TTSEngine:
         Supports switching between VieNeu-TTS (local) and EdgeTTS (cloud).
         """
         if not text or not text.strip():
+            return None
+
+        # Sanitize FIRST — before beautify_prosody and cache key computation
+        text = self._sanitize_text(text)
+        if not text:
             return None
 
         text = self.beautify_prosody(text)
@@ -271,6 +310,11 @@ class TTSEngine:
         Suitable for direct playback on ESP32 I2S speaker.
         """
         if not text or not text.strip():
+            return None
+
+        # Sanitize at entry so cache key is deterministic and clean
+        text = self._sanitize_text(text)
+        if not text:
             return None
 
         h = self._get_hash(text, f"pcm_{sample_rate}")

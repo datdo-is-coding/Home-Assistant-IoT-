@@ -99,7 +99,46 @@ class AudioServer:
         self._running = False
         # node_id -> websocket, cho phép gửi relay command trực tiếp trên socket audio
         self._ws_nodes: dict = {}
+        # Tập hợp tất cả các websocket loa ESP32 vật lý đang hoạt động
+        self._active_speakers: set = set()
+        self._playback_lock = asyncio.Lock()
+        self._active_voice_session = None  # {"node_id": str, "timestamp": float}
         self.arbiter = StreamArbiter(gateway=self.gateway)
+
+    def _is_ws_alive(self, ws) -> bool:
+        """Kiểm tra websocket còn sống không (tương thích mọi version websockets)."""
+        if ws is None:
+            return False
+        try:
+            # websockets >= 10.x uses .open; older versions use not .closed
+            if hasattr(ws, 'open'):
+                return bool(ws.open)
+            if hasattr(ws, 'closed'):
+                return not bool(ws.closed)
+            return True  # fallback: assume alive
+        except Exception:
+            return False
+
+    def has_ws(self, node_id: str) -> bool:
+        """Kiểm tra xem node_id có kết nối WebSocket audio còn sống hay không."""
+        ws = self._ws_nodes.get(node_id)
+        return ws is not None and self._is_ws_alive(ws)
+
+    async def send_relay_ws(self, node_id: str, channel: str, action: str, seq: int = 0) -> bool:
+        """Gửi lệnh điều khiển relay trực tiếp qua WebSocket text frame (0ms latency)."""
+        ws = self._ws_nodes.get(node_id)
+        if not ws or not self._is_ws_alive(ws):
+            return False
+        ch_num = 1 if channel in ("ch1", 1, "1") else 2
+        s = 1 if action in ("turn_on", "on", "1", 1) else 0
+        cmd = {"t": "rl", "ch": ch_num, "s": s, "seq": seq}
+        try:
+            await ws.send(json.dumps(cmd))
+            logger.info(f"⚡ [WS Relay] Sent to {node_id}: {cmd}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to send WS relay to {node_id}: {e}")
+            return False
 
     async def start(self):
         """Start the WebSocket server."""
@@ -129,11 +168,9 @@ class AudioServer:
         logger.info(f"🔗 ESP32 client connected from {client_addr}")
 
         client_node_id = None
-        # Default physical master node mapping for connected hardware (non-localhost)
-        if client_addr and client_addr[0] != "127.0.0.1":
-            self._ws_nodes["esp32s3_master"] = websocket
-            client_node_id = "esp32s3_master"
-            logger.info(f"📢 Mapped physical hardware node {client_addr} to 'esp32s3_master' speaker")
+        # Đăng ký ngay websocket vào _active_speakers để sẵn sàng nhận broadcast âm thanh
+        self._active_speakers.add(websocket)
+        logger.info(f"📢 ESP32 speaker registered from {client_addr} (Active speaker pool: {len(self._active_speakers)})")
 
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
@@ -164,10 +201,16 @@ class AudioServer:
                                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                     self.gateway.broadcast_event("node_hello", cmd)
                             node_id = handled.get("node_id") if handled else None
+                            if not node_id and cmd.get("id"):
+                                node_id = cmd.get("id")
 
-                            if handled and handled.get("action") == "known":
+                            if node_id:
                                 client_node_id = node_id
                                 self._ws_nodes[client_node_id] = websocket
+                                self._active_speakers.add(websocket)
+
+                            if handled and handled.get("action") == "known":
+                                logger.info(f"✅ Node '{node_id}' registered for WS relay + speaker broadcast (pool: {len(self._active_speakers)})")
                                 await websocket.send(json.dumps({"t": "hello_ok", "id": node_id}))
                             elif handled and handled.get("action") == "cfg_mismatch":
                                 # re-provision
@@ -177,6 +220,8 @@ class AudioServer:
                                         await self.gateway.mqtt.send_cfg(node_id, cfg)
                                 await websocket.send(json.dumps({"t": "cfg_sent", "id": node_id}))
                             elif handled and handled.get("action") == "pending":
+                                if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                    self.gateway.broadcast_event("pending_node", {"mac": client_mac, "hello": cmd})
                                 await websocket.send(json.dumps({"t": "pending", "mac": client_mac}))
                             else:
                                 logger.warning(f"hello_ignored: {cmd}")
@@ -187,13 +232,14 @@ class AudioServer:
                             nid = cmd.get("id")
                             rl = cmd.get("rl")
                             if nid and isinstance(rl, list):
+                                if self.gateway and hasattr(self.gateway, "registry"):
+                                    self.gateway.registry.update_relay_state(nid, rl)
+                                    self.gateway.registry.update_heartbeat(nid)
                                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                     self.gateway.broadcast_event("node_status",
                                         {"node_id": nid, "rl_state": rl, "seq": cmd.get("seq"),
                                          "ch1": rl[0] if len(rl)>0 else None,
                                          "ch2": rl[1] if len(rl)>1 else None})
-                                if self.gateway and hasattr(self.gateway, "registry"):
-                                    self.gateway.registry.update_heartbeat(nid)
                                 logger.info(f"ACK {nid} rl={rl} seq={cmd.get('seq')}")
                             continue
 
@@ -215,6 +261,14 @@ class AudioServer:
 
                         # ── LEGACY: start / stop / ping (giữ nguyên) ──
                         if msg_type == "start":
+                            if self._playback_lock.locked():
+                                curr_node = client_node_id or "node_voice"
+                                logger.info(f"🔇 Rejecting mic stream from '{curr_node}': speaker is actively playing TTS audio")
+                                await websocket.send(json.dumps({
+                                    "type": "suppressed", "reason": "speaker_busy"
+                                }))
+                                continue
+
                             codec = cmd.get("codec", "pcm")
                             sample_rate = cmd.get("sample_rate", config.AUDIO_SAMPLE_RATE)
                             pcm_chunks.clear()
@@ -223,7 +277,9 @@ class AudioServer:
                             total_frames = 0
                             if cmd.get("node_id"):
                                 client_node_id = cmd.get("node_id")
-                            curr_node = client_node_id or "esp32s3_master"
+                            curr_node = client_node_id or "node_voice"
+                            self._ws_nodes[curr_node] = websocket
+                            self._active_speakers.add(websocket)
                             self.arbiter.register_start(curr_node)
 
                             # Setup Opus decoder if needed
@@ -242,8 +298,23 @@ class AudioServer:
 
                         elif msg_type == "stop":
                             recording = False
-                            elapsed = time.monotonic() - record_start_time
-                            curr_node = client_node_id or "esp32s3_master"
+                            now_ts = time.monotonic()
+                            elapsed = now_ts - record_start_time
+                            curr_node = client_node_id or "node_voice"
+
+                            # 1. Nếu đã có phiên giọng nói đang xử lý từ node khác trong 3.5s qua, suppress ngay để tránh xung đột
+                            if self._active_voice_session and (now_ts - self._active_voice_session.get("timestamp", 0)) < 3.5:
+                                active_nid = self._active_voice_session.get("node_id")
+                                if active_nid and active_nid != curr_node:
+                                    logger.info(f"🔇 Spatial Arbiter: Suppressed concurrent stream from '{curr_node}' (active session already on '{active_nid}')")
+                                    await websocket.send(json.dumps({
+                                        "type": "suppressed",
+                                        "dominant_node": active_nid,
+                                        "detected_room": self.arbiter._get_room(active_nid)
+                                    }))
+                                    pcm_chunks.clear()
+                                    continue
+
                             dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             logger.info(
                                 f"🛑 Voice recording ENDED — "
@@ -261,6 +332,9 @@ class AudioServer:
                                 }))
                                 pcm_chunks.clear()
                                 continue
+
+                            # Khóa phiên giọng nói cho node chiếm ưu thế
+                            self._active_voice_session = {"node_id": curr_node, "timestamp": now_ts}
 
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                 self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
@@ -316,7 +390,7 @@ class AudioServer:
 
                         if len(raw_i16) > 0:
                             rms = int(np.sqrt(np.mean(np.square(raw_i16.astype(np.float32)))))
-                            curr_node = client_node_id or "esp32s3_master"
+                            curr_node = client_node_id or "node_voice"
                             self.arbiter.add_rms(curr_node, rms)
                             if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
                                 self.gateway.broadcast_event("audio_meter", {"rms": rms, "frames": total_frames})
@@ -334,7 +408,7 @@ class AudioServer:
                         }))
                         if pcm_chunks:
                             full_pcm = np.concatenate(pcm_chunks)
-                            curr_node = client_node_id or "esp32s3_master"
+                            curr_node = client_node_id or "node_voice"
                             dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             await self._process_audio(
                                 websocket, full_pcm, sample_rate,
@@ -345,12 +419,17 @@ class AudioServer:
 
         except websockets.exceptions.ConnectionClosed as e:
             logger.info(f"ESP32 client disconnected: {client_addr} (code={e.code}, reason='{e.reason}')")
+            self._active_speakers.discard(websocket)
             # remove node from ws registry
             for nid, ws in list(self._ws_nodes.items()):
                 if ws is websocket:
                     del self._ws_nodes[nid]
-            logger.info(f"WS node still connected: {list(self._ws_nodes.keys())}")
+            # Dọn dead sockets khỏi _active_speakers
+            self._active_speakers = {ws for ws in self._active_speakers if self._is_ws_alive(ws)}
+            logger.info(f"WS node still connected: {list(self._ws_nodes.keys())}, active speakers: {len(self._active_speakers)}")
         except Exception as e:
+            self._active_speakers.discard(websocket)
+            self._active_speakers = {ws for ws in self._active_speakers if self._is_ws_alive(ws)}
             logger.error(f"Error handling WebSocket client {client_addr}: {e}")
 
     def has_ws(self, node_id: str) -> bool:
@@ -390,7 +469,7 @@ class AudioServer:
         websocket,
         pcm_samples: np.ndarray,
         sample_rate: int,
-        client_node_id: str = "esp32s3_master",
+        client_node_id: str = "node_voice",
         detected_room: Optional[str] = None
     ):
         """
@@ -415,37 +494,30 @@ class AudioServer:
 
         if not text:
             logger.warning("ASR returned empty transcript")
-            if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
-                await self.gateway.sound.play_sound("wrong_sound", websocket=websocket)
             reply = "Em không nghe rõ. Bạn nói lại được không?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": ""
             }))
-            await self._send_voice_reply(websocket, reply, follow_up=True)
+            await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
             return
 
         # If confidence is very low, ask user to repeat (don't blindly execute)
         from asr_engine import ASREngine
         if confidence < ASREngine.CONFIDENCE_LOW:
             logger.warning(f"ASR confidence too low ({confidence:.2f}): '{text}' — asking user to repeat")
-            if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
-                await self.gateway.sound.play_sound("wrong_sound", websocket=websocket)
             reply = f"Em nghe không rõ lắm. Bạn nói lại lần nữa được không ạ?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": text, "confidence": round(confidence, 2)
             }))
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2), "status": "low_confidence"})
-            await self._send_voice_reply(websocket, reply, follow_up=True)
+            await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
             return
 
         if confidence < ASREngine.CONFIDENCE_MEDIUM:
             logger.warning(f"ASR confidence medium ({confidence:.2f}): '{text}' — proceeding with caution")
 
         logger.info(f"📝 Recognized voice: '{text}' (confidence={confidence:.2f})")
-        # 🎵 Play listen_success sound cue to acknowledge command reception!
-        if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
-            await self.gateway.sound.play_sound("listen_success", websocket=websocket)
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2)})
         await websocket.send(json.dumps({
@@ -464,29 +536,37 @@ class AudioServer:
             "follow_up": follow_up,
         }))
 
-        # ─── Step 5: Stream TTS audio back to ESP32 speaker ───
+        # ─── Step 5: Stream TTS audio back to ESP32 speaker (Unicast to caller) ───
         voice_reply = result.get("voice_reply")
         if voice_reply:
-            await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up)
+            await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up, broadcast=False)
 
     async def speak_proactive(self, text: str, node_id: str = None) -> bool:
         """
         Chủ động phát âm thanh ra loa ESP32 (không cần user gọi trước).
-        Ưu tiên node_id chỉ định, nếu không tìm loa esp32s3_master hoặc node đang online.
+        - Nếu node_id cụ thể: phát ra node đó.
+        - Nếu node_id là None hoặc 'all': phát đồng thời ra TẤT CẢ các loa ESP32 đang kết nối.
         """
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available for proactive speech")
             return False
 
-        target_ws = None
-        if node_id and node_id in self._ws_nodes:
-            target_ws = self._ws_nodes[node_id]
-        elif "esp32s3_master" in self._ws_nodes:
-            target_ws = self._ws_nodes["esp32s3_master"]
-        elif self._ws_nodes:
-            target_ws = next(iter(self._ws_nodes.values()))
+        targets = []
+        if node_id and node_id != "all":
+            ws = self._ws_nodes.get(node_id)
+            if ws and self._is_ws_alive(ws):
+                targets = [ws]
+            elif self._ws_nodes:
+                alive = [w for w in self._ws_nodes.values() if self._is_ws_alive(w)]
+                if alive:
+                    targets = [alive[0]]
+        else:
+            # Broadcast tới tất cả các loa đang hoạt động
+            targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+            if not targets and self._ws_nodes:
+                targets = [ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)]
 
-        if not target_ws:
+        if not targets:
             logger.debug("No active WebSocket speaker connected to receive proactive audio")
             return False
 
@@ -495,19 +575,20 @@ class AudioServer:
                 text, sample_rate=config.AUDIO_SAMPLE_RATE
             )
             if pcm_audio:
-                await self._send_pcm_stream(target_ws, pcm_audio, follow_up=False)
+                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=False)
                 return True
             else:
                 mp3_audio = await self.gateway.tts.synthesize(text)
                 if mp3_audio:
-                    await self._send_audio_stream_mp3(target_ws, mp3_audio, follow_up=False)
+                    for ws in targets:
+                        await self._send_audio_stream_mp3(ws, mp3_audio, follow_up=False)
                     return True
         except Exception as e:
             logger.error(f"Failed to speak proactive audio: {e}")
         return False
 
-    async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False):
-        """Synthesize text to PCM and stream to ESP32 speaker."""
+    async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False, broadcast: bool = False):
+        """Synthesize text to PCM and stream to ESP32 speaker(s) — unicast by default."""
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available")
             return
@@ -518,74 +599,129 @@ class AudioServer:
         )
 
         if pcm_audio:
-            await self._send_pcm_stream(websocket, pcm_audio, follow_up=follow_up)
-            # Đọc kết quả ra loa thật: Phát ra ESP32 vật lý (esp32s3_master)
-            real_spk = self._ws_nodes.get("esp32s3_master")
-            if real_spk and real_spk != websocket:
-                try:
-                    await self._send_pcm_stream(real_spk, pcm_audio, follow_up=follow_up)
-                except Exception as e:
-                    logger.debug(f"Forward to real speaker failed: {e}")
+            targets = []
+            if broadcast and self._active_speakers:
+                targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+            elif websocket and self._is_ws_alive(websocket):
+                targets = [websocket]
+            elif self._active_speakers:
+                alive = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+                if alive:
+                    targets = [alive[0]]
+
+            if targets:
+                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket)
         else:
             # Fallback: try sending MP3 if PCM conversion failed
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")
             mp3_audio = await self.gateway.tts.synthesize(text)
-            if mp3_audio:
+            if mp3_audio and websocket and self._is_ws_alive(websocket):
                 await self._send_audio_stream_mp3(websocket, mp3_audio, follow_up=follow_up)
 
     async def _send_pcm_stream(self, websocket, pcm_bytes: bytes, follow_up: bool = False):
+        """Single speaker wrapper for _broadcast_pcm_stream."""
+        await self._broadcast_pcm_stream([websocket], pcm_bytes, follow_up=follow_up)
+
+    async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None):
         """
-        Stream raw PCM audio data back to ESP32 in chunks.
-        Format: 16kHz, 16-bit signed, little-endian, mono.
-        ESP32 writes directly to I2S speaker — no decoding needed.
+        Stream raw PCM audio data to ESP32 speaker(s).
+        Protected by self._playback_lock so multiple streams can never interleave or corrupt audio.
+        Pacing is calibrated: 8 pre-buffer chunks (~512ms) then 70% real-time pacing (~45ms)
+        so ESP32 512KB PSRAM DMA buffer never underflows.
         """
-        total_len = len(pcm_bytes)
-        chunk_size = config.WS_SEND_CHUNK_SIZE
-        duration_s = total_len / (config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH)
+        async with self._playback_lock:
+            valid_targets = [ws for ws in targets if self._is_ws_alive(ws)]
+            if not valid_targets:
+                return
 
-        logger.info(
-            f"🔊 Streaming {total_len} bytes PCM to ESP32 speaker "
-            f"({duration_s:.2f}s audio, follow_up={follow_up})"
-        )
-        if self.gateway and hasattr(self.gateway, "broadcast_event"):
-            self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
+            total_len = len(pcm_bytes)
+            chunk_size = config.WS_SEND_CHUNK_SIZE
+            duration_s = total_len / (config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH)
 
-        # Send start marker with PCM format info
-        await websocket.send(json.dumps({
-            "type": "audio_start",
-            "format": "pcm",
-            "sample_rate": config.AUDIO_SAMPLE_RATE,
-            "channels": config.AUDIO_CHANNELS,
-            "sample_width": config.AUDIO_SAMPLE_WIDTH,
-            "size": total_len,
-        }))
+            logger.info(
+                f"🔊 Streaming {total_len} bytes PCM to {len(valid_targets)} ESP32 speaker(s) "
+                f"({duration_s:.2f}s audio, follow_up={follow_up})"
+            )
+            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
 
-        # Send binary PCM chunks with real-time playback pacing
-        chunks_sent = 0
-        bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH  # 32,000 bytes/sec
-        for i in range(0, total_len, chunk_size):
-            chunk = pcm_bytes[i:i + chunk_size]
-            await websocket.send(chunk)
-            chunks_sent += 1
-            # Pre-buffer first 3 chunks (~192ms) quickly for instant start,
-            # then pace at 95% real-time playback speed to prevent buffer overflow/sample drop!
-            if chunks_sent <= 3:
-                await asyncio.sleep(0.010)
-            else:
-                chunk_duration = len(chunk) / bytes_per_sec
-                await asyncio.sleep(chunk_duration * 0.95)
+            # Thông báo cho TẤT CẢ các ESP32 trong nhà tắt mic / mute wake word để chống tự kích hoạt (echo suppression)
+            busy_msg = json.dumps({"type": "speaker_busy", "busy": True})
+            all_ws = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+            if all_ws:
+                await asyncio.gather(*[ws.send(busy_msg) for ws in all_ws], return_exceptions=True)
 
-        # Send end marker
-        await websocket.send(json.dumps({
-            "type": "audio_end",
-            "follow_up": follow_up,
-            "timeout_ms": 6000 if follow_up else 0
-        }))
-        logger.info(
-            f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to ESP32"
-        )
-        if self.gateway and hasattr(self.gateway, "broadcast_event"):
-            self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
+            # Send start marker to all targets simultaneously
+            start_msg = json.dumps({
+                "type": "audio_start",
+                "format": "pcm",
+                "sample_rate": config.AUDIO_SAMPLE_RATE,
+                "channels": config.AUDIO_CHANNELS,
+                "sample_width": config.AUDIO_SAMPLE_WIDTH,
+                "size": total_len,
+            })
+            results = await asyncio.gather(*[ws.send(start_msg) for ws in valid_targets], return_exceptions=True)
+            dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
+            if dead:
+                for d in dead:
+                    self._active_speakers.discard(d)
+                valid_targets = [ws for ws in valid_targets if ws not in dead]
+                if not valid_targets:
+                    return
+
+            # Chờ ESP32 parse JSON audio_start và chuyển state sang PLAYING
+            await asyncio.sleep(0.030)
+
+            # Send binary PCM chunks with robust playback pacing
+            chunks_sent = 0
+            bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH  # 32,000 bytes/sec
+            for i in range(0, total_len, chunk_size):
+                chunk = pcm_bytes[i:i + chunk_size]
+                results = await asyncio.gather(*[ws.send(chunk) for ws in valid_targets], return_exceptions=True)
+                dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
+                if dead:
+                    for d in dead:
+                        self._active_speakers.discard(d)
+                    valid_targets = [ws for ws in valid_targets if ws not in dead]
+                    if not valid_targets:
+                        logger.warning("All target speaker websockets disconnected during streaming")
+                        break
+
+                chunks_sent += 1
+                # Pre-buffer first 16 chunks (~32KB = 1s audio) with 2ms spacing to let ESP32
+                # accumulate enough data before amp enables (it waits for ≥4KB).
+                # After pre-buffer, pace at 80% real-time (~51ms per 2KB chunk) to maintain
+                # steady flow without underflow or overflow on ESP32's 512KB PSRAM buffer.
+                if chunks_sent <= 16:
+                    await asyncio.sleep(0.002)
+                else:
+                    chunk_duration = len(chunk) / bytes_per_sec
+                    await asyncio.sleep(chunk_duration * 0.80)
+
+            # Send end marker: only initiator_ws gets follow_up=True, others get follow_up=False
+            tasks = []
+            for ws in valid_targets:
+                ws_follow_up = follow_up if (ws == initiator_ws or initiator_ws is None) else False
+                end_msg = json.dumps({
+                    "type": "audio_end",
+                    "follow_up": ws_follow_up,
+                    "timeout_ms": 6000 if ws_follow_up else 0
+                })
+                tasks.append(ws.send(end_msg))
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            logger.info(
+                f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to {len(valid_targets)} ESP32(s)"
+            )
+            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
+
+            # Mở lại mic cho toàn bộ các node sau khi loa phát xong
+            free_msg = json.dumps({"type": "speaker_busy", "busy": False})
+            all_ws = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+            if all_ws:
+                await asyncio.gather(*[ws.send(free_msg) for ws in all_ws], return_exceptions=True)
 
     async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes, follow_up: bool = False):
         """

@@ -237,8 +237,8 @@ class AuthManager:
         user_id = user.get("id")
         allowed_ids = set(self.get_user_devices(user_id))
         
-        # If user has no specific devices assigned yet, grant access to master or leave empty
+        # If user has no specific devices assigned yet, leave empty (unassigned user)
         if not allowed_ids:
-            return {k: v for k, v in all_nodes.items() if k == "esp32s3_master"}
+            return {}
 
         return {k: v for k, v in all_nodes.items() if k in allowed_ids}

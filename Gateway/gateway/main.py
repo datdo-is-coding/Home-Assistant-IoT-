@@ -106,13 +106,22 @@ class SmartHomeGateway:
         self.mqtt.on_message("smarthome/tele/#", self._on_telemetry)
         self.mqtt.on_message("smarthome/status/#", self._on_status)
         self.mqtt.on_message("smarthome/ota/progress/#", self._on_ota_progress)
+        self.mqtt.on_message("smarthome/ota_progress/#", self._on_ota_progress)
+
+        # Spec v1.0 Industrial Device OS Topics:
+        self.mqtt.on_message("home/discovery/unclaimed", self._on_unclaimed_device)
+        self.mqtt.on_message("home/devices/+/status", self._on_device_status)
+        self.mqtt.on_message("home/devices/+/telemetry", self._on_device_telemetry)
+        self.mqtt.on_message("home/devices/+/config/reported", self._on_reported_config)
+        self.mqtt.on_message("home/devices/+/relay/+/state", self._on_device_relay_state)
 
         self._running = True
         asyncio.create_task(self._announce_all_nodes())
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.start()
-        if hasattr(self, "sound") and self.sound:
-            asyncio.create_task(self._play_bootup_sound())
+        # ESP32 nodes play bootup sound locally on hardware init; avoid re-broadcasting over WS on gateway start
+        # if hasattr(self, "sound") and self.sound:
+        #     asyncio.create_task(self._play_bootup_sound())
         logger.info("Starting MQTT client...")
         try:
             await self.mqtt.connect()
@@ -278,20 +287,24 @@ class SmartHomeGateway:
         location = cmd.get("location")
         action = cmd.get("action", "turn_on")
 
-        # Xử lý lệnh toàn bộ thiết bị (Bulk turn_off)
-        if device == "all" and action == "turn_off":
+        # Xử lý lệnh toàn bộ thiết bị (Bulk turn_on / turn_off)
+        if device == "all" and action in ("turn_on", "turn_off"):
             all_online = self.registry.get_online_nodes()
             room_filter = str(location).lower().strip() if location else None
-            turned_off_count = 0
+            affected_count = 0
             for nid, node in all_online.items():
                 if room_filter and str(node.get("room", "")).lower().strip() != room_filter:
                     continue
                 for cid in node.get("channels", {}).keys():
                     seq = self.registry.next_seq(nid)
-                    await self.verifier.verify_command(nid, cid, "turn_off", seq=seq)
-                    turned_off_count += 1
+                    await self.verifier.verify_command(nid, cid, action, seq=seq)
+                    affected_count += 1
             r_vn = get_room_name(location)
-            reply = f"Dạ, em đã tắt toàn bộ thiết bị ở {r_vn} cho anh rồi nè~" if r_vn else "Dạ, em đã tắt hết tất cả thiết bị trong nhà cho anh rồi nè~"
+            act_vn = "bật" if action == "turn_on" else "tắt"
+            if r_vn:
+                reply = f"Dạ, em đã {act_vn} toàn bộ thiết bị ở {r_vn} cho anh rồi nè~"
+            else:
+                reply = f"Dạ, em đã {act_vn} hết tất cả thiết bị trong nhà cho anh rồi nè~"
             result["voice_reply"] = reply
             result["tts_audio"] = await self.tts.synthesize(reply)
             result["verify"] = "success"
@@ -299,7 +312,7 @@ class SmartHomeGateway:
             self.broadcast_event("command_result", {
                 "voice_reply": reply, "verify": "success", "engine": result["engine"], "follow_up": False
             })
-            logger.info(f"Bulk turn_off executed for {turned_off_count} channels (room={location})")
+            logger.info(f"Bulk {action} executed for {affected_count} channels (room={location})")
             return result
 
         # Lớp 2: phân giải node_id/channel TỪ REGISTRY THỰC TẾ — không bao giờ bịa
@@ -457,6 +470,8 @@ class SmartHomeGateway:
             # compact ack: {"t":"ack","id":"...","rl":[1,0],"seq":n}
             if payload.get("t") == "ack":
                 rl = payload.get("rl", [])
+                if rl and hasattr(self.registry, "update_relay_state"):
+                    self.registry.update_relay_state(node_id, rl)
                 self.broadcast_event("node_status", {
                     "node_id": node_id, "rl_state": rl, "seq": payload.get("seq"),
                     "ch1": rl[0] if len(rl)>0 else None, "ch2": rl[1] if len(rl)>1 else None
@@ -465,14 +480,32 @@ class SmartHomeGateway:
                 self.broadcast_event("node_status", payload)
 
     async def _on_ota_progress(self, topic: str, payload: Any):
-        """Broadcast OTA flashing progress from ESP32 nodes to Web UI."""
-        node_id = topic.split("/")[-1]
+        """Broadcast OTA flashing progress from ESP32 nodes to Web UI and update task state."""
+        node_id = topic.split("/")[-1] if "/" in topic else "unknown"
         data = payload if isinstance(payload, dict) else {}
+        if isinstance(payload, str):
+            try:
+                data = json.loads(payload)
+            except Exception:
+                data = {"raw": payload}
+
+        if isinstance(data, dict) and data.get("node_id"):
+            node_id = data["node_id"]
+
+        progress = data.get("progress", 0) if isinstance(data, dict) else 0
+        status = data.get("status", "flashing") if isinstance(data, dict) else "flashing"
+        msg = (data.get("message") or data.get("msg") or "") if isinstance(data, dict) else ""
+
+        if hasattr(self, "ota") and self.ota:
+            self.ota.update_task_progress(node_id, progress, status, msg)
+
+        logger.info(f"⚡ [OTA Progress] {node_id}: {progress}% - {status} ({msg})")
+
         self.broadcast_event("ota_progress", {
             "node_id": node_id,
-            "progress": data.get("progress", 0),
-            "status": data.get("status", "flashing"),
-            "message": data.get("msg", "")
+            "progress": progress,
+            "status": status,
+            "message": msg
         })
 
     async def _on_ha_discovery(self, topic: str, payload: Any):
@@ -483,22 +516,6 @@ class SmartHomeGateway:
         """Native ESP32 discovery announcement received over MQTT."""
         self.discovery.handle_native_discovery(topic, payload)
 
-    async def _on_ota_progress(self, topic: str, payload: Any):
-        """Handle OTA flashing progress updates from nodes."""
-        node_id = topic.split("/")[-1] if "/" in topic else "unknown"
-        data = payload if isinstance(payload, dict) else {}
-        if isinstance(payload, str):
-            try:
-                data = json.loads(payload)
-            except Exception:
-                data = {"raw": payload}
-        self.broadcast_event("ota_progress", {
-            "node_id": node_id,
-            "progress": data.get("progress", 0),
-            "status": data.get("status", "progress"),
-            "message": data.get("message") or data.get("msg", "")
-        })
-
     async def _announce_all_nodes(self):
         """Broadcast Home Assistant discovery configs for all registered nodes."""
         await asyncio.sleep(2)
@@ -506,20 +523,151 @@ class SmartHomeGateway:
             await self.discovery.publish_ha_discovery_for_node(nid)
 
     # ── WebUI gọi: provision node pending ───────────────────────────────
-    async def provision_pending(self, mac: str, room: str, rl1: str, rl2: str, node_short: str = None) -> dict:
-        node = self.registry.provision_node(mac, room, rl1, rl2, node_short=node_short)
+    async def provision_pending(self, mac_or_id: str, room: str, rl1: str, rl2: str,
+                                node_short: str = None, name: str = None,
+                                location: str = None, description: str = None) -> dict:
+        node = self.registry.provision_node(
+            mac_or_id, room, rl1, rl2,
+            node_short=node_short, name=name, location=location, description=description
+        )
         if not node:
-            return {"success": False, "error": "MAC not in pending or invalid"}
-        node_id = node["node_id"]
+            return {"success": False, "error": "Target node not in pending or invalid"}
+        node_id = node.get("device_id") or node.get("node_id")
+        mac = node.get("mac", "")
         cfg = self.registry.get_provision_payload(node_id)
-        # gửi qua MQTT retain + nếu node đang giữ WS thì hello tiếp theo sẽ nhận
-        await self.mqtt.send_cfg(mac, cfg)          # cho node chưa có id
-        await self.mqtt.send_cfg(node_id, cfg)      # cho lần sau
+        # Gửi qua MQTT retain cho cả MAC và device_id
+        if mac:
+            await self.mqtt.send_cfg(mac, cfg)
+        await self.mqtt.send_cfg(node_id, cfg)
         # Công bố Home Assistant discovery để HA phát hiện node ngay lập tức
         await self.discovery.publish_ha_discovery_for_node(node_id)
-        self.broadcast_event("node_provisioned", {"node_id": node_id, "cfg": cfg})
-        self.broadcast_event("pending_remove", {"mac": mac.upper()})
-        return {"success": True, "node_id": node_id, "cfg": cfg}
+        self.broadcast_event("node_provisioned", {"node_id": node_id, "device_id": node_id, "cfg": cfg})
+        if mac:
+            self.broadcast_event("pending_remove", {"mac": mac.upper(), "device_id": node_id})
+        return {"success": True, "device_id": node_id, "node_id": node_id, "cfg": cfg}
+
+    # ── Device OS Twin Handlers (Spec Section 4, 8 & 9) ─────────────────
+    async def _on_unclaimed_device(self, topic: str, payload: Any):
+        """Thiết bị xuất xưởng / unprovisioned phát hiện qua home/discovery/unclaimed"""
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return
+        logger.info(f"🆕 [Discovery] Unclaimed Device: {payload.get('device_id')} ({payload.get('serial')})")
+        res = self.registry.on_hello(payload, ws_available=False)
+        self.broadcast_event("pending_device", payload)
+
+    async def _on_device_status(self, topic: str, payload: Any):
+        """Nhận LWT / online status từ home/devices/{device_id}/status"""
+        parts = topic.split("/")
+        if len(parts) < 4:
+            return
+        device_id = parts[2]
+        self.registry.update_heartbeat(device_id)
+
+        status_str = "online"
+        if isinstance(payload, dict):
+            status_str = payload.get("state", payload.get("status", "online"))
+        elif isinstance(payload, str):
+            status_str = payload.lower()
+
+        if status_str == "offline":
+            self.registry.mark_offline(device_id)
+            self.broadcast_event("node_status", {"node_id": device_id, "online": False, "status": "offline"})
+        else:
+            self.broadcast_event("node_status", {"node_id": device_id, "online": True, "status": "online"})
+
+    async def _on_device_telemetry(self, topic: str, payload: Any):
+        """Nhận telemetry định kỳ từ home/devices/{device_id}/telemetry"""
+        parts = topic.split("/")
+        if len(parts) < 4:
+            return
+        device_id = parts[2]
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return
+        self.registry.record_telemetry(device_id, payload)
+        self.broadcast_event("node_telemetry", {"node_id": device_id, "device_id": device_id, **payload})
+
+    async def _on_reported_config(self, topic: str, payload: Any):
+        """Nhận reported configuration từ node: home/devices/{device_id}/config/reported"""
+        parts = topic.split("/")
+        if len(parts) < 5:
+            return
+        device_id = parts[2]
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                return
+        sync_status = self.registry.on_reported_config(device_id, payload)
+        self.broadcast_event("node_config_sync", {
+            "device_id": device_id,
+            "reported": payload,
+            "sync_status": sync_status
+        })
+
+    async def _on_device_relay_state(self, topic: str, payload: Any):
+        """Nhận trạng thái relay độc lập: home/devices/{device_id}/relay/{channel}/state"""
+        parts = topic.split("/")
+        if len(parts) < 5:
+            return
+        device_id = parts[2]
+        channel = parts[4]
+        state = 0
+        if isinstance(payload, dict):
+            state = payload.get("state", 0)
+        elif isinstance(payload, (int, str)):
+            state = 1 if str(payload) in ("1", "true", "on") else 0
+
+        self.registry.update_heartbeat(device_id)
+        cur_rl = None
+        if hasattr(self.registry, "update_relay_state") and device_id in self.registry.data.get("nodes", {}):
+            n = self.registry.data["nodes"][device_id]
+            cur_rl = list(n.get("relay_state", [0, 0]))
+            ch_idx = 0 if channel in ("1", "ch1", 1) else 1
+            if ch_idx < len(cur_rl):
+                cur_rl[ch_idx] = 1 if state else 0
+            self.registry.update_relay_state(device_id, cur_rl)
+
+        evt = {
+            "node_id": device_id,
+            "channel": channel,
+            "state": state
+        }
+        if cur_rl is not None:
+            evt["rl_state"] = cur_rl
+        self.broadcast_event("node_status", evt)
+
+    async def update_device_desired_config(self, device_id: str, desired_dict: dict) -> dict:
+        """Cập nhật Desired Configuration Twin và phát MQTT QoS 1 retain"""
+        new_v, desired_payload = self.registry.update_desired_config(device_id, desired_dict)
+        # Gửi topic industrial
+        await self.mqtt.send_desired_config(device_id, desired_payload)
+        # Gửi thêm legacy cfg topic
+        legacy_cfg = self.registry.get_provision_payload(device_id)
+        if legacy_cfg:
+            await self.mqtt.send_cfg(device_id, legacy_cfg)
+        self.broadcast_event("node_config_desired", {
+            "device_id": device_id,
+            "desired": desired_payload,
+            "sync_status": "SYNCING"
+        })
+        return {"success": True, "device_id": device_id, "version": new_v, "sync_status": "SYNCING"}
+
+    async def update_device(self, device_id: str, update_dict: dict) -> dict:
+        """Cập nhật thông tin và cấu hình thiết bị, đồng bộ tức thì xuống ESP32."""
+        updated = self.registry.update_device(device_id, update_dict)
+        cfg_payload = self.registry.get_provision_payload(device_id)
+        if cfg_payload and self.mqtt:
+            await self.mqtt.send_cfg(device_id, cfg_payload)
+            await self.mqtt.send_desired_config(device_id, cfg_payload)
+        self.broadcast_event("node_status", {"node_id": device_id, "updated": True})
+        return updated
+
 
 
 def setup_logging():

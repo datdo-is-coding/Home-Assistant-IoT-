@@ -221,13 +221,30 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
 }
 #toast.show { transform: translateY(0); opacity: 1; }
 
-@media (max-width: 900px) {
-  aside.sidebar { width: 72px; }
-  .brand-text, .nav-text, .sys-status, .user-pill span { display: none; }
-  .brand-box { justify-content: center; padding: 18px 0; }
-  .nav-item { justify-content: center; padding: 14px 0; }
-  main.main-viewport { margin-left: 72px; width: calc(100% - 72px); }
-  .content-container { padding: 16px; }
+/* Modal Dialogs */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(10px);
+  display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px;
+}
+.modal-backdrop.active { display: flex; animation: viewFade 0.2s ease-out; }
+.modal-box {
+  background: #0e1422; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 16px;
+  width: 100%; max-width: 520px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 35px rgba(0, 242, 254, 0.15);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.modal-head {
+  padding: 18px 24px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-head h3 { font-size: 1.05rem; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px; }
+.modal-close {
+  background: none; border: none; font-size: 1.2rem; color: var(--text-muted); cursor: pointer; padding: 4px;
+}
+.modal-close:hover { color: #fff; }
+.modal-body { padding: 20px 24px; max-height: 75vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.modal-foot {
+  padding: 14px 24px; border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex; justify-content: flex-end; gap: 10px; background: rgba(0, 0, 0, 0.25);
 }
 </style>
 </head>
@@ -356,7 +373,10 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
         <div style="display:flex;gap:8px" id="room-filter-bar">
           <button class="btn btn-primary" onclick="filterRoom('all')">Tất Cả</button>
         </div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary" onclick="openAddDeviceModal()" style="display:flex;align-items:center;gap:6px;box-shadow:0 0 15px rgba(0,242,254,0.25)">
+            <span>➕</span> Thêm Thiết Bị
+          </button>
           <button class="btn btn-ghost" onclick="batchToggle('turn_on')">💡 Bật Tất Cả</button>
           <button class="btn btn-ghost" onclick="batchToggle('turn_off')">🌙 Tắt Tất Cả</button>
         </div>
@@ -426,8 +446,7 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
             <div>
               <label style="font-size:0.78rem;color:var(--text-dim)">Chọn thiết bị đích cần nạp:</label>
               <select class="sel" id="ota-node-select" style="margin-top:4px">
-                <option value="esp32s3_master">esp32s3_master (ESP32-S3 Master Board)</option>
-                <option value="all">Tất cả thiết bị online</option>
+                <option value="all">🌐 Tất cả thiết bị online (Broadcast All)</option>
               </select>
             </div>
             <button class="btn btn-primary" style="margin-top:6px;padding:12px" onclick="triggerOtaFlash()">
@@ -667,6 +686,145 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
   </div>
 </main>
 
+<!-- Modal Thêm Thiết Bị -->
+<div id="modal-add-device" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3><span>➕</span> Thêm Thiết Bị Vào Hệ Thống</h3>
+      <button class="modal-close" onclick="closeAddDeviceModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="modal-add-pending-box"></div>
+      <div>
+        <label style="font-size:0.78rem;color:var(--text-dim)">ID Thiết Bị hoặc Địa Chỉ MAC (*):</label>
+        <input type="text" class="inp" id="add-dev-id" placeholder="node_85350b54 hoặc 28:84:85:35:0B:54" style="margin-top:4px">
+      </div>
+      <div>
+        <label style="font-size:0.78rem;color:var(--text-dim)">Tên Thiết Bị Thân Thiện:</label>
+        <input type="text" class="inp" id="add-dev-name" placeholder="Loa & Công Tắc Phòng Khách" style="margin-top:4px">
+      </div>
+      <div class="grid-2" style="gap:12px">
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Phòng (Room):</label>
+          <select class="sel" id="add-dev-room" style="margin-top:4px">
+            <option value="livingroom">Phòng Khách (livingroom)</option>
+            <option value="bedroom">Phòng Ngủ (bedroom)</option>
+            <option value="kitchen">Phòng Bếp (kitchen)</option>
+            <option value="balcony">Ban Công (balcony)</option>
+            <option value="bathroom">Phòng Tắm (bathroom)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Vị trí chi tiết:</label>
+          <input type="text" class="inp" id="add-dev-location" placeholder="Tầng 1 - Phòng Khách" style="margin-top:4px">
+        </div>
+      </div>
+      <div class="grid-2" style="gap:12px">
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Loại Tải Kênh 1 (CH1):</label>
+          <select class="sel" id="add-dev-rl1" style="margin-top:4px">
+            <option value="light" selected>💡 Đèn (Light)</option>
+            <option value="fan">🌀 Quạt (Fan)</option>
+            <option value="socket">🔌 Ổ cắm (Socket)</option>
+            <option value="heater">♨️ Bình nóng lạnh (Heater)</option>
+            <option value="pump">💧 Máy bơm (Pump)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Loại Tải Kênh 2 (CH2):</label>
+          <select class="sel" id="add-dev-rl2" style="margin-top:4px">
+            <option value="fan" selected>🌀 Quạt (Fan)</option>
+            <option value="light">💡 Đèn (Light)</option>
+            <option value="socket">🔌 Ổ cắm (Socket)</option>
+            <option value="heater">♨️ Bình nóng lạnh (Heater)</option>
+            <option value="pump">💧 Máy bơm (Pump)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeAddDeviceModal()">Hủy</button>
+      <button class="btn btn-primary" onclick="submitAddDevice()">➕ Kích Hoạt Thiết Bị</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Sửa Thiết Bị -->
+<div id="modal-edit-device" class="modal-backdrop">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3><span>✏️</span> Chỉnh Sửa Thiết Bị</h3>
+      <button class="modal-close" onclick="closeEditDeviceModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.06)">
+        <div>
+          <div style="font-size:0.7rem;color:var(--text-dim)">MÃ THIẾT BỊ (IMMUTABLE ID)</div>
+          <input type="text" id="edit-dev-id" readonly style="background:transparent;border:none;color:var(--accent);font-family:monospace;font-weight:700;font-size:0.95rem;outline:none;padding:0">
+        </div>
+        <div id="edit-dev-meta" style="font-size:0.72rem;color:var(--text-muted);font-family:monospace"></div>
+      </div>
+      <div>
+        <label style="font-size:0.78rem;color:var(--text-dim)">Tên Thiết Bị:</label>
+        <input type="text" class="inp" id="edit-dev-name" style="margin-top:4px">
+      </div>
+      <div class="grid-2" style="gap:12px">
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Phòng (Room):</label>
+          <select class="sel" id="edit-dev-room" style="margin-top:4px">
+            <option value="livingroom">Phòng Khách (livingroom)</option>
+            <option value="bedroom">Phòng Ngủ (bedroom)</option>
+            <option value="kitchen">Phòng Bếp (kitchen)</option>
+            <option value="balcony">Ban Công (balcony)</option>
+            <option value="bathroom">Phòng Tắm (bathroom)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-dim)">Vị trí chi tiết:</label>
+          <input type="text" class="inp" id="edit-dev-location" style="margin-top:4px">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:0.78rem;color:var(--text-dim)">Mô tả:</label>
+        <input type="text" class="inp" id="edit-dev-desc" style="margin-top:4px">
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:12px;margin-top:4px">
+        <div style="font-size:0.8rem;font-weight:700;color:var(--text-main);margin-bottom:8px">⚙️ Cấu Hình Rơ-le (Relay Channels)</div>
+        <div class="grid-2" style="gap:12px">
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-dim)">Tên Kênh 1 (CH1):</label>
+            <input type="text" class="inp" id="edit-ch1-name" style="margin-top:4px">
+            <label style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;display:block">Loại thiết bị CH1:</label>
+            <select class="sel" id="edit-ch1-type" style="margin-top:2px">
+              <option value="light">💡 Đèn (Light)</option>
+              <option value="fan">🌀 Quạt (Fan)</option>
+              <option value="socket">🔌 Ổ cắm (Socket)</option>
+              <option value="heater">♨️ Bình nóng lạnh (Heater)</option>
+              <option value="pump">💧 Máy bơm (Pump)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.75rem;color:var(--text-dim)">Tên Kênh 2 (CH2):</label>
+            <input type="text" class="inp" id="edit-ch2-name" style="margin-top:4px">
+            <label style="font-size:0.72rem;color:var(--text-dim);margin-top:6px;display:block">Loại thiết bị CH2:</label>
+            <select class="sel" id="edit-ch2-type" style="margin-top:2px">
+              <option value="light">💡 Đèn (Light)</option>
+              <option value="fan">🌀 Quạt (Fan)</option>
+              <option value="socket">🔌 Ổ cắm (Socket)</option>
+              <option value="heater">♨️ Bình nóng lạnh (Heater)</option>
+              <option value="pump">💧 Máy bơm (Pump)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeEditDeviceModal()">Hủy</button>
+      <button class="btn btn-primary" onclick="submitEditDevice()">💾 Lưu Thay Đổi</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast">Thông báo</div>
 
 <!-- ── JAVASCRIPT LOGIC & THREE.JS 3D DIGITAL TWIN ── -->
@@ -848,9 +1006,25 @@ async function loadAll() {
     renderDashboardKPIs();
     renderDevices();
     renderProvisioning();
+    updateOtaNodeSelect();
     updateThreeLights();
   } catch(e) {
     console.warn('loadAll error:', e);
+  }
+}
+
+function updateOtaNodeSelect() {
+  const sel = $('ota-node-select');
+  if (!sel) return;
+  const curVal = sel.value;
+  let opts = '<option value="all">🌐 Tất cả thiết bị online (Broadcast All)</option>';
+  for (const [nid, n] of Object.entries(nodes)) {
+    const label = n.name ? `${n.name} (${nid})` : nid;
+    opts += `<option value="${nid}">${label}</option>`;
+  }
+  sel.innerHTML = opts;
+  if (curVal && (curVal === 'all' || nodes[curVal])) {
+    sel.value = curVal;
   }
 }
 
@@ -903,14 +1077,27 @@ function renderDevices() {
       const n = nodes[nid] || {};
       const isOnline = n.status === 'online';
       const rState = n.relay_state || [0, 0];
+      const serial = (n.firmware && n.firmware.serial) || n.serial || 'S3-2026-XXXXXX';
+      const syncStatus = n.sync_status || 'SYNCED';
+      const isSynced = syncStatus === 'SYNCED';
+      const syncBadge = `<span style="font-size:0.7rem;padding:2px 6px;border-radius:4px;font-weight:600;background:${isSynced?'rgba(16,185,129,0.15)':'rgba(245,158,11,0.15)'};color:${isSynced?'var(--green)':'var(--orange)'}">${syncStatus}</span>`;
 
       html += `<div class="device-tile">
-        <div class="device-tile-top">
-          <div>
-            <div class="device-name">${nid}</div>
-            <div class="device-meta">MAC: ${n.mac || 'ESP32'} · RSSI: ${n.rssi != null ? n.rssi + ' dB' : 'N/A'}</div>
+        <div class="device-tile-top" style="align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div class="device-name" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <span>${n.name || nid}</span>
+              ${syncBadge}
+            </div>
+            <div class="device-meta">${n.location || n.room || 'Phòng'} · <span style="font-family:monospace;color:var(--accent)">${nid}</span> · SN: <span style="font-family:monospace">${serial}</span> · RSSI: ${(n.address ? n.address.rssi : n.rssi) != null ? (n.address ? n.address.rssi : n.rssi) + ' dB' : 'N/A'}</div>
           </div>
-          <span class="status-pill"><span class="dot ${isOnline?'':'offline'}"></span>${isOnline?'Online':'Offline'}</span>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+            <span class="status-pill"><span class="dot ${isOnline?'':'offline'}"></span>${isOnline?'Online':'Offline'}</span>
+            <div style="display:flex;gap:4px">
+              <button class="btn btn-ghost" style="padding:3px 8px;font-size:0.72rem;border-radius:6px" onclick="openEditDeviceModal('${nid}')" title="Sửa thông tin thiết bị">✏️ Sửa</button>
+              <button class="btn btn-ghost" style="padding:3px 8px;font-size:0.72rem;border-radius:6px;color:#f87171;border-color:rgba(239,68,68,0.25)" onclick="deleteDevice('${nid}')" title="Xóa thiết bị">🗑️ Xóa</button>
+            </div>
+          </div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">`;
 
@@ -948,6 +1135,16 @@ function filterRoom(rm) {
 async function toggleRelay(nodeId, channel, cb) {
   const action = cb.checked ? 'turn_on' : 'turn_off';
   addLog(`⚡ Điều khiển [${nodeId}]: ${channel} → ${action}`);
+
+  // Cập nhật state nội bộ ngay trong JS memory để phản hồi mượt mà 0ms
+  if (nodes[nodeId]) {
+    const idx = (channel === 'ch1' || channel === 1) ? 0 : 1;
+    if (!nodes[nodeId].relay_state) nodes[nodeId].relay_state = [0, 0];
+    nodes[nodeId].relay_state[idx] = cb.checked ? 1 : 0;
+    renderDashboardKPIs();
+    updateThreeLights();
+  }
+
   try {
     const r = await fetch('/api/relay', {
       method: 'POST',
@@ -957,10 +1154,15 @@ async function toggleRelay(nodeId, channel, cb) {
     const j = await r.json();
     if (j.success) {
       showToast(`Đã ${action==='turn_on'?'bật':'tắt'} ${channel} (${nodeId})`);
-      setTimeout(loadAll, 400);
+      setTimeout(loadAll, 600);
     } else {
       showToast('Lỗi: ' + (j.error || 'Thao tác thất bại'), false);
       cb.checked = !cb.checked;
+      if (nodes[nodeId]) {
+        const idx = (channel === 'ch1' || channel === 1) ? 0 : 1;
+        nodes[nodeId].relay_state[idx] = cb.checked ? 1 : 0;
+        renderDashboardKPIs();
+      }
     }
   } catch(e) {
     showToast('Lỗi kết nối tới Gateway', false);
@@ -990,49 +1192,243 @@ function renderProvisioning() {
   if (!pKeys.length) {
     pBox.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;text-align:center;padding:24px">Không có thiết bị mới nào đang chờ. Hãy cấp nguồn cho công tắc ESP32!</div>';
   } else {
-    pBox.innerHTML = pKeys.map(mac => {
-      const p = pending[mac] || {};
-      return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;flex-wrap:wrap;gap:12px">
-        <div>
-          <b style="font-family:monospace;font-size:0.95rem;color:var(--accent)">${mac}</b>
-          <div style="font-size:0.75rem;color:var(--text-dim)">IP: ${p.ip||'chưa gán'} · RSSI: ${p.rssi!=null?p.rssi+' dB':'N/A'}</div>
+    pBox.innerHTML = pKeys.map(key => {
+      const p = pending[key] || {};
+      const devId = p.device_id || key;
+      const mac = p.mac || key;
+      const serial = (p.hardware_identity && p.hardware_identity.serial) || p.serial || 'S3-2026-XXXXXX';
+      const hw = (p.hardware_identity && p.hardware_identity.hardware) || p.hardware || 'esp32s3';
+      return `<div style="padding:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div>
+            <span style="font-family:monospace;font-weight:700;font-size:1.05rem;color:var(--accent)">${devId}</span>
+            <span style="background:rgba(0,242,254,0.12);color:var(--accent);padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">${hw}</span>
+            <span style="background:rgba(255,255,255,0.06);color:var(--text-dim);padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:4px">SN: ${serial}</span>
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-dim)">MAC: ${mac} · IP: ${p.ip||'chưa gán'} · RSSI: ${p.rssi!=null?p.rssi+' dB':'N/A'}</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <input class="inp" id="prov-room-${mac}" placeholder="Tên phòng (ví dụ: livingroom)" style="width:160px" value="livingroom">
-          <select class="sel" id="prov-r1-${mac}" style="width:130px">
-            <option value="light" selected>RL1: Đèn</option>
-            <option value="fan">RL1: Quạt</option>
-            <option value="switch">RL1: Công tắc</option>
-          </select>
-          <select class="sel" id="prov-r2-${mac}" style="width:130px">
-            <option value="fan" selected>RL2: Quạt</option>
-            <option value="light">RL2: Đèn</option>
-            <option value="switch">RL2: Công tắc</option>
-          </select>
-          <button class="btn btn-primary" onclick="pairNode('${mac}')">➕ Gán Vào Nhà</button>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:8px;align-items:center">
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Tên thiết bị (User Identity):</label>
+            <input class="inp" id="prov-name-${devId}" placeholder="Loa phòng ngủ" value="Loa ${p.room || 'Phòng Khách'}" style="margin-top:2px">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Mã phòng (Room ID):</label>
+            <input class="inp" id="prov-room-${devId}" placeholder="bedroom, livingroom" value="${p.room || 'livingroom'}" style="margin-top:2px">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Vị trí (Location):</label>
+            <input class="inp" id="prov-loc-${devId}" placeholder="Tầng 2 - Phòng ngủ" value="Tầng 1 - Phòng Khách" style="margin-top:2px">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Mô tả thiết bị:</label>
+            <input class="inp" id="prov-desc-${devId}" placeholder="Voice node" value="Voice node" style="margin-top:2px">
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Kênh 1 (RL1):</label>
+            <select class="sel" id="prov-r1-${devId}" style="margin-top:2px">
+              <option value="light" selected>RL1: Đèn</option>
+              <option value="fan">RL1: Quạt</option>
+              <option value="switch">RL1: Công tắc</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:0.72rem;color:var(--text-dim)">Kênh 2 (RL2):</label>
+            <select class="sel" id="prov-r2-${devId}" style="margin-top:2px">
+              <option value="fan" selected>RL2: Quạt</option>
+              <option value="light">RL2: Đèn</option>
+              <option value="switch">RL2: Công tắc</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="pairNode('${devId}', '${mac}')" style="grid-column: 1 / -1;margin-top:6px;padding:10px">
+            ➕ Gán Vào Hệ Thống (Claim Device)
+          </button>
         </div>
       </div>`;
     }).join('');
   }
 }
 
-async function pairNode(mac) {
-  const room = ($('prov-room-' + mac)?.value || 'livingroom').trim();
-  const rl1 = $('prov-r1-' + mac)?.value || 'light';
-  const rl2 = $('prov-r2-' + mac)?.value || 'fan';
+async function pairNode(devId, mac) {
+  const name = ($('prov-name-' + devId)?.value || '').trim();
+  const room = ($('prov-room-' + devId)?.value || 'livingroom').trim();
+  const location = ($('prov-loc-' + devId)?.value || '').trim();
+  const description = ($('prov-desc-' + devId)?.value || '').trim();
+  const rl1 = $('prov-r1-' + devId)?.value || 'light';
+  const rl2 = $('prov-r2-' + devId)?.value || 'fan';
   try {
     const r = await fetch('/api/provision', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac, room, rl1, rl2 })
+      body: JSON.stringify({ device_id: devId, mac, name, room, location, description, rl1, rl2 })
     });
     const j = await r.json();
     if (j.success) {
-      showToast(`Đã gán công tắc ${mac} vào phòng ${room} thành công!`);
+      showToast(`Đã gán thiết bị "${name || devId}" vào phòng ${room} thành công!`);
       setTimeout(loadAll, 600);
     } else {
       showToast('Lỗi: ' + (j.error || ''), false);
     }
   } catch(e) { showToast('Lỗi gửi lệnh gán thiết bị', false); }
+}
+
+/* ── Device Management Modal Functions ── */
+function openAddDeviceModal() {
+  const pendingKeys = Object.keys(pending);
+  let pendingHtml = '';
+  if (pendingKeys.length > 0) {
+    pendingHtml = `<div style="background:rgba(0,242,254,0.08);border:1px solid rgba(0,242,254,0.25);border-radius:10px;padding:12px;margin-bottom:14px">
+      <div style="font-size:0.8rem;font-weight:700;color:var(--accent);margin-bottom:6px">⚡ Thiết bị mới phát hiện đang chờ gán (${pendingKeys.length}):</div>
+      <div style="display:flex;flex-direction:column;gap:6px">`;
+    pendingKeys.forEach(pk => {
+      const p = pending[pk] || {};
+      const mac = p.mac || pk;
+      pendingHtml += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.78rem">
+        <span><b>${p.device_id || pk}</b> (${mac})</span>
+        <button class="btn btn-primary" style="padding:3px 8px;font-size:0.72rem" onclick="fillAddDeviceForm('${p.device_id || pk}', '${mac}')">Chọn Nhanh</button>
+      </div>`;
+    });
+    pendingHtml += `</div></div>`;
+  }
+  const pBox = $('modal-add-pending-box');
+  if (pBox) pBox.innerHTML = pendingHtml;
+  $('modal-add-device').classList.add('active');
+}
+
+function closeAddDeviceModal() {
+  $('modal-add-device').classList.remove('active');
+}
+
+function fillAddDeviceForm(id, mac) {
+  $('add-dev-id').value = id || mac;
+  if (!$('add-dev-name').value) $('add-dev-name').value = 'Loa ' + ($('add-dev-room').value || 'Phòng Khách');
+}
+
+async function submitAddDevice() {
+  const idOrMac = $('add-dev-id').value.trim();
+  const name = $('add-dev-name').value.trim();
+  const room = $('add-dev-room').value.trim() || 'livingroom';
+  const location = $('add-dev-location').value.trim();
+  const rl1 = $('add-dev-rl1').value;
+  const rl2 = $('add-dev-rl2').value;
+
+  if (!idOrMac) {
+    showToast('Vui lòng nhập ID hoặc MAC của thiết bị', false);
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/provision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: idOrMac,
+        mac: idOrMac,
+        name: name || undefined,
+        room: room,
+        location: location || undefined,
+        rl1: rl1,
+        rl2: rl2
+      })
+    });
+    const j = await r.json();
+    if (j.success || j.device_id || j.node_id) {
+      showToast('Đã thêm và kích hoạt thiết bị thành công!');
+      closeAddDeviceModal();
+      loadAll();
+    } else {
+      showToast('Lỗi: ' + (j.error || 'Không thể thêm thiết bị'), false);
+    }
+  } catch(e) {
+    showToast('Lỗi kết nối tới Gateway', false);
+  }
+}
+
+function openEditDeviceModal(deviceId) {
+  const n = nodes[deviceId];
+  if (!n) return;
+
+  $('edit-dev-id').value = deviceId;
+  $('edit-dev-meta').textContent = `${n.firmware?.hardware || 'esp32s3'} · SN: ${(n.firmware?.serial || n.serial || '—')} · MAC: ${(n.address?.mac || n.mac || '—')}`;
+  $('edit-dev-name').value = n.name || deviceId;
+  $('edit-dev-room').value = n.room || 'livingroom';
+  $('edit-dev-location').value = n.location || '';
+  $('edit-dev-desc').value = n.description || '';
+
+  const ch1 = n.channels?.ch1 || {};
+  const ch2 = n.channels?.ch2 || {};
+
+  $('edit-ch1-name').value = ch1.name || ch1.fullname || 'Đèn';
+  $('edit-ch1-type').value = ch1.device_type || 'light';
+  $('edit-ch2-name').value = ch2.name || ch2.fullname || 'Quạt';
+  $('edit-ch2-type').value = ch2.device_type || 'fan';
+
+  $('modal-edit-device').classList.add('active');
+}
+
+function closeEditDeviceModal() {
+  $('modal-edit-device').classList.remove('active');
+}
+
+async function submitEditDevice() {
+  const deviceId = $('edit-dev-id').value.trim();
+  const name = $('edit-dev-name').value.trim();
+  const room = $('edit-dev-room').value.trim();
+  const location = $('edit-dev-location').value.trim();
+  const description = $('edit-dev-desc').value.trim();
+  const ch1_name = $('edit-ch1-name').value.trim();
+  const ch1_type = $('edit-ch1-type').value;
+  const ch2_name = $('edit-ch2-name').value.trim();
+  const ch2_type = $('edit-ch2-type').value;
+
+  if (!deviceId) return;
+
+  try {
+    const r = await fetch('/api/device/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        device_id: deviceId,
+        name, room, location, description,
+        ch1_name, ch1_type,
+        ch2_name, ch2_type
+      })
+    });
+    const j = await r.json();
+    if (j.success) {
+      showToast(`Đã cập nhật cấu hình thiết bị ${deviceId}!`);
+      closeEditDeviceModal();
+      loadAll();
+    } else {
+      showToast('Lỗi: ' + (j.error || 'Cập nhật thất bại'), false);
+    }
+  } catch(e) {
+    showToast('Lỗi kết nối tới Gateway', false);
+  }
+}
+
+async function deleteDevice(deviceId) {
+  const n = nodes[deviceId];
+  const devName = n ? (n.name || deviceId) : deviceId;
+  if (!confirm(`Bạn có chắc chắn muốn xóa thiết bị "${devName}" (${deviceId}) khỏi hệ thống?\nThiết bị sẽ trở về trạng thái chưa kích hoạt.`)) {
+    return;
+  }
+
+  try {
+    const r = await fetch('/api/device/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: deviceId })
+    });
+    const j = await r.json();
+    if (j.success) {
+      showToast(`Đã xóa thiết bị ${devName} thành công!`);
+      loadAll();
+    } else {
+      showToast('Lỗi xóa: ' + (j.error || 'Không thể xóa'), false);
+    }
+  } catch(e) {
+    showToast('Lỗi kết nối tới Gateway', false);
+  }
 }
 
 /* ── OTA Firmware Hub ── */
@@ -1135,7 +1531,7 @@ async function uploadBinary(file) {
 
 async function triggerOtaFlash() {
   const filename = $('ota-firmware-select')?.value;
-  const targetNode = $('ota-node-select')?.value || 'esp32s3_master';
+  const targetNode = $('ota-node-select')?.value || 'all';
   if (!filename) {
     showToast('Vui lòng chọn file firmware trước khi nạp!', false);
     return;
@@ -1302,10 +1698,11 @@ function playWebSound(name) {
 async function playSpeakerSound(name) {
   try {
     showToast(`Đang truyền "${name}" tới loa ESP32...`);
+    const targetNode = $('ota-node-select')?.value || 'all';
     const r = await fetch('/api/sound/play', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sound: name, node_id: 'esp32s3_master' })
+      body: JSON.stringify({ sound: name, node_id: targetNode })
     });
     const j = await r.json();
     if (j.success) showToast(`Đã phát "${name}" thành công trên loa ESP32!`);
@@ -1390,11 +1787,36 @@ function connectSSE() {
       const d = JSON.parse(e.data);
       if (d.node_id && nodes[d.node_id]) {
         if (d.rl_state) nodes[d.node_id].relay_state = d.rl_state;
+        else if (d.channel != null && d.state !== undefined) {
+          const idx = (d.channel === '1' || d.channel === 'ch1' || d.channel === 1) ? 0 : 1;
+          if (!nodes[d.node_id].relay_state) nodes[d.node_id].relay_state = [0, 0];
+          nodes[d.node_id].relay_state[idx] = d.state ? 1 : 0;
+        }
         if (d.online != null) nodes[d.node_id].status = d.online ? 'online' : 'offline';
       }
       renderDashboardKPIs();
       renderDevices();
       updateThreeLights();
+    } catch(err) {}
+  });
+
+  es.addEventListener('node_config_sync', e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.device_id && nodes[d.device_id]) {
+        nodes[d.device_id].sync_status = d.sync_status;
+        renderDevices();
+      }
+    } catch(err) {}
+  });
+
+  es.addEventListener('node_config_desired', e => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.device_id && nodes[d.device_id]) {
+        nodes[d.device_id].sync_status = 'SYNCING';
+        renderDevices();
+      }
     } catch(err) {}
   });
 
@@ -1627,6 +2049,17 @@ class WebServer:
                     else:
                         success = False
                         
+                    # Cập nhật ngay relay_state vào registry để /api/nodes luôn có dữ liệu đồng bộ
+                    if success and hasattr(self.gateway, "registry") and node_id in self.gateway.registry.data.get("nodes", {}):
+                        n = self.gateway.registry.data["nodes"][node_id]
+                        cur_rl = list(n.get("relay_state", [0, 0]))
+                        ch_idx = 0 if channel in ("ch1", 1, "1") else 1
+                        val = 1 if action in ("turn_on", "on", "1", 1) else 0
+                        if ch_idx < len(cur_rl):
+                            cur_rl[ch_idx] = val
+                        self.gateway.registry.update_relay_state(node_id, cur_rl)
+                        self.broadcast_event("node_status", {"node_id": node_id, "rl_state": cur_rl})
+
                     resp_data = {"success": success, "node_id": node_id, "channel": channel, "action": action}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
@@ -1636,27 +2069,149 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Provisioning ──
-            if method == "POST" and path == "/api/provision":
+            # ── API: Provisioning / Add Device / Claim ──
+            if method == "POST" and (path in ("/api/provision", "/api/device/claim", "/api/device/add")):
                 body = await _read_body()
                 try:
                     d = json.loads(body.decode() or "{}")
                     mac = d.get("mac", "").upper()
-                    if not mac or mac not in self.gateway.registry.get_pending():
-                        resp_data = {"success": False, "error": f"MAC {mac} không nằm trong pending"}
-                    else:
-                        res = await self.gateway.provision_pending(
-                            mac, d.get("room", "livingroom"), d.get("rl1", "light"), d.get("rl2", "fan"),
-                            node_short=d.get("node_short")
-                        )
-                        # Auto assign ownership to current user
-                        if current_user and hasattr(self.gateway, "auth"):
-                            nid = res.get("node_id")
-                            if nid:
-                                self.gateway.auth.assign_device_to_user(current_user["id"], nid)
-                        resp_data = res
+                    dev_id = d.get("device_id", "")
+                    target_key = dev_id if (dev_id and dev_id in self.gateway.registry.get_pending()) else mac
+                    if not target_key or target_key not in self.gateway.registry.get_pending():
+                        for pk, pv in self.gateway.registry.get_pending().items():
+                            if pk == dev_id or pk == mac or pv.get("mac") == mac or pv.get("device_id") == dev_id:
+                                target_key = pk
+                                break
+                    if not target_key:
+                        target_key = dev_id or mac
+
+                    res = await self.gateway.provision_pending(
+                        target_key,
+                        room=d.get("room", "livingroom"),
+                        rl1=d.get("rl1", "light"),
+                        rl2=d.get("rl2", "fan"),
+                        node_short=d.get("node_short"),
+                        name=d.get("name"),
+                        location=d.get("location"),
+                        description=d.get("description")
+                    )
+                    # Auto assign ownership to current user
+                    if current_user and hasattr(self.gateway, "auth"):
+                        nid = res.get("device_id") or res.get("node_id")
+                        if nid:
+                            self.gateway.auth.assign_device_to_user(current_user["id"], nid)
+                    resp_data = res
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Delete / Remove Device ──
+            if method in ("POST", "DELETE") and (path == "/api/device/delete" or (path.startswith("/api/device/") and path.endswith("/delete"))):
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}") if body else {}
+                    dev_id = d.get("device_id") or d.get("node_id")
+                    if not dev_id:
+                        parts = [p for p in path.split("/") if p]
+                        if len(parts) >= 3:
+                            dev_id = parts[2]
+                    if not dev_id:
+                        resp_data = {"success": False, "error": "device_id is required"}
+                    else:
+                        ok = self.gateway.registry.delete_node(dev_id)
+                        self.broadcast_event("device_deleted", {"device_id": dev_id})
+                        resp_data = {"success": ok, "device_id": dev_id}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Edit / Update Device Info ──
+            if method == "POST" and (path == "/api/device/update" or path == "/api/device/edit"):
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    dev_id = d.get("device_id") or d.get("node_id")
+                    if not dev_id:
+                        resp_data = {"success": False, "error": "device_id is required"}
+                    elif hasattr(self.gateway, "update_device"):
+                        updated = await self.gateway.update_device(dev_id, d)
+                        resp_data = {"success": True, "device": updated}
+                    else:
+                        resp_data = {"success": False, "error": "Gateway update_device not available"}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Device OS Desired Config Twin (Spec Section 4 & 8) ──
+            if method == "POST" and (path == "/api/device/config" or (path.startswith("/api/device/") and path.endswith("/config"))):
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    if path != "/api/device/config":
+                        parts = [p for p in path.split("/") if p]
+                        if len(parts) >= 3:
+                            d["device_id"] = parts[2]
+                    dev_id = d.get("device_id")
+                    if not dev_id:
+                        resp_data = {"success": False, "error": "device_id is required"}
+                    else:
+                        resp_data = await self.gateway.update_device_desired_config(dev_id, d)
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Device OS Twin Query (Spec Section 8) ──
+            if method == "GET" and (path == "/api/device/twin" or (path.startswith("/api/device/") and path.endswith("/twin"))):
+                dev_id = query.get("id", [None])[0] or query.get("device_id", [None])[0]
+                if not dev_id and path != "/api/device/twin":
+                    parts = [p for p in path.split("/") if p]
+                    if len(parts) >= 3:
+                        dev_id = parts[2]
+                twin = self.gateway.registry.get_device_twin(dev_id) if dev_id else None
+                resp_data = {"success": bool(twin), "twin": twin} if twin else {"success": False, "error": f"Device {dev_id} not found"}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Telemetry History ──
+            if method == "GET" and (path == "/api/device/telemetry" or (path.startswith("/api/device/") and path.endswith("/telemetry"))):
+                dev_id = query.get("id", [None])[0] or query.get("device_id", [None])[0]
+                if not dev_id and path != "/api/device/telemetry":
+                    parts = [p for p in path.split("/") if p]
+                    if len(parts) >= 3:
+                        dev_id = parts[2]
+                limit = int(query.get("limit", [50])[0])
+                records = self.gateway.registry.get_telemetry_history(dev_id, limit=limit) if dev_id else []
+                resp_data = {"device_id": dev_id, "telemetry": records}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: OTA History Records ──
+            if method == "GET" and path == "/api/ota/history":
+                dev_id = query.get("device_id", [None])[0]
+                records = self.gateway.registry.get_ota_history(dev_id)
+                resp_data = {"history": records}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
                 writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
@@ -1746,7 +2301,7 @@ class WebServer:
                 try:
                     d = json.loads(body.decode() or "{}")
                     s_name = d.get("sound", "bootup_sound")
-                    node_id = d.get("node_id", "esp32s3_master")
+                    node_id = d.get("node_id", "all")
                     ok = False
                     if hasattr(self.gateway, "sound") and self.gateway.sound:
                         ok = await self.gateway.sound.play_sound(s_name, target_node=node_id)
@@ -1892,21 +2447,26 @@ class WebServer:
                 try:
                     d = json.loads(body.decode() or "{}")
                     fn = d.get("filename")
-                    node_id = d.get("node_id", "esp32s3_master")
+                    node_id = d.get("node_id", "all")
                     
-                    # Find node IP
-                    node_info = self.gateway.registry.get_all_nodes().get(node_id, {})
-                    target_ip = node_info.get("ip")
-                    
-                    if target_ip and hasattr(self.gateway, "ota"):
-                        res = await self.gateway.ota.flash_via_http(target_ip, fn, node_id=node_id)
-                    elif hasattr(self.gateway, "ota"):
-                        # Fallback to MQTT pull
-                        my_ip = self.host if self.host != "0.0.0.0" else "192.168.11.29"
-                        res = await self.gateway.ota.trigger_via_mqtt(node_id, fn, my_ip)
+                    if not fn:
+                        resp_data = {"success": False, "error": "Thiếu tên file firmware (.bin)"}
+                    elif not hasattr(self.gateway, "ota") or not self.gateway.ota:
+                        resp_data = {"success": False, "error": "OTA manager không khả dụng trên Gateway"}
                     else:
-                        res = {"success": False, "error": "OTA manager not available"}
-                    resp_data = res
+                        # Dynamic gateway IP detection reachable by ESP32
+                        gw_ip = ""
+                        req_host = headers.get("host", "").split(":")[0]
+                        if req_host and req_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
+                            gw_ip = req_host
+                        elif hasattr(self.gateway.ota, "get_gateway_lan_ip"):
+                            gw_ip = self.gateway.ota.get_gateway_lan_ip()
+                        else:
+                            gw_ip = self.host if self.host != "0.0.0.0" else "127.0.0.1"
+
+                        # Trigger Pull OTA via dual channel (MQTT + WS)
+                        res = await self.gateway.ota.trigger_via_mqtt(node_id, fn, gateway_ip=gw_ip)
+                        resp_data = res
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
@@ -1915,13 +2475,22 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            if method == "GET" and path.startswith("/api/ota/download/"):
+            if method in ("GET", "HEAD") and path.startswith("/api/ota/download/"):
                 fn = os.path.basename(path)
                 data = self.gateway.ota.get_firmware_bytes(fn) if hasattr(self.gateway, "ota") else None
                 if data:
-                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
-                                  f"Content-Length: {len(data)}\r\nAccess-Control-Allow-Origin: *\r\n"
-                                  f"Connection: close\r\n\r\n").encode() + data)
+                    hdr = (f"HTTP/1.1 200 OK\r\n"
+                           f"Content-Type: application/octet-stream\r\n"
+                           f"Content-Length: {len(data)}\r\n"
+                           f"Content-Disposition: attachment; filename=\"{fn}\"\r\n"
+                           f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                           f"Pragma: no-cache\r\n"
+                           f"Expires: 0\r\n"
+                           f"Access-Control-Allow-Origin: *\r\n"
+                           f"Connection: close\r\n\r\n").encode()
+                    writer.write(hdr)
+                    if method == "GET":
+                        writer.write(data)
                     await writer.drain(); writer.close(); return
                 else:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")

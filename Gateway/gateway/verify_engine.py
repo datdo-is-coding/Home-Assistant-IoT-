@@ -48,6 +48,11 @@ class CommandVerifier:
         ok = await self.mqtt.send_command(node_id, channel, action, seq=seq)
         return "mqtt" if ok else "failed"
 
+    async def execute_action(self, node_id: str, channel: str, action: str, seq: int = 0) -> bool:
+        """Thực thi lệnh relay: ưu tiên WebSocket, fallback MQTT."""
+        via = await self._dispatch(node_id, channel, action, seq)
+        return via != "failed"
+
     async def verify_command(self, node_id: str, channel: str,
                              action: str, seq: int = 0) -> tuple:
         """

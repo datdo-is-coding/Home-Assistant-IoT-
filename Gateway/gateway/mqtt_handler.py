@@ -72,14 +72,19 @@ class MQTTHandler:
         legacy chưa nâng cấp lên compact protocol.
         """
         # Map channel names -> channel number
-        ch_number = {"ch1": 1, "ch2": 2, 1: 1, 2: 2}.get(channel, 0)
+        ch_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel, 0)
         if ch_number in (1, 2):
-            s = 1 if action in ("turn_on", "open", "on") else 0
+            s = 1 if action in ("turn_on", "open", "on", "1", 1) else 0
             payload = {"t": "rl", "ch": ch_number, "s": s, "seq": seq or 0}
             topic = config.TOPIC_CMD_SHORT.format(node_id=node_id)
             ok = await self.publish(topic, payload)
+
+            # Đồng thời gửi industrial topic (home/devices/{node_id}/relay/{ch}/set)
+            ind_topic = f"home/devices/{node_id}/relay/{ch_number}/set"
+            await self.publish(ind_topic, {"state": s})
+
             if ok:
-                logger.info(f"📤 CMD[compact] {node_id} ch{ch_number}={s} seq={seq}")
+                logger.info(f"📤 CMD[compact+ind] {node_id} ch{ch_number}={s} seq={seq}")
             return ok
         # legacy
         topic = config.TOPIC_COMMAND.format(node_id=node_id)
@@ -87,9 +92,37 @@ class MQTTHandler:
         return await self.publish(topic, payload)
 
     async def send_cfg(self, mac_or_id: str, cfg_payload: dict) -> bool:
-        """Gửi gói provision/cfg xuống node. QoS 1 + retain để node offline vẫn nhận khi boot."""
+        """Gửi gói provision/cfg xuống node. QoS 1, retain=False để tránh node bị reboot loop vô tận khi broker lưu tin nhắn cũ."""
         topic = config.TOPIC_CFG.format(mac_or_id=mac_or_id)
-        return await self.publish(topic, cfg_payload, qos=1, retain=True)
+        return await self.publish(topic, cfg_payload, qos=1, retain=False)
+
+    async def send_desired_config(self, device_id: str, desired_payload: dict) -> bool:
+        """
+        Gửi Desired Configuration Twin xuống node theo Spec Section 4.
+        Topic: home/devices/{device_id}/config/desired
+        QoS 1, retain=True để thiết bị nhận ngay khi reconnect.
+        """
+        topic = getattr(config, "TOPIC_DEV_CONFIG_DESIRED", "home/devices/{device_id}/config/desired").format(device_id=device_id)
+        ok = await self.publish(topic, desired_payload, qos=1, retain=True)
+        if ok:
+            logger.info(f"📤 Published Desired Twin to {topic}: v={desired_payload.get('version')}")
+        return ok
+
+    async def send_relay_set(self, device_id: str, channel: int, state: int) -> bool:
+        """
+        Điều khiển relay theo chuẩn Industrial Topic: home/devices/{device_id}/relay/{channel}/set
+        Đồng thời gửi kênh compact smarthome/cmd/{device_id} để đảm bảo tương thích 100%.
+        """
+        topic = getattr(config, "TOPIC_DEV_RELAY_SET", "home/devices/{device_id}/relay/{channel}/set").format(
+            device_id=device_id, channel=channel
+        )
+        payload = {"state": 1 if state else 0}
+        ok = await self.publish(topic, payload, qos=1)
+
+        # Compact backward-compat
+        compact_topic = config.TOPIC_CMD_SHORT.format(node_id=device_id)
+        await self.publish(compact_topic, {"t": "rl", "ch": channel, "s": 1 if state else 0, "seq": 0})
+        return ok
 
     async def send_compact_status(self, node_id: str) -> bool:
         """Yêu cầu node echo trạng thái relay hiện tại."""
@@ -192,18 +225,23 @@ class MQTTHandler:
             return
 
         # Update telemetry & power cache
-        # e.g. topic: smarthome/telemetry/esp32s3_master  or smarthome/tele/{node_id}
+        # e.g. topic: smarthome/telemetry/node_xxx, smarthome/tele/node_xxx, home/devices/node_xxx/telemetry
+        node_id = None
         if topic.startswith("smarthome/telemetry/") or topic.startswith("smarthome/tele/"):
             node_id = topic.split("/")[-1]
-            if isinstance(payload, dict):
-                self.latest_telemetry[node_id] = payload
-                # compact keys: p / power
-                power = payload.get("power", payload.get("p", None))
-                if power is not None:
-                    try:
-                        self.latest_power[node_id] = float(power)
-                    except (ValueError, TypeError):
-                        pass
+        elif topic.startswith("home/devices/") and topic.endswith("/telemetry"):
+            parts = topic.split("/")
+            if len(parts) >= 4:
+                node_id = parts[2]
+
+        if node_id and isinstance(payload, dict):
+            self.latest_telemetry[node_id] = payload
+            power = payload.get("power", payload.get("p", None))
+            if power is not None:
+                try:
+                    self.latest_power[node_id] = float(power)
+                except (ValueError, TypeError):
+                    pass
 
         # Compact relay ack: {"t":"ack","id":"...","rl":[1,0],"seq":n} on smarthome/status/{id}
         if topic.startswith("smarthome/status/") and isinstance(payload, dict) and payload.get("t") in ("ack","hello"):

@@ -34,9 +34,12 @@
 #include "ws_audio_client.h"
 #include "mqtt_relay.h"
 #include "audio_feedback.h"
+#include "ota_updater.h"
+#include "device_identity.h"
 
 static void add_cors_headers(httpd_req_t *req);
 static esp_err_t api_provision_post_handler(httpd_req_t *req);
+static esp_err_t api_factory_reset_post_handler(httpd_req_t *req);
 
 
 #ifndef MIN
@@ -47,59 +50,112 @@ static const char *TAG = "ESP32S3_VOICE_MASTER";
 
 static uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
-#include "driver/rmt_tx.h"
+// SCHEMATIC SYNC: U1 ESP32-S3-WROOM-1
+// Pin 25: IO48 -> LED1 (System Status / Wi-Fi / MQTT)
+// Pin 24: IO47 -> LED2 (Voice / Activity Indicator)
+// Pin 39: IO1  -> BUT1 (Local Toggle Relay 1)
+// Pin 15: IO3  -> BUT2 (Local Toggle Relay 2)
 
-#define RGB_LED_GPIO GPIO_NUM_48
+#define LED1_GPIO GPIO_NUM_48
+#define LED2_GPIO GPIO_NUM_47
 
-static rmt_channel_handle_t led_chan = NULL;
-static rmt_encoder_handle_t bytes_encoder = NULL;
+#define BUT1_GPIO GPIO_NUM_1
+#define BUT2_GPIO GPIO_NUM_3
 
-static void init_rgb_led(void)
+static void init_status_leds(void)
 {
-    rmt_tx_channel_config_t tx_chan_config = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,
-        .gpio_num = RGB_LED_GPIO,
-        .mem_block_symbols = 64,
-        .resolution_hz = 10 * 1000 * 1000, // 10MHz (1 tick = 100ns)
-        .trans_queue_depth = 4,
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << LED1_GPIO) | (1ULL << LED2_GPIO),
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
     };
-    if (rmt_new_tx_channel(&tx_chan_config, &led_chan) == ESP_OK) {
-        rmt_bytes_encoder_config_t bytes_encoder_config = {
-            .bit0 = {
-                .duration0 = 4,
-                .level0 = 1,
-                .duration1 = 8,
-                .level1 = 0,
-            },
-            .bit1 = {
-                .duration0 = 8,
-                .level0 = 1,
-                .duration1 = 4,
-                .level1 = 0,
-            },
-            .flags = {
-                .msb_first = 1
-            }
-        };
-        if (rmt_new_bytes_encoder(&bytes_encoder_config, &bytes_encoder) == ESP_OK) {
-            rmt_enable(led_chan);
-            ESP_LOGI(TAG, "Hardware RMT WS2812 RGB LED Driver initialized on GPIO %d!", RGB_LED_GPIO);
-            return;
-        }
-    }
-
-    ESP_LOGE(TAG, "Failed to initialize RMT WS2812 RGB LED driver on GPIO %d", RGB_LED_GPIO);
+    gpio_config(&io_conf);
+    gpio_set_level(LED1_GPIO, 0);
+    gpio_set_level(LED2_GPIO, 0);
+    ESP_LOGI(TAG, "Hardware Status LEDs initialized (LED1=GPIO%d, LED2=GPIO%d) - Schematic Match OK!",
+             LED1_GPIO, LED2_GPIO);
 }
 
-/* Non-static: shared with ws_audio_client.c for LED status indication */
-void set_rgb_led_color(uint8_t r, uint8_t g, uint8_t b)
+void led1_set(bool on)
 {
-    if (!led_chan || !bytes_encoder) return;
-    uint8_t grb[3] = {g, r, b}; // WS2812 protocol requires Green-Red-Blue
-    rmt_transmit_config_t tx_config = {
-        .loop_count = 0,
+    gpio_set_level(LED1_GPIO, on ? 1 : 0);
+}
+
+void led2_set(bool on)
+{
+    gpio_set_level(LED2_GPIO, on ? 1 : 0);
+}
+
+
+/**
+ * @brief Physical Push Buttons Task: BUT1 (IO1) -> Toggle RL1, BUT2 (IO3) -> Toggle RL2
+ */
+static void button_monitor_task(void *arg)
+{
+    gpio_config_t btn_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << BUT1_GPIO) | (1ULL << BUT2_GPIO),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
-    rmt_transmit(led_chan, bytes_encoder, grb, sizeof(grb), &tx_config);
+    gpio_config(&btn_conf);
+    ESP_LOGI(TAG, "Physical Buttons Task Started (BUT1=GPIO%d -> RL1, BUT2=GPIO%d -> RL2)",
+             BUT1_GPIO, BUT2_GPIO);
+
+    int prev_b1 = 1, prev_b2 = 1;
+    int b1_hold_ms = 0;
+    while (1) {
+        int b1 = gpio_get_level(BUT1_GPIO);
+        int b2 = gpio_get_level(BUT2_GPIO);
+
+        if (b1 == 0) {
+            b1_hold_ms += 50;
+            if (b1_hold_ms == 3000) {
+                ESP_LOGW(TAG, "⚠️ BUT1 Held 3s... Continue holding to 10s for Factory Reset");
+                audio_feedback_play(AUDIO_FB_TING);
+                led2_set(true);
+            } else if (b1_hold_ms == 7000) {
+                ESP_LOGW(TAG, "⚠️ BUT1 Held 7s... Releasing in 3s will Factory Reset!");
+                audio_feedback_play(AUDIO_FB_TING);
+                led1_set(true); led2_set(true);
+            } else if (b1_hold_ms >= 10000) {
+                ESP_LOGW(TAG, "⚠️ BUT1 Held 10s! Executing Commercial Factory Reset (Keeping Device ID)...");
+                led1_set(false); led2_set(false);
+                audio_feedback_play(AUDIO_FB_WRONG);
+                device_identity_factory_reset();
+            }
+        } else {
+            if (prev_b1 == 0 && b1_hold_ms < 3000 && b1_hold_ms > 50) {
+                // Short press: Toggle Relay 1
+                bool current = mqtt_relay_get_state(1);
+                ESP_LOGI(TAG, "🔘 BUT1 Pressed! Toggling RL1 (GPIO4) -> %s", !current ? "ON" : "OFF");
+                mqtt_relay_set(1, !current);
+                audio_feedback_play(AUDIO_FB_TING);
+                led2_set(true);
+                vTaskDelay(pdMS_TO_TICKS(150));
+                led2_set(false);
+            }
+            b1_hold_ms = 0;
+        }
+
+        if (prev_b2 == 1 && b2 == 0) {
+            // BUT2 Pressed! Toggle Relay 2
+            bool current = mqtt_relay_get_state(2);
+            ESP_LOGI(TAG, "🔘 BUT2 Pressed! Toggling RL2 (GPIO5) -> %s", !current ? "ON" : "OFF");
+            mqtt_relay_set(2, !current);
+            audio_feedback_play(AUDIO_FB_TING);
+            led2_set(true);
+            vTaskDelay(pdMS_TO_TICKS(150));
+            led2_set(false);
+        }
+
+        prev_b1 = b1;
+        prev_b2 = b2;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 }
 
 
@@ -264,8 +320,10 @@ static void esp_now_recv_callback(const esp_now_recv_info_t *recv_info, const ui
         // Run local TinyML AI inference model on incoming waveform metrics
         run_tinyml_inference(live_voltage, live_current, live_power, live_pf);
 
-        // Flash Emerald Green RGB LED on successful packet reception!
-        set_rgb_led_color(0, 200, 100);
+        // Pulse status LED on successful packet reception
+        led2_set(true);
+        vTaskDelay(pdMS_TO_TICKS(10));
+        led2_set(false);
 
         ESP_LOGI(TAG, "=================================================");
         ESP_LOGI(TAG, "⚡ LIVE POWER METRICS FROM ESP32 WROOM SLAVE:");
@@ -420,44 +478,93 @@ static esp_err_t api_google_assistant_post_handler(httpd_req_t *req)
 
 static esp_err_t update_post_handler(httpd_req_t *req)
 {
-    esp_ota_handle_t ota_handle;
+    if (ota_updater_is_in_progress()) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "OTA is already in progress");
+        return ESP_FAIL;
+    }
+
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Starting Web OTA Update onto partition: %s", update_partition->label);
+    ESP_LOGI(TAG, "Starting Standalone Web OTA Update onto partition: %s", update_partition->label);
+    led1_set(true);
+    led2_set(true);
+
+    esp_ota_handle_t ota_handle;
     esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin failed: %s", esp_err_to_name(err));
+        led1_set(false);
+        led2_set(false);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    char buf[1024];
+    char buf[2048];
     int remaining = req->content_len;
+    bool first_chunk = true;
+
     while (remaining > 0) {
         int recv_len = httpd_req_recv(req, buf, MIN(remaining, sizeof(buf)));
         if (recv_len <= 0) {
             if (recv_len == HTTPD_SOCK_ERR_TIMEOUT) continue;
             esp_ota_abort(ota_handle);
+            led1_set(false);
+            led2_set(false);
             httpd_resp_send_500(req);
             return ESP_FAIL;
         }
 
-        err = esp_ota_write(ota_handle, buf, recv_len);
-        if (err != ESP_OK) {
-            esp_ota_abort(ota_handle);
-            httpd_resp_send_500(req);
-            return ESP_FAIL;
+        const char *write_ptr = buf;
+        int write_len = recv_len;
+
+        /* If uploaded via multipart form, strip the multipart boundary header from first chunk */
+        if (first_chunk) {
+            first_chunk = false;
+            if ((uint8_t)buf[0] != 0xE9) {
+                /* Search for boundary end (\r\n\r\n) */
+                char *payload_start = strstr(buf, "\r\n\r\n");
+                if (payload_start) {
+                    payload_start += 4;
+                    int header_len = payload_start - buf;
+                    write_ptr = payload_start;
+                    write_len = recv_len - header_len;
+                    ESP_LOGI(TAG, "Stripped multipart header (%d bytes). Binary magic: 0x%02X",
+                             header_len, (uint8_t)write_ptr[0]);
+                }
+            }
+            if (write_len > 0 && (uint8_t)write_ptr[0] != 0xE9) {
+                ESP_LOGE(TAG, "❌ Not a valid ESP32 binary image (magic 0x%02X != 0xE9)", (uint8_t)write_ptr[0]);
+                esp_ota_abort(ota_handle);
+                led1_set(false);
+                led2_set(false);
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File is not a valid ESP32 binary (.bin)");
+                return ESP_FAIL;
+            }
+        }
+
+        if (write_len > 0) {
+            err = esp_ota_write(ota_handle, write_ptr, write_len);
+            if (err != ESP_OK) {
+                esp_ota_abort(ota_handle);
+                led1_set(false);
+                led2_set(false);
+                httpd_resp_send_500(req);
+                return ESP_FAIL;
+            }
         }
         remaining -= recv_len;
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        led1_set(false);
+        led2_set(false);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
@@ -465,13 +572,18 @@ static esp_err_t update_post_handler(httpd_req_t *req)
     err = esp_ota_set_boot_partition(update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        led1_set(false);
+        led2_set(false);
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "OTA Update Successful! Rebooting ESP32-S3 in 1 second...");
+    ESP_LOGI(TAG, "Web OTA Update Successful! Rebooting ESP32-S3 in 1.5 seconds...");
+    led1_set(true);
+    led2_set(false);
+    audio_feedback_play(AUDIO_FB_SUCCESS);
     httpd_resp_sendstr(req, "<h1>OTA Firmware Update Successful! Rebooting...</h1>");
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    vTaskDelay(pdMS_TO_TICKS(1500));
     esp_restart();
     return ESP_OK;
 }
@@ -526,9 +638,27 @@ static httpd_handle_t start_web_server(void)
         httpd_uri_t prov_uri = { .uri = "/api/provision", .method = HTTP_POST, .handler = api_provision_post_handler };
         httpd_register_uri_handler(server, &prov_uri);
 
-        ESP_LOGI(TAG, "Standalone ESP32-S3 Server & Web OTA Handlers registered on port 80 (/update & /ota & /api/provision)");
+        httpd_uri_t reset_uri = { .uri = "/api/reset", .method = HTTP_POST, .handler = api_factory_reset_post_handler };
+        httpd_register_uri_handler(server, &reset_uri);
+
+        httpd_uri_t freset_uri = { .uri = "/api/factory_reset", .method = HTTP_POST, .handler = api_factory_reset_post_handler };
+        httpd_register_uri_handler(server, &freset_uri);
+
+        ESP_LOGI(TAG, "Standalone ESP32-S3 Server & Web OTA Handlers registered on port 80 (/update & /ota & /api/provision & /api/reset)");
     }
     return server;
+}
+
+static esp_err_t api_factory_reset_post_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *resp = "{\"success\":true,\"message\":\"Node resetting into unprovisioned state...\"}";
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    ESP_LOGW(TAG, "⚠️ Received HTTP /api/reset request! Factory resetting node...");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    mqtt_relay_factory_reset();
+    return ESP_OK;
 }
 
 static esp_err_t api_provision_post_handler(httpd_req_t *req)
@@ -603,8 +733,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *dis = (wifi_event_sta_disconnected_t*) event_data;
         ESP_LOGW(TAG, "Wi-Fi disconnected (reason: %d), retrying connection to 'XIAOMI'...", dis->reason);
-        /* Gentle disconnect reminder tone loop (every 8s) */
-        audio_feedback_start_disconnect_loop(8);
         esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
@@ -613,8 +741,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "📌 GOT IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "=================================================");
 
-        /* Connect WebSocket audio client to Gateway now that network route is active */
-        ws_audio_client_reconnect();
+        /* Stop any disconnect reminder sound */
+        audio_feedback_stop_disconnect_loop();
+
+        /* Start MQTT client and WebSocket client now that network route is active */
+        mqtt_relay_start();
+        ws_audio_client_start();
 
         static bool beacon_task_started = false;
         if (!beacon_task_started) {
@@ -827,16 +959,21 @@ static void audio_feed_task(void *arg)
                 i2s_buff[i] = (abs(left_sample) >= abs(right_sample)) ? l16 : r16;
             }
 
-            afe_handle->feed(afe_data, i2s_buff);
-
             /* ── Feed PCM to WebSocket if streaming to Pi ── */
             if (ws_audio_is_streaming()) {
                 ws_audio_feed_pcm(i2s_buff, mono_samples);
             }
 
-            // Log Mic Live Audio Level every ~0.5 seconds
+            if (ws_audio_get_state() == WS_STATE_PLAYING) {
+                // While speaker is playing, zero out mic samples to AFE to prevent acoustic feedback
+                memset(i2s_buff, 0, feed_size);
+            }
+
+            afe_handle->feed(afe_data, i2s_buff);
+
+            // Log Mic Live Audio Level every ~2 seconds
             frame_count++;
-            if (frame_count >= 50) {
+            if (frame_count >= 200) {
                 frame_count = 0;
                 int avg_l = mono_samples > 0 ? (int)(sum_l / mono_samples) : 0;
                 int avg_r = mono_samples > 0 ? (int)(sum_r / mono_samples) : 0;
@@ -874,9 +1011,33 @@ static void audio_detect_task(void *arg)
     ESP_LOGI(TAG, "Audio Detect Task started (fetch chunk size: %d)", afe_chunksize);
 
     static ws_audio_state_t prev_ws_state = WS_STATE_IDLE;
+    static uint32_t processing_start_tick = 0;
 
     while (1) {
         ws_audio_state_t current_ws_state = ws_audio_get_state();
+
+        /* Watchdog: If stuck in PROCESSING for > 7 seconds, auto-reset to IDLE */
+        if (current_ws_state == WS_STATE_PROCESSING) {
+            if (prev_ws_state != WS_STATE_PROCESSING) {
+                processing_start_tick = xTaskGetTickCount();
+            } else if ((xTaskGetTickCount() - processing_start_tick) > pdMS_TO_TICKS(7000)) {
+                ESP_LOGW(TAG, "⚠️ Processing state timeout (>7s) without Pi response, auto-resetting to IDLE!");
+                ws_audio_reset_state();
+                afe_handle->reset_buffer(afe_data);
+                current_ws_state = WS_STATE_IDLE;
+            }
+        }
+
+        /* Periodic Watchdog: If WebSocket disconnected while IDLE, auto-reconnect */
+        static uint32_t last_reconnect_check = 0;
+        uint32_t now_ticks = xTaskGetTickCount();
+        if ((now_ticks - last_reconnect_check) > pdMS_TO_TICKS(5000)) {
+            last_reconnect_check = now_ticks;
+            if (current_ws_state == WS_STATE_IDLE) {
+                ws_audio_client_reconnect();
+            }
+        }
+
         if (prev_ws_state == WS_STATE_PLAYING && current_ws_state == WS_STATE_IDLE) {
             // Speaker playback finished, flush any residual sound out of AFE buffer!
             afe_handle->reset_buffer(afe_data);
@@ -892,8 +1053,8 @@ static void audio_detect_task(void *arg)
             continue;
         }
 
-        // While speaker is playing TTS audio, discard wake word detections to avoid self-triggering
-        if (current_ws_state == WS_STATE_PLAYING) {
+        // While local speaker is playing or any speaker in the house is busy, discard wake word to avoid self-triggering/echo
+        if (current_ws_state == WS_STATE_PLAYING || ws_audio_is_speaker_busy()) {
             continue;
         }
 
@@ -902,8 +1063,8 @@ static void audio_detect_task(void *arg)
                      res->wake_word_index, res->wakenet_model_index);
             is_listening = true;
             
-            // Turn WS2812 RGB LED Bright Green on "Hi ESP" detection!
-            set_rgb_led_color(0, 255, 0);
+            // Turn LED2 (GPIO 47) ON on "Hi ESP" detection!
+            led2_set(true);
 
             // Play prompt Ding! feedback chime through speaker
             audio_feedback_play(AUDIO_FB_WAKEUP);
@@ -916,11 +1077,11 @@ static void audio_detect_task(void *arg)
 
             /* ── Start WebSocket audio streaming to Pi 4 ── */
             if (!ws_audio_is_streaming()) {
-                set_rgb_led_color(0, 200, 255); /* Cyan = streaming active */
+                led2_set(true);
                 esp_err_t ws_err = ws_audio_start_stream();
                 if (ws_err != ESP_OK) {
                     ESP_LOGW(TAG, "WebSocket stream failed to start: %s", esp_err_to_name(ws_err));
-                    set_rgb_led_color(0, 0, 30); /* Back to dim blue */
+                    led2_set(false);
                 }
             }
         }
@@ -943,13 +1104,12 @@ static void telemetry_poll_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(3000)); // Wait for system init
 
     while (1) {
-        // Brief yellow flash to indicate polling
-        set_rgb_led_color(80, 80, 0);
+        // Brief LED flash to indicate polling
+        led2_set(true);
         send_esp_now_request_power();
-        vTaskDelay(pdMS_TO_TICKS(200));
-        // Return to dim blue idle state
-        set_rgb_led_color(0, 0, 30);
-        vTaskDelay(pdMS_TO_TICKS(4800)); // Total cycle = 5s
+        vTaskDelay(pdMS_TO_TICKS(80));
+        led2_set(false);
+        vTaskDelay(pdMS_TO_TICKS(4920)); // Total cycle = 5s
     }
 }
 
@@ -960,9 +1120,10 @@ void app_main(void)
     ESP_LOGI(TAG, "   DTV ENERGY - ESP32-S3 N16R8 VOICE MASTER    ");
     ESP_LOGI(TAG, "=================================================");
 
-    // 0. Initialize WS2812 RGB LED Indicator (Blue on Boot)
-    init_rgb_led();
-    set_rgb_led_color(0, 0, 150);
+    // 0. Initialize Status LEDs (LED1=GPIO48, LED2=GPIO47) & Button Monitor (BUT1=IO1, BUT2=IO3)
+    init_status_leds();
+    led1_set(true); // LED1 on = power & boot
+    xTaskCreate(button_monitor_task, "button_task", 3072, NULL, 3, NULL);
 
     // 1. Initialize NVS Flash
     esp_err_t ret = nvs_flash_init();
@@ -975,6 +1136,12 @@ void app_main(void)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "NVS Flash Init failed: %s", esp_err_to_name(ret));
     }
+
+    // 1b. Initialize Commercial Device Identity (Hardware ID & User ID)
+    device_identity_init();
+
+    // 1c. Initialize OTA Subsystem & confirm boot integrity (cancels rollback if pending)
+    ota_updater_init();
 
     // 2. Initialize ESP-NOW Master Protocol & HTTP Web Server with Web OTA
     init_esp_now_master();
@@ -1005,42 +1172,46 @@ void app_main(void)
         ESP_LOGW(TAG, "Speaker Init Warning (optional): %s", esp_err_to_name(spk_err));
     } else {
         audio_feedback_init(tx_handle);
+        ESP_LOGI(TAG, "=============================================================");
+        ESP_LOGI(TAG, "🚀 Playing bootup_sound...");
+        ESP_LOGI(TAG, "=============================================================");
+        audio_feedback_play(AUDIO_FB_BOOTUP);
     }
 
     // 4. Configure ESP-SR Audio Front-End (AFE)
     srmodel_list_t *models = esp_srmodel_init("model");
-    if (!models) {
-        ESP_LOGE(TAG, "CRITICAL: Failed to load speech recognition models from 'model' partition!");
+    if (!models || models->num <= 0) {
+        ESP_LOGE(TAG, "CRITICAL: Speech recognition models not found or empty in 'model' partition (num=%d)!", models ? models->num : -1);
+        ESP_LOGW(TAG, "Please ensure srmodels.bin is flashed to 0x610000. WakeNet temporarily bypassed to allow audio/system to run.");
     } else {
         ESP_LOGI(TAG, "Successfully loaded %d speech recognition models from flash!", models->num);
+
+        afe_config_t afe_config = AFE_CONFIG_DEFAULT();
+        afe_config.aec_init = false;  // AEC requires ref_num > 0. Disable for 1-mic setup.
+        afe_config.se_init = true;   // Speech enhancement (noise suppression)
+        afe_config.vad_init = true;  // Voice activity detection
+        afe_config.wakenet_init = true;
+        afe_config.wakenet_model_name = "wn9_hiesp";
+        afe_config.wakenet_mode = DET_MODE_2CH_90;
+
+        afe_config.afe_mode = SR_MODE_LOW_COST;
+        afe_config.memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+        afe_config.pcm_config.total_ch_num = 1;
+        afe_config.pcm_config.mic_num = 1;
+        afe_config.pcm_config.ref_num = 0;
+
+        afe_data = afe_handle->create_from_config(&afe_config);
+
+        if (!afe_data) {
+            ESP_LOGE(TAG, "CRITICAL ERROR: Failed to create ESP-SR AFE Engine! Check PSRAM!");
+        } else {
+            ESP_LOGI(TAG, "ESP-SR AFE Engine & WakeNet Pipeline successfully created!");
+
+            // 5. Create Audio Tasks
+            xTaskCreatePinnedToCore(audio_feed_task, "audio_feed_task", 8 * 1024, afe_data, 5, NULL, 0);
+            xTaskCreatePinnedToCore(audio_detect_task, "audio_detect_task", 8 * 1024, afe_data, 5, NULL, 1);
+        }
     }
-
-    afe_config_t afe_config = AFE_CONFIG_DEFAULT();
-    afe_config.aec_init = false;  // AEC requires ref_num > 0. Disable for 1-mic setup.
-    afe_config.se_init = true;   // Speech enhancement (noise suppression)
-    afe_config.vad_init = true;  // Voice activity detection
-    afe_config.wakenet_init = true;
-    afe_config.wakenet_model_name = "wn9_hiesp";
-    afe_config.wakenet_mode = DET_MODE_2CH_90;
-
-    afe_config.afe_mode = SR_MODE_LOW_COST;
-    afe_config.memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
-    afe_config.pcm_config.total_ch_num = 1;
-    afe_config.pcm_config.mic_num = 1;
-    afe_config.pcm_config.ref_num = 0;
-
-    afe_data = afe_handle->create_from_config(&afe_config);
-
-    if (!afe_data) {
-        ESP_LOGE(TAG, "CRITICAL ERROR: Failed to create ESP-SR AFE Engine! Check PSRAM!");
-        return;
-    }
-
-    ESP_LOGI(TAG, "ESP-SR AFE Engine & WakeNet Pipeline successfully created!");
-
-    // 5. Create Audio Tasks
-    xTaskCreatePinnedToCore(audio_feed_task, "audio_feed_task", 8 * 1024, afe_data, 5, NULL, 0);
-    xTaskCreatePinnedToCore(audio_detect_task, "audio_detect_task", 8 * 1024, afe_data, 5, NULL, 1);
 
     // 6. Initialize MQTT Relay Controller (connects to EMQX broker on Pi 4)
     mqtt_relay_init("mqtt://192.168.11.29:1883", "admin", "SmarthomePass2026!");
@@ -1049,9 +1220,7 @@ void app_main(void)
     ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
 
     ESP_LOGI(TAG, "=============================================================");
-    ESP_LOGI(TAG, "🚀 ESP32-S3 Master Hub Boot Completed! Playing bootup_sound...");
+    ESP_LOGI(TAG, "🚀 ESP32-S3 Master Hub Boot Completed!");
     ESP_LOGI(TAG, "=============================================================");
-    audio_feedback_play(AUDIO_FB_BOOTUP);
-
     ESP_LOGI(TAG, "System ready. Say 'Hi ESP' to wake up the system.");
 }

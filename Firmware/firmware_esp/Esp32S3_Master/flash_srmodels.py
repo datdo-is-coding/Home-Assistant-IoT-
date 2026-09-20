@@ -44,10 +44,29 @@ if os.path.exists(flasher_args_path) and os.path.exists(srmodels_bin):
     except Exception as e:
         print(f">>> Note: Could not update flasher_args.json: {e}")
 
-# 3. Also append to FLASH_EXTRA_IMAGES for SCons
+# 3. Update flash_project_args and flash_args for PlatformIO espidf upload
+for fname in ["flash_project_args", "flash_args"]:
+    fpath = os.path.join(build_dir, fname)
+    if os.path.exists(fpath) and os.path.exists(srmodels_bin):
+        try:
+            with open(fpath, "r") as f:
+                content = f.read()
+            if "0x610000" not in content:
+                with open(fpath, "a") as f:
+                    f.write("0x610000 srmodels/srmodels.bin\n")
+                print(f">>> Appended 0x610000 srmodels.bin to {fname}")
+        except Exception as e:
+            print(f">>> Note: Could not update {fname}: {e}")
+
+# 4. Also append to UPLOADERFLAGS and FLASH_EXTRA_IMAGES for PlatformIO upload
 if os.path.exists(srmodels_bin):
     env.Append(
+        UPLOADERFLAGS=[
+            "0x610000", srmodels_bin
+        ],
         FLASH_EXTRA_IMAGES=[
             ("0x610000", srmodels_bin)
         ]
     )
+    print(">>> Added 0x610000 srmodels.bin to UPLOADERFLAGS successfully!")
+

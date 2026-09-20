@@ -221,14 +221,51 @@ class OTAManager:
                 })
             return {"success": False, "error": body}
 
-    async def trigger_via_mqtt(self, node_id: str, filename: str, gateway_ip: str) -> Dict[str, Any]:
+    def get_gateway_lan_ip(self) -> str:
+        """Automatically detect the real LAN IP of this Gateway reachable by ESP32 devices."""
+        # 1. Check if explicitly configured in config
+        if hasattr(config, "GATEWAY_IP") and config.GATEWAY_IP and config.GATEWAY_IP != "0.0.0.0":
+            return config.GATEWAY_IP
+        # 2. Open a dummy UDP socket to query routing table for local interface IP
+        try:
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                if ip and not ip.startswith("127."):
+                    return ip
+        except Exception:
+            pass
+        return "192.168.1.1"
+
+    def update_task_progress(self, node_id: str, progress: int, status: str, message: str = ""):
+        """Update live progress of an active OTA task."""
+        task_id = f"ota_{node_id}"
+        self._active_tasks[task_id] = {
+            "node_id": node_id,
+            "status": status,
+            "progress": progress,
+            "message": message,
+            "updated_at": time.time()
+        }
+        if hasattr(self.gateway, "registry") and hasattr(self.gateway.registry, "record_ota_history"):
+            try:
+                self.gateway.registry.record_ota_history(node_id, "esp32s3_master_latest.bin", status, progress=progress, message=message)
+            except Exception:
+                pass
+
+    async def trigger_via_mqtt(self, node_id: str, filename: str, gateway_ip: str = None) -> Dict[str, Any]:
         """
-        Trigger pull OTA via MQTT command.
+        Trigger pull OTA via MQTT and WebSocket dual-channel command.
         ESP32 node connects back to Gateway to stream firmware and flash.
         """
+        import json
         fw_bytes = self.get_firmware_bytes(filename)
         if not fw_bytes:
             return {"success": False, "error": f"Firmware file not found: {filename}"}
+
+        if not gateway_ip or gateway_ip in ("0.0.0.0", "127.0.0.1", "localhost"):
+            gateway_ip = self.get_gateway_lan_ip()
 
         md5 = hashlib.md5(fw_bytes).hexdigest()
         download_url = f"http://{gateway_ip}:{config.WEB_PORT}/api/ota/download/{filename}"
@@ -241,10 +278,67 @@ class OTAManager:
             "md5": md5
         }
 
+        # 1. Publish to MQTT topics (both compact and industrial)
         topic = f"smarthome/ota/{node_id}"
+        mqtt_sent = False
         if hasattr(self.gateway, "mqtt") and self.gateway.mqtt:
-            self.gateway.mqtt.publish(topic, payload)
-            logger.info(f"📢 [OTA MQTT Trigger] Published OTA command to {topic}: {download_url}")
-            return {"success": True, "topic": topic, "url": download_url}
+            try:
+                await self.gateway.mqtt.publish(topic, payload, qos=1)
+                if node_id != "all":
+                    ind_ota_top = f"home/devices/{node_id}/ota/trigger"
+                    await self.gateway.mqtt.publish(ind_ota_top, payload, qos=1)
+                logger.info(f"📢 [OTA MQTT Trigger] Published OTA command to {topic}: {download_url}")
+                mqtt_sent = True
+            except Exception as e:
+                logger.error(f"Failed to publish OTA command via MQTT: {e}")
+
+        # 2. Also send over active WebSocket if connected
+        ws_sent = False
+        if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:
+            ws_targets = []
+            if node_id == "all":
+                ws_targets = list(self.gateway.audio_server._active_speakers)
+            else:
+                ws = self.gateway.audio_server._ws_nodes.get(node_id)
+                if ws:
+                    ws_targets = [ws]
+                elif len(self.gateway.audio_server._ws_nodes) == 1:
+                    ws_targets = list(self.gateway.audio_server._ws_nodes.values())
+                elif self.gateway.audio_server._active_speakers:
+                    ws_targets = list(self.gateway.audio_server._active_speakers)
+
+            ws_msg = json.dumps({
+                "t": "ota",
+                "url": download_url,
+                "size": len(fw_bytes),
+                "md5": md5
+            })
+            for ws in ws_targets:
+                if self.gateway.audio_server._is_ws_alive(ws):
+                    try:
+                        asyncio.create_task(ws.send(ws_msg))
+                        ws_sent = True
+                        logger.info(f"📢 [OTA WS Trigger] Sent OTA command to node '{node_id}' over WebSocket")
+                    except Exception as e:
+                        logger.warning(f"Could not send OTA over WebSocket: {e}")
+
+        # 3. Broadcast initial progress event to Web UI SSE
+        if hasattr(self.gateway, "broadcast_event"):
+            self.gateway.broadcast_event("ota_progress", {
+                "node_id": node_id,
+                "progress": 0,
+                "status": "starting",
+                "message": f"Đã phát lệnh nạp {filename} (từ {gateway_ip}). Đang chờ ESP32 kết nối..."
+            })
+
+        self.update_task_progress(node_id, 0, "starting", f"Đã gửi lệnh nạp {filename} tới {node_id}")
+        if hasattr(self.gateway, "registry") and hasattr(self.gateway.registry, "record_ota_history"):
+            try:
+                self.gateway.registry.record_ota_history(node_id, filename, "starting", progress=0, message=f"Đã phát lệnh nạp {filename}")
+            except Exception:
+                pass
+
+        if mqtt_sent or ws_sent:
+            return {"success": True, "topic": topic, "url": download_url, "size": len(fw_bytes), "md5": md5}
         else:
-            return {"success": False, "error": "MQTT client not initialized"}
+            return {"success": False, "error": "Neither MQTT nor WebSocket client available to send OTA command"}
