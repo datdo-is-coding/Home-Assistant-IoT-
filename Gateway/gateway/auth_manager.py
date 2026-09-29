@@ -28,6 +28,7 @@ class AuthManager:
                 self.db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache", "auth.db")
                 os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
+        self.login_attempts = {}
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -75,18 +76,35 @@ class AuthManager:
                 );
             """)
 
-            # Seed default admin user if none exists
-            cur = conn.execute("SELECT COUNT(*) as cnt FROM users")
-            if cur.fetchone()["cnt"] == 0:
-                self._create_user(conn, "admin", "admin123", fullname="Chủ Hộ (Admin)", role="admin")
-                logger.info("👤 Initialized default admin account: 'admin' (password: admin123)")
+            # Retire the previously shipped default account without deleting ownership.
+            old = conn.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
+            if old and self._verify_password("admin123", old["salt"], old["password_hash"]):
+                conn.execute("DELETE FROM sessions WHERE user_id = ?", (old["id"],))
+                conn.execute("DELETE FROM api_keys WHERE user_id = ?", (old["id"],))
+                replacement = config.BOOTSTRAP_PASSWORD
+                if len(replacement) < 12 or replacement == "admin123":
+                    raise RuntimeError("Set BOOTSTRAP_PASSWORD (12+ characters) to retire the default admin")
+                digest, salt = self._hash_password(replacement)
+                conn.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (digest, salt, old["id"]))
+            if not conn.execute("SELECT 1 FROM users WHERE role = 'admin'").fetchone():
+                if len(config.BOOTSTRAP_PASSWORD) < 12:
+                    raise RuntimeError("First startup requires BOOTSTRAP_PASSWORD (12+ characters)")
+                self._create_user(conn, config.BOOTSTRAP_USERNAME, config.BOOTSTRAP_PASSWORD, role="admin")
 
     def _hash_password(self, password: str, salt: Optional[str] = None) -> tuple[str, str]:
         if not salt:
             salt = secrets.token_hex(16)
-        salted = (password + salt).encode('utf-8')
-        h = hashlib.pbkdf2_hmac('sha256', salted, salt.encode('utf-8'), 100000).hex()
-        return h, salt
+        # ponytail: scrypt instead of pbkdf2 as requested, minimal config
+        h = hashlib.scrypt(password.encode('utf-8'), salt=salt.encode('utf-8'), n=16384, r=8, p=1).hex()
+        return "scrypt$" + h, salt
+
+    def _verify_password(self, password: str, salt: str, stored: str) -> bool:
+        if stored.startswith("scrypt$"):
+            return secrets.compare_digest(self._hash_password(password, salt)[0], stored)
+        if len(stored) == 128:  # Unversioned scrypt from the previous local revision.
+            return secrets.compare_digest(self._hash_password(password, salt)[0][7:], stored)
+        legacy = hashlib.pbkdf2_hmac("sha256", (password + salt).encode(), salt.encode(), 100000).hex()
+        return secrets.compare_digest(legacy, stored)
 
     def _create_user(self, conn: sqlite3.Connection, username: str, password: str, fullname: str = "", role: str = "member") -> int:
         h, salt = self._hash_password(password)
@@ -97,44 +115,51 @@ class AuthManager:
         )
         return cur.lastrowid
 
-    def register(self, username: str, password: str, fullname: str = "") -> Dict[str, Any]:
-        """Register a new user."""
-        u = username.strip().lower()
-        if not u or len(u) < 3:
-            return {"success": False, "error": "Tên đăng nhập phải có ít nhất 3 ký tự"}
-        if not password or len(password) < 6:
-            return {"success": False, "error": "Mật khẩu phải có ít nhất 6 ký tự"}
-
-        try:
-            with self._get_conn() as conn:
-                cur = conn.execute("SELECT id FROM users WHERE username = ?", (u,))
-                if cur.fetchone():
-                    return {"success": False, "error": "Tên đăng nhập đã tồn tại"}
-
-                uid = self._create_user(conn, u, password, fullname=fullname, role="member")
-                # Automatically grant permission to current online nodes for new user
-                logger.info(f"✨ Registered new user: {u} (id={uid})")
-                return {"success": True, "user_id": uid, "username": u}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    def register(self, username: str, password: str, fullname: str = "", bootstrap_password: str = "") -> Dict[str, Any]:
+        """Register a new user (bootstrap admin on first run, locked afterwards)."""
+        return {"success": False, "error": "Public registration is disabled; provision accounts locally."}
 
     def login(self, username: str, password: str) -> Dict[str, Any]:
         """Authenticate user and return session token."""
+        if not isinstance(username, str) or not isinstance(password, str) or len(username) > 128 or len(password) > 1024:
+            return {"success": False, "error": "Invalid credentials"}
         u = username.strip().lower()
+        now = time.time()
+
+        self.login_attempts = {k: [t for t in v if now - t < 900] for k, v in self.login_attempts.items() if any(now - t < 900 for t in v)}
+        if u not in self.login_attempts and len(self.login_attempts) >= 1024:
+            return {"success": False, "error": "Too many login attempts", "rate_limited": True}
+        attempts = self.login_attempts.get(u, [])
+        attempts = [t for t in attempts if now - t < 900]
+        if len(attempts) >= 5:
+            self.login_attempts[u] = attempts
+            return {"success": False, "error": "Bạn đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.", "rate_limited": True}
+
         with self._get_conn() as conn:
             cur = conn.execute("SELECT * FROM users WHERE username = ?", (u,))
             row = cur.fetchone()
             if not row:
+                attempts.append(now)
+                self.login_attempts[u] = attempts
                 return {"success": False, "error": "Tài khoản hoặc mật khẩu không chính xác"}
 
-            h, _ = self._hash_password(password, row["salt"])
-            if h != row["password_hash"]:
+            if not self._verify_password(password, row["salt"], row["password_hash"]):
+                attempts.append(now)
+                self.login_attempts[u] = attempts
                 return {"success": False, "error": "Tài khoản hoặc mật khẩu không chính xác"}
 
-            # Generate secure session token (valid 14 days)
+            if u in self.login_attempts:
+                del self.login_attempts[u]
+
+            if not row["password_hash"].startswith("scrypt$"):
+                digest, salt = self._hash_password(password)
+                conn.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (digest, salt, row["id"]))
+
+            # Expired sessions are removed at each successful login.
             token = secrets.token_hex(32)
             now = time.time()
-            expires = now + 14 * 86400
+            expires = now + config.SESSION_TTL_SECONDS
+            conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
 
             conn.execute(
                 "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -231,7 +256,9 @@ class AuthManager:
         Filter nodes dictionary based on user permissions.
         Admin sees all nodes. Regular members see assigned nodes only.
         """
-        if not user or user.get("role") == "admin":
+        if not user:
+            return {}
+        if user.get("role") == "admin":
             return all_nodes
 
         user_id = user.get("id")

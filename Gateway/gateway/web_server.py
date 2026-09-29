@@ -12,6 +12,7 @@ import logging
 import os
 import time
 import urllib.parse
+from http.cookies import SimpleCookie
 from typing import Set, Dict, Any, Optional
 
 import config
@@ -349,7 +350,7 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
             <span class="card-title">🎙️ Khẩu Lệnh Gần Nhất (ASR & NLU)</span>
           </div>
           <div id="latest-transcript" style="font-size:1.1rem;font-weight:600;color:var(--accent);margin-bottom:8px">"Chưa có khẩu lệnh..."</div>
-          <div id="latest-reply" style="font-size:0.9rem;color:var(--text-muted);font-style:italic">"Dạ em đang lắng nghe anh ạ..."</div>
+          <div id="latest-reply" style="font-size:0.9rem;color:var(--text-muted);font-style:italic">"Hệ thống đang lắng nghe..."</div>
           <div style="display:flex;gap:8px;margin-top:12px;font-size:0.75rem;color:var(--text-dim)">
             <span>Thời gian xử lý: <b id="kpi-latency" style="color:var(--green)">0.00s</b></span>
             <span>· Động cơ: <b id="kpi-ai-engine">Fast-Path V3</b></span>
@@ -667,7 +668,7 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
         <!-- Login / Register Form -->
         <div class="card">
           <div class="card-header">
-            <span class="card-title">🔑 Đăng Nhập Hoặc Đăng Ký Tài Khoản Khác</span>
+            <span class="card-title">🔑 Đăng Nhập</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:12px">
             <input type="text" class="inp" id="auth-user" placeholder="Tên đăng nhập (username)">
@@ -675,7 +676,7 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
             <input type="text" class="inp" id="auth-fullname" placeholder="Họ và tên (chỉ cần khi đăng ký)">
             <div style="display:flex;gap:8px;margin-top:6px">
               <button class="btn btn-primary" style="flex:1" onclick="login()">Đăng Nhập</button>
-              <button class="btn btn-ghost" style="flex:1" onclick="register()">Đăng Ký Mới</button>
+              
             </div>
             <div id="auth-status" style="font-size:0.8rem;color:var(--orange)">—</div>
           </div>
@@ -831,7 +832,7 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
 <script>
 const $ = id => document.getElementById(id);
 let nodes = {}, rooms = {}, pending = {}, discovered = {}, currentFilter = 'all';
-let currentUser = { username: 'admin', role: 'admin' };
+let currentUser = null;
 let currentView = 'dashboard';
 let threeScene, threeCamera, threeRenderer, roomMeshes = {}, roomLights = {};
 
@@ -1633,7 +1634,7 @@ async function previewInBrowser(e) {
 
   try {
     const player = $('browser-audio-player');
-    const text = encodeURIComponent("Dạ em đã bật đèn phòng khách cho anh rồi nè~");
+    const text = encodeURIComponent("Đã bật đèn phòng khách.");
     player.src = `/api/tts/preview?text=${text}&t=${Date.now()}`;
     player.style.display = 'block';
     await player.play();
@@ -1722,10 +1723,9 @@ async function login() {
     });
     const j = await r.json();
     if (j.success) {
-      localStorage.setItem('aetheria_token', j.token);
+      localStorage.removeItem('aetheria_token');
       showToast(`Xin chào, ${j.user.fullname || j.user.username}!`);
-      checkSession();
-      switchView('dashboard');
+      location.reload();
     } else {
       $('auth-status').textContent = j.error || 'Đăng nhập thất bại';
       showToast(j.error || 'Đăng nhập thất bại', false);
@@ -1755,9 +1755,9 @@ async function register() {
 }
 
 async function checkSession() {
-  const t = localStorage.getItem('aetheria_token');
   try {
-    const r = await fetch('/api/auth/me', { headers: { 'Authorization': `Bearer ${t||''}` } });
+    const r = await fetch('/api/auth/me');
+    if (!r.ok) { switchView('auth'); return false; }
     const j = await r.json();
     if (j.authenticated && j.user) {
       currentUser = j.user;
@@ -1765,14 +1765,14 @@ async function checkSession() {
       $('prof-username').textContent = currentUser.username;
       $('prof-fullname').textContent = currentUser.fullname || '—';
       $('prof-role').textContent = (currentUser.role || 'member').toUpperCase();
+      return true;
     }
   } catch(e) {}
 }
 
 async function logout() {
-  const t = localStorage.getItem('aetheria_token');
   try {
-    await fetch('/api/auth/logout', { method: 'POST', headers: { 'Authorization': `Bearer ${t||''}` } });
+    await fetch('/api/auth/logout', { method: 'POST' });
   } catch(e) {}
   localStorage.removeItem('aetheria_token');
   showToast('Đã đăng xuất');
@@ -1874,13 +1874,15 @@ setInterval(() => {
 }, 1000);
 
 /* ── DOM Init ── */
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  localStorage.removeItem('aetheria_token');
   initThree();
-  loadAll();
-  loadVoiceStatus();
-  checkSession();
-  connectSSE();
-  setInterval(loadAll, 12000);
+  if (await checkSession()) {
+    loadAll();
+    if (currentUser.role === 'admin') loadVoiceStatus();
+    connectSSE();
+    setInterval(loadAll, 12000);
+  }
 });
 </script>
 </body>
@@ -1896,7 +1898,7 @@ class WebServer:
         self.host = getattr(config, "WEB_HOST", "0.0.0.0")
         self.port = getattr(config, "WEB_PORT", 8000)
         self.server = None
-        self.sse_queues: Set[asyncio.Queue] = set()
+        self.sse_queues = {}  # queue -> authenticated user
         self._running = False
 
     async def start(self):
@@ -1918,7 +1920,11 @@ class WebServer:
         if not self.sse_queues:
             return
         payload = f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-        for q in list(self.sse_queues):
+        for q, user in list(self.sse_queues.items()):
+            if user.get("role") != "admin":
+                node_id = data.get("node_id") or data.get("device_id")
+                if event_name not in {"node_status", "node_telemetry", "device_deleted"} or not node_id or node_id not in self.gateway.auth.get_user_devices(user["id"]):
+                    continue
             try:
                 q.put_nowait(payload)
             except Exception:
@@ -1936,68 +1942,92 @@ class WebServer:
         disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
         return {
             "nodes": all_nodes,
-            "rooms": r.get_rooms(),
-            "pending": r.get_pending(),
-            "discovered": disc,
+            "rooms": r.get_rooms() if user and user.get("role") == "admin" else sorted({n.get("room", "") for n in all_nodes.values()}),
+            "pending": r.get_pending() if user and user.get("role") == "admin" else {},
+            "discovered": disc if user and user.get("role") == "admin" else {},
         }
+
+    async def _respond(self, writer, status, data, extra=""):
+        reasons = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 413: "Payload Too Large", 429: "Too Many Requests"}
+        body = json.dumps(data, ensure_ascii=False).encode()
+        writer.write((f"HTTP/1.1 {status} {reasons[status]}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {len(body)}\r\n{extra}Connection: close\r\n\r\n").encode() + body)
+        await writer.drain()
+        writer.close()
 
     async def _handle_client(self, reader, writer):
         try:
-            request_line = await reader.readline()
-            if not request_line:
-                writer.close(); return
-            parts = request_line.decode("utf-8", errors="ignore").split()
-            if len(parts) < 2:
-                writer.close(); return
+            request_line = await asyncio.wait_for(reader.readline(), 10)
+            parts = request_line.decode("ascii").split()
+            if len(parts) != 3 or len(request_line) > 8192:
+                await self._respond(writer, 400, {"error": "Malformed request"}); return
             method, full_path = parts[0].upper(), parts[1]
-
-            # Parse path and query
             parsed_url = urllib.parse.urlparse(full_path)
             path = parsed_url.path
             query = urllib.parse.parse_qs(parsed_url.query)
-
             headers = {}
-            content_length = 0
+            header_bytes = 0
             while True:
-                line = await reader.readline()
-                if not line or line == b"\r\n":
-                    break
-                ls = line.decode("utf-8", errors="ignore").strip()
-                if ":" in ls:
-                    k, v = ls.split(":", 1)
-                    headers[k.strip().lower()] = v.strip()
-                    if k.strip().lower() == "content-length":
-                        try:
-                            content_length = int(v.strip())
-                        except ValueError:
-                            content_length = 0
-
-            # Extract user from token or API Key
-            current_user = None
+                line = await asyncio.wait_for(reader.readline(), 10)
+                header_bytes += len(line)
+                if header_bytes > 16384:
+                    await self._respond(writer, 400, {"error": "Headers too large"}); return
+                if line == b"\r\n": break
+                if not line or b":" not in line:
+                    await self._respond(writer, 400, {"error": "Malformed headers"}); return
+                k, v = line.decode("latin-1").strip().split(":", 1)
+                k = k.lower().strip()
+                if k in headers:
+                    await self._respond(writer, 400, {"error": "Duplicate header"}); return
+                headers[k] = v.strip()
+            try:
+                content_length = int(headers.get("content-length", "0"))
+            except ValueError:
+                content_length = -1
+            if content_length < 0 or "transfer-encoding" in headers:
+                await self._respond(writer, 400, {"error": "Invalid body framing"}); return
+            maximum = 10 * 1024 * 1024 if path == "/api/ota/upload" else 65536
+            if content_length > maximum:
+                await self._respond(writer, 413, {"error": "Request too large"}); return
+            origin = headers.get("origin")
+            if origin and origin != config.WEB_PUBLIC_ORIGIN:
+                await self._respond(writer, 403, {"error": "Cross-origin request denied"}); return
+            cookies = SimpleCookie()
+            cookies.load(headers.get("cookie", ""))
             auth_header = headers.get("authorization", "")
-            api_key_header = headers.get("x-api-key", "")
-            token = None
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:].strip()
-            elif api_key_header:
-                token = api_key_header.strip()
-            elif "token" in query:
-                token = query["token"][0]
-            elif "api_key" in query:
-                token = query["api_key"][0]
-
-            if hasattr(self.gateway, "auth") and self.gateway.auth and token:
-                current_user = self.gateway.auth.authenticate_token(token)
-
+            token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else headers.get("x-api-key", "")
+            cookie_auth = not token and "aetheria_session" in cookies
+            if cookie_auth:
+                token = cookies["aetheria_session"].value
+                if method not in ("GET", "HEAD") and origin != config.WEB_PUBLIC_ORIGIN:
+                    await self._respond(writer, 403, {"error": "Origin required for cookie authentication"}); return
+            auth = getattr(self.gateway, "auth", None)
+            current_user = auth.authenticate_token(token) if auth and token else None
+            public = (method == "GET" and path in {"/", "/index.html", "/api/health"}) or (method == "POST" and path == "/api/auth/login")
+            if not current_user and not public:
+                await self._respond(writer, 401, {"error": "Authentication required"}); return
+            raw_body = await asyncio.wait_for(reader.readexactly(content_length), 10) if content_length else b""
             async def _read_body():
-                if content_length > 0:
-                    return await reader.readexactly(content_length)
-                return b""
+                return raw_body
+            if current_user and current_user.get("role") != "admin":
+                allowed = (method == "GET" and path in {"/", "/index.html", "/api/nodes", "/api/events", "/api/auth/me", "/api/health"}) or (method == "POST" and path == "/api/auth/logout")
+                target = None
+                if method == "POST" and path == "/api/relay":
+                    try: target = json.loads(raw_body).get("node_id")
+                    except (ValueError, AttributeError): pass
+                elif method == "GET" and path.startswith("/api/device/") and path.rsplit("/", 1)[-1] in {"twin", "telemetry"}:
+                    target = query.get("id", query.get("device_id", [None]))[0]
+                    if len(path.split("/")) == 5: target = path.split("/")[3]
+                if target:
+                    allowed = target in auth.get_user_devices(current_user["id"])
+                if not allowed:
+                    await self._respond(writer, 403, {"error": "Insufficient permissions"}); return
+            if method == "GET" and path == "/api/health":
+                await self._respond(writer, 200, {"status": "ok"}); return
 
             # ── SPA Main View ──
             if method == "GET" and path in ("/", "/index.html"):
                 body = HTML_PAGE.encode("utf-8")
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: text/html; charset=utf-8\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2005,31 +2035,36 @@ class WebServer:
             if method == "GET" and path == "/api/nodes":
                 data = self._nodes_snapshot(current_user)
                 body = json.dumps(data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
             # ── API: SSE Events ──
-            if method == "GET" and path.startswith("/api/events"):
-                writer.write(("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+            if method == "GET" and path == "/api/events":
+                writer.write(("HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: text/event-stream\r\n"
                               "Cache-Control: no-cache\r\nConnection: keep-alive\r\n"
-                              "Access-Control-Allow-Origin: *\r\n\r\n").encode())
+                              "\r\n").encode())
                 await writer.drain()
-                q = asyncio.Queue()
-                self.sse_queues.add(q)
+                q = asyncio.Queue(maxsize=64)
+                self.sse_queues[q] = current_user
                 try:
                     init_d = json.dumps(self._nodes_snapshot(current_user), ensure_ascii=False)
                     writer.write(f"event: init\ndata: {init_d}\n\n".encode())
                     await writer.drain()
                     while self._running:
-                        msg = await asyncio.wait_for(q.get(), timeout=30.0)
+                        try:
+                            msg = await asyncio.wait_for(q.get(), timeout=15.0)
+                        except asyncio.TimeoutError:
+                            msg = ": keepalive\n\n"
+                        if not auth.authenticate_token(token):
+                            break
                         writer.write(msg.encode())
                         await writer.drain()
                 except (asyncio.TimeoutError, Exception):
                     pass
                 finally:
-                    self.sse_queues.discard(q)
+                    self.sse_queues.pop(q, None)
                     try: writer.close()
                     except Exception: pass
                 return
@@ -2043,29 +2078,18 @@ class WebServer:
                     channel = d.get("channel") or d.get("ch", "ch1")
                     action = d.get("action") or d.get("s", "turn_on")
                     
-                    # Relay control via verifier or mqtt
-                    if hasattr(self.gateway, "verifier") and self.gateway.verifier:
-                        success = await self.gateway.verifier.execute_action(node_id, channel, action)
-                    else:
-                        success = False
-                        
-                    # Cập nhật ngay relay_state vào registry để /api/nodes luôn có dữ liệu đồng bộ
-                    if success and hasattr(self.gateway, "registry") and node_id in self.gateway.registry.data.get("nodes", {}):
-                        n = self.gateway.registry.data["nodes"][node_id]
-                        cur_rl = list(n.get("relay_state", [0, 0]))
-                        ch_idx = 0 if channel in ("ch1", 1, "1") else 1
-                        val = 1 if action in ("turn_on", "on", "1", 1) else 0
-                        if ch_idx < len(cur_rl):
-                            cur_rl[ch_idx] = val
-                        self.gateway.registry.update_relay_state(node_id, cur_rl)
-                        self.broadcast_event("node_status", {"node_id": node_id, "rl_state": cur_rl})
-
-                    resp_data = {"success": success, "node_id": node_id, "channel": channel, "action": action}
+                    if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", 1, 2, "1", "2"):
+                        await self._respond(writer, 400, {"error": "Use an explicit relay state and valid channel"}); return
+                    action = "TURN_ON" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "TURN_OFF"
+                    channel = "ch1" if channel in ("ch1", 1, "1") else "ch2"
+                    result = await self.gateway.verifier.verify_command(node_id, channel, action)
+                    outcome = result.value
+                    resp_data = {"success": outcome.upper() == "CONFIRMED_LOAD", "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2104,8 +2128,8 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2128,8 +2152,8 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2149,8 +2173,8 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2171,8 +2195,8 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2186,8 +2210,8 @@ class WebServer:
                 twin = self.gateway.registry.get_device_twin(dev_id) if dev_id else None
                 resp_data = {"success": bool(twin), "twin": twin} if twin else {"success": False, "error": f"Device {dev_id} not found"}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2202,8 +2226,8 @@ class WebServer:
                 records = self.gateway.registry.get_telemetry_history(dev_id, limit=limit) if dev_id else []
                 resp_data = {"device_id": dev_id, "telemetry": records}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2213,8 +2237,8 @@ class WebServer:
                 records = self.gateway.registry.get_ota_history(dev_id)
                 resp_data = {"history": records}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2231,8 +2255,8 @@ class WebServer:
                     "tts_pitch": getattr(config, "TTS_PITCH", "+2Hz")
                 }
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2269,7 +2293,7 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2277,8 +2301,8 @@ class WebServer:
             if method == "GET" and path == "/api/sounds":
                 data = self.gateway.sound.list_sounds() if hasattr(self.gateway, "sound") else {"sounds": []}
                 body = json.dumps(data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2287,8 +2311,8 @@ class WebServer:
                 sound_name = path.replace("/api/sound/", "").strip()
                 audio_bytes = self.gateway.sound.get_mp3_data(sound_name) if hasattr(self.gateway, "sound") else None
                 if audio_bytes:
-                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n"
-                                  f"Content-Length: {len(audio_bytes)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                    writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: audio/mpeg\r\n"
+                                  f"Content-Length: {len(audio_bytes)}\r\n"
                                   f"Connection: close\r\n\r\n").encode() + audio_bytes)
                     await writer.drain(); writer.close(); return
                 else:
@@ -2309,21 +2333,21 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
             # ── API: In-Browser Audio Preview ──
             if method in ("GET", "HEAD") and path.startswith("/api/tts/preview"):
-                test_text = query.get("text", ["Dạ em đã bật đèn phòng khách cho anh rồi nè~"])[0]
+                test_text = query.get("text", ["Đã bật đèn phòng khách."])[0]
                 audio_bytes = None
                 if hasattr(self.gateway, "tts") and self.gateway.tts:
                     audio_bytes = await self.gateway.tts.synthesize(test_text)
                 if audio_bytes:
                     mime = "audio/wav" if audio_bytes.startswith(b"RIFF") else "audio/mpeg"
-                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\n"
-                                  f"Content-Length: {len(audio_bytes)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                    writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: {mime}\r\n"
+                                  f"Content-Length: {len(audio_bytes)}\r\n"
                                   f"Connection: close\r\n\r\n").encode() + audio_bytes)
                     await writer.drain(); writer.close(); return
                 else:
@@ -2336,14 +2360,10 @@ class WebServer:
                 try:
                     d = json.loads(body.decode() or "{}")
                     t = d.get("type", "chào")
-                    if t == "hát":
-                        text = "Một con vịt xòe ra hai cái cánh, nó kêu rằng quác quác quác quạc quạc quác! Em ngân nga chút cho ngôi nhà thêm vui tươi nè anh ơi~"
-                    elif t == "hài":
-                        text = "Tại sao con cua không bao giờ đi thẳng? Vì nó thích đi ngang đó nha anh!"
-                    elif t == "an_toan":
-                        text = "Dạ anh ơi~ Em thấy bình nóng lạnh ở phòng tắm đã bật hơn 35 phút rồi đó ạ. Anh nhớ tắt giúp em để vừa an toàn vừa tiết kiệm điện nha anh!"
+                    if t == "an_toan":
+                        text = "Cảnh báo: bình nóng lạnh đã bật liên tục hơn 35 phút. Vui lòng kiểm tra tắt để đảm bảo an toàn."
                     else:
-                        text = "Dạ, em chào anh ạ! Em là Lumi, cô trợ lý nhỏ luôn sẵn sàng hỗ trợ anh nè~ Anh có mệt không, để em bật chút nhạc cho anh thư giãn nha?"
+                        text = "Hệ thống nhà thông minh đang hoạt động ổn định."
 
                     ok = False
                     if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:
@@ -2355,36 +2375,12 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Save Gemini Key ──
             if method == "POST" and path == "/api/settings/gemini_key":
-                body = await _read_body()
-                try:
-                    d = json.loads(body.decode() or "{}")
-                    k = d.get("gemini_key", "").strip()
-                    config.GEMINI_API_KEY = k
-                    if hasattr(self.gateway, "persona") and self.gateway.persona:
-                        self.gateway.persona.set_api_key(k)
-                    cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
-                    cfg_data = {}
-                    if os.path.exists(cfg_path):
-                        try:
-                            with open(cfg_path, "r", encoding="utf-8") as f:
-                                cfg_data = json.load(f)
-                        except Exception: pass
-                    cfg_data["GEMINI_API_KEY"] = k
-                    with open(cfg_path, "w", encoding="utf-8") as f:
-                        json.dump(cfg_data, f, ensure_ascii=False, indent=2)
-                    resp_data = {"success": True}
-                except Exception as e:
-                    resp_data = {"success": False, "error": str(e)}
-                body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
-                await writer.drain(); writer.close(); return
+                await self._respond(writer, 403, {"error": "Configure GEMINI_API_KEY in the service environment"}); return
 
             # ── API: Proactive Toggle ──
             if method == "POST" and path == "/api/proactive/toggle":
@@ -2399,7 +2395,7 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2409,8 +2405,8 @@ class WebServer:
                 if hasattr(self.gateway, "ota") and self.gateway.ota:
                     items = self.gateway.ota.list_firmwares()
                 body = json.dumps({"firmwares": items}, ensure_ascii=False).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2423,8 +2419,8 @@ class WebServer:
                 else:
                     resp_data = {"success": False, "error": "OTA manager not available"}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2438,7 +2434,7 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2470,8 +2466,8 @@ class WebServer:
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
@@ -2479,14 +2475,14 @@ class WebServer:
                 fn = os.path.basename(path)
                 data = self.gateway.ota.get_firmware_bytes(fn) if hasattr(self.gateway, "ota") else None
                 if data:
-                    hdr = (f"HTTP/1.1 200 OK\r\n"
+                    hdr = (f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n"
                            f"Content-Type: application/octet-stream\r\n"
                            f"Content-Length: {len(data)}\r\n"
                            f"Content-Disposition: attachment; filename=\"{fn}\"\r\n"
                            f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
                            f"Pragma: no-cache\r\n"
                            f"Expires: 0\r\n"
-                           f"Access-Control-Allow-Origin: *\r\n"
+                           f""
                            f"Connection: close\r\n\r\n").encode()
                     writer.write(hdr)
                     if method == "GET":
@@ -2498,35 +2494,21 @@ class WebServer:
 
             # ── API: Auth & Multi-Tenant ──
             if method == "POST" and path == "/api/auth/login":
-                body = await _read_body()
                 try:
-                    d = json.loads(body.decode() or "{}")
-                    u = d.get("username", "")
-                    p = d.get("password", "")
-                    res = self.gateway.auth.login(u, p) if hasattr(self.gateway, "auth") else {"success": False, "error": "Auth disabled"}
-                    resp_data = res
-                except Exception as e:
-                    resp_data = {"success": False, "error": str(e)}
-                body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
-                await writer.drain(); writer.close(); return
+                    d = json.loads(raw_body)
+                    res = await asyncio.to_thread(auth.login, d.get("username", ""), d.get("password", ""))
+                except (ValueError, AttributeError, TypeError):
+                    await self._respond(writer, 400, {"error": "Invalid login request"}); return
+                cookie = ""
+                if res.get("success"):
+                    cookie = f"Set-Cookie: aetheria_session={res['token']}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={config.SESSION_TTL_SECONDS}\r\n"
+                    if origin:  # Browser keeps credentials only in the HttpOnly cookie.
+                        res = {k: v for k, v in res.items() if k not in {"token", "api_key"}}
+                status = 200 if res.get("success") else (429 if res.get("rate_limited") else 401)
+                await self._respond(writer, status, res, cookie); return
 
             if method == "POST" and path == "/api/auth/register":
-                body = await _read_body()
-                try:
-                    d = json.loads(body.decode() or "{}")
-                    u = d.get("username", "")
-                    p = d.get("password", "")
-                    fn = d.get("fullname", "")
-                    res = self.gateway.auth.register(u, p, fn) if hasattr(self.gateway, "auth") else {"success": False, "error": "Auth disabled"}
-                    resp_data = res
-                except Exception as e:
-                    resp_data = {"success": False, "error": str(e)}
-                body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
-                await writer.drain(); writer.close(); return
+                await self._respond(writer, 403, {"error": "Public registration is disabled"}); return
 
             if method == "GET" and path == "/api/auth/me":
                 if current_user:
@@ -2534,18 +2516,15 @@ class WebServer:
                 else:
                     resp_data = {"authenticated": False}
                 body = json.dumps(resp_data).encode()
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nAccess-Control-Allow-Origin: *\r\n"
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
             if method == "POST" and path == "/api/auth/logout":
                 if token and hasattr(self.gateway, "auth"):
                     self.gateway.auth.logout(token)
-                body = b'{"success":true}'
-                writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                              f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
-                await writer.drain(); writer.close(); return
+                await self._respond(writer, 200, {"success": True}, "Set-Cookie: aetheria_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0\r\n"); return
 
             # ── API: Download Mobile Android APK ──
             if method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"):
@@ -2560,10 +2539,10 @@ class WebServer:
                 apk_path = next((p for p in apk_paths if os.path.exists(p)), None)
                 if apk_path:
                     fsize = os.path.getsize(apk_path)
-                    writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.android.package-archive\r\n"
+                    writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/vnd.android.package-archive\r\n"
                                   f"Content-Length: {fsize}\r\n"
                                   f"Content-Disposition: attachment; filename=\"aetheria_home_assistant.apk\"\r\n"
-                                  f"Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n").encode())
+                                  f"Connection: close\r\n\r\n").encode())
                     if method == "GET":
                         with open(apk_path, "rb") as af:
                             while chunk := af.read(65536):
@@ -2573,6 +2552,88 @@ class WebServer:
                 else:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return
+
+            # ── API: Wi-Fi Management & Provisioning (nmcli) ──
+            if method == "GET" and path == "/api/wifi/status":
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    out, _ = await proc.communicate()
+                    devices = []
+                    for line in out.decode().strip().split("\n"):
+                        if line:
+                            parts = line.split(":")
+                            if len(parts) >= 4:
+                                devices.append({"device": parts[0], "type": parts[1], "state": parts[2], "connection": parts[3]})
+                    resp_data = {"success": True, "devices": devices}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            if method == "GET" and path == "/api/wifi/scan":
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,CHAN", "dev", "wifi", "list",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    out, _ = await proc.communicate()
+                    seen = {}
+                    for line in out.decode().strip().split("\n"):
+                        if line:
+                            parts = line.split(":")
+                            if len(parts) >= 3:
+                                ssid = parts[0].strip()
+                                if ssid and ssid != "--" and ssid != "Aetheria-Gateway-Setup":
+                                    sig = int(parts[1]) if parts[1].isdigit() else 0
+                                    sec = parts[2].strip()
+                                    chan = parts[3].strip() if len(parts) > 3 else ""
+                                    if ssid not in seen or sig > seen[ssid]["signal"]:
+                                        seen[ssid] = {"ssid": ssid, "signal": sig, "security": sec, "channel": chan}
+                    wifi_list = sorted(list(seen.values()), key=lambda x: x["signal"], reverse=True)
+                    resp_data = {"success": True, "networks": wifi_list}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            if method == "POST" and path == "/api/wifi/connect":
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    ssid = d.get("ssid", "").strip()
+                    password = d.get("password", "").strip()
+                    if not ssid:
+                        resp_data = {"success": False, "error": "SSID is required"}
+                    else:
+                        cmd = ["nmcli", "dev", "wifi", "connect", ssid]
+                        if password:
+                            cmd.extend(["password", password])
+                        proc = await asyncio.create_subprocess_exec(
+                            *cmd,
+                            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                        )
+                        out, err = await proc.communicate()
+                        if proc.returncode == 0:
+                            asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
+                            resp_data = {"success": True, "message": f"Connected to {ssid}"}
+                        else:
+                            resp_data = {"success": False, "error": err.decode().strip() or out.decode().strip()}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
 
             # 404 Fallthrough
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")

@@ -106,16 +106,13 @@ class PersonaEngine:
         return self._offline_reply(user_text)
 
     async def _call_gemini(self, user_text: str, api_key: str) -> Optional[str]:
-        """Gọi Google Gemini Flash API cho câu trả lời tự nhiên, ngọt ngào, luyến láy."""
+        """Gọi Google Gemini Flash API cho câu trả lời tự nhiên, tinh tế, lịch thiệp."""
         system_prompt = (
-            f"Bạn là {self.name}, một nữ trợ lý AI nhà thông minh cực kỳ ngọt ngào, dịu dàng, ấm áp và luyến láy dễ thương.\n"
-            f"Quy tắc xưng hô & phong cách:\n"
-            f"- BẮT BUỘC luôn xưng 'em' và gọi người dùng là 'anh'. Tuyệt đối không bao giờ dùng 'tôi', 'bạn' hay 'mình'.\n"
-            f"- Giọng điệu nữ tính, nũng nịu, ngọt ngào, ấm áp như người bạn gái hoặc em gái nhỏ chăm sóc chu đáo cho anh.\n"
-            f"- Sử dụng các từ đệm và trợ từ tình thái tiếng Việt dịu dàng: 'nè~', 'nha anh~', 'nhé anh', 'dạ anh ơi~', 'ạ~'.\n"
-            f"- Thêm dấu phẩy sau các từ cảm thán để ngắt nhịp thở nhẹ nhàng trước khi nói tiếp.\n"
-            f"- Nếu người dùng bảo hát: Viết lời hát có vần điệu tươi vui, kèm emoji âm nhạc 🎶 🎵.\n"
-            f"- Trả lời ngắn gọn từ 1 đến 3 câu tiếng Việt tự nhiên có dấu, không dùng định dạng markdown."
+            f"Bạn là {self.name}, trợ lý nhà thông minh cao cấp, tinh tế, lịch thiệp và thông thái.\n"
+            f"Phong cách phản hồi:\n"
+            f"- Đĩnh đạc, tự nhiên, nhã nhặn và khúc chiết. Tuyệt đối không dùng giọng nũng nịu, sến sẩm hay cợt nhả.\n"
+            f"- Trả lời ngắn gọn từ 1 đến 2 câu súc tích, cung cấp thông tin hữu ích và chính xác.\n"
+            f"- Tiếng Việt chuẩn mực, có dấu, không dùng markdown, không dùng ký tự lượn sóng (~)."
         )
 
         url = f"{config.GEMINI_URL}?key={api_key}"
@@ -123,8 +120,8 @@ class PersonaEngine:
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": user_text}]}],
             "generationConfig": {
-                "temperature": 0.7,
-                "maxOutputTokens": 100,
+                "temperature": 0.4,
+                "maxOutputTokens": 80,
             }
         }
 
@@ -134,17 +131,14 @@ class PersonaEngine:
             data = resp.json()
             candidates = data.get("candidates", [])
             if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    txt = parts[0].get("text", "").strip()
-                    # Loại bỏ ký tự markdown nếu có
-                    txt = re.sub(r"[*#_`]", "", txt).strip()
-                    logger.info(f"✨ [Gemini Persona] Reply: {txt}")
-                    return txt
+                text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                if text:
+                    logger.info(f"✨ Gemini Persona refined reply: {text}")
+                    return text
         return None
 
     def _offline_reply(self, user_text: str) -> str:
-        """Sinh câu trả lời offline thông minh, ngọt ngào, dịu dàng, gọi anh xưng em."""
+        """Thư viện phản hồi nhanh ngoại tuyến tinh tế, chuẩn mực."""
         t = user_text.lower().strip()
         now = datetime.now(TZ_VN)
 
@@ -158,29 +152,24 @@ class PersonaEngine:
 
         # 3. Hỏi giờ giấc
         if any(w in t for w in ("mấy giờ", "bây giờ là mấy giờ")):
-            return f"Dạ anh ơi, bây giờ là {now.hour} giờ {now.minute:02d} phút rồi nè~ Anh nhớ giữ gìn sức khỏe nha!"
+            return f"Bây giờ là {now.hour} giờ {now.minute:02d} phút."
 
         # 4. Hỏi ngày tháng
         if any(w in t for w in ("thứ mấy", "ngày mấy", "ngày bao nhiêu")):
             days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
             day_name = days[now.weekday()]
-            return f"Dạ hôm nay là {day_name}, ngày {now.day} tháng {now.month} nè anh. Chúc anh một ngày tràn đầy năng lượng nha~"
+            return f"Hôm nay là {day_name}, ngày {now.day} tháng {now.month}."
 
         # 5. Hỏi danh tính
         if any(w in t for w in ("em là ai", "bạn là ai", "em tên gì", "bạn tên gì", "bạn tên là gì", "tên bạn là gì", "tên của em")):
-            return f"Dạ em là {self.name}, trợ lý nhỏ của anh đây ạ! Em luôn ở đây để giúp anh điều khiển nhà cửa, tâm sự và hát cho anh nghe mỗi ngày nè~"
+            return f"Tôi là {self.name}, hệ thống điều khiển nhà thông minh của bạn."
 
-        if "ai tạo ra em" in t:
-            return "Dạ em được sinh ra từ tình yêu công nghệ để luôn đồng hành và chăm sóc cho ngôi nhà của anh đó ạ!"
+        if "ai tạo ra em" in t or "ai tạo ra bạn" in t:
+            return "Tôi được phát triển bởi đội ngũ kỹ thuật DTV Smart Home."
 
         # 6. Khen ngợi
         if any(w in t for w in ("giỏi quá", "thông minh quá", "tuyệt vời", "được đấy", "hay quá")):
-            replies = [
-                "Hihi, em cảm ơn anh yêu nha! Được anh khen là em vui cả ngày luôn á! Em sẽ luôn ngoan ngoãn phục vụ anh thật tốt nè~",
-                "Dạ em cảm ơn anh nhiều! Có anh động viên là em có thêm bao nhiêu năng lượng luôn nè~",
-                "Hihi em vui quá đi mất! Cảm ơn anh đã tin tưởng và yêu quý em nha!"
-            ]
-            return random.choice(replies)
+            return "Cảm ơn bạn. Tôi luôn sẵn sàng hỗ trợ bạn."
 
         # 7. Tâm sự / than mệt mỏi
         if any(w in t for w in ("mệt quá", "buồn quá", "chán quá", "áp lực")):
@@ -188,19 +177,19 @@ class PersonaEngine:
 
         # 8. Lời cảm ơn
         if "cảm ơn" in t:
-            return "Dạ không có chi đâu anh ơi~ Giúp được anh là niềm hạnh phúc lớn nhất của em mà!"
+            return "Không có chi. Rất vui được hỗ trợ bạn."
 
         # 9. Lời chào chung
         if any(w in t for w in ("chào em", "xin chào", "hello", "chào")):
             hour = now.hour
             if 5 <= hour < 12:
-                time_greet = "Dạ em chào buổi sáng anh yêu nè~ Chúc anh một ngày mới tràn ngập niềm vui và may mắn nha!"
+                time_greet = "Xin chào buổi sáng. Chúc bạn một ngày tốt lành."
             elif 12 <= hour < 18:
-                time_greet = "Dạ em chào buổi chiều anh ạ! Hôm nay công việc của anh có thuận lợi không nè?"
+                time_greet = "Xin chào buổi chiều."
             else:
-                time_greet = "Dạ em chào buổi tối anh yêu! Anh đã ăn cơm nước gì chưa, nhớ nghỉ ngơi sớm nha anh!"
+                time_greet = "Xin chào buổi tối. Chúc bạn một buổi tối thư thái."
             return time_greet
 
         # Mặc định thân thiện
-        return "Dạ, em nghe anh nè~ Em có thể giúp gì cho anh, hay anh muốn em hát tặng anh một câu không nào?"
+        return "Tôi có thể hỗ trợ gì cho bạn?"
 

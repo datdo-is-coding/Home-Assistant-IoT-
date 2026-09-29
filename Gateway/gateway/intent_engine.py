@@ -664,7 +664,7 @@ class FastPathEngine:
                 normalized_text=norm.text,
                 needs_clarification=True,
                 clarification_reason="negation_detected",
-                voice_reply="Dạ, em đã ghi nhận bạn không muốn bật thiết bị ạ."
+                voice_reply="Đã hủy lệnh."
             )
 
         # 2. Xử lý Scene / Ngữ cảnh sinh hoạt
@@ -704,7 +704,7 @@ class FastPathEngine:
                     clarification_reason="missing_action",
                     raw_text=norm.original_text,
                     normalized_text=norm.text,
-                    voice_reply=f"Dạ bạn muốn bật hay tắt {get_device_name(device)} vậy ạ?"
+                    voice_reply=f"Bạn muốn bật hay tắt {get_device_name(device)}?"
                 )
             return None
 
@@ -722,10 +722,16 @@ class FastPathEngine:
         needs_clarify = False
         clarify_reason = None
 
+        if not device and not room and action in ("turn_on", "turn_off"):
+            if re.search(r"\b(hết|tất cả|toàn bộ)\b", text):
+                device = "all"
+                confidence = 0.98
+
         if device and room:
             confidence = min(0.99, norm.confidence * 0.98)
         elif device and not room:
-            confidence = min(0.92, norm.confidence * 0.92)
+            # Lệnh đơn (bật đèn, tắt quạt, bật relay 1)
+            confidence = min(0.98, norm.confidence * 0.98)
         elif not device and room and action != "set_temperature":
             confidence = 0.60
             needs_clarify = True
@@ -736,6 +742,22 @@ class FastPathEngine:
             clarify_reason = "missing_slots"
 
         target = Target(device_type=device, room=room)
+
+        # Pre-computed refined Vietnamese voice reply
+        v_reply = None
+        if action in ("turn_on", "turn_off"):
+            act_vi = "bật" if action == "turn_on" else "tắt"
+            if device == "all":
+                v_reply = f"Đã {act_vi} tất cả thiết bị."
+            elif device:
+                dev_vi = get_device_name(device)
+                room_vi = get_room_name(room)
+                if room_vi:
+                    v_reply = f"Đã {act_vi} {dev_vi} {room_vi}."
+                else:
+                    v_reply = f"Đã {act_vi} {dev_vi}."
+        elif action == "set_temperature" and value:
+            v_reply = f"Đã chỉnh điều hòa {value} độ."
 
         return IntentResult(
             intent=action or "unknown",
@@ -748,7 +770,8 @@ class FastPathEngine:
             clarification_reason=clarify_reason,
             negated=False,
             raw_text=norm.original_text,
-            normalized_text=norm.text
+            normalized_text=norm.text,
+            voice_reply=v_reply
         )
 
     def _extract_action(self, text: str) -> Tuple[Optional[str], float]:
@@ -909,6 +932,7 @@ class IntentEngine:
         self.context_manager = IntentContextManager(
             ttl_seconds=getattr(config, "CONTEXT_TTL", 60.0)
         )
+        self._session_contexts = {}
         self.validator = StrictValidator(registry=self.registry)
 
     def set_registry(self, registry):
@@ -936,10 +960,21 @@ class IntentEngine:
         clean_parts = [p.strip() for p in parts if len(p.strip()) > 3]
         return clean_parts if len(clean_parts) > 1 else [raw_text]
 
-    async def extract(self, user_text: str) -> IntentResult:
+    async def extract(self, user_text: str, session_key: str = None) -> IntentResult:
         """
         Entry Point chính: Nhận khẩu lệnh ASR text và trả về IntentResult chuẩn cấu trúc.
         """
+        context = self.context_manager
+        if session_key is not None:
+            now = time.monotonic()
+            ttl = getattr(config, "CONTEXT_TTL", 60.0)
+            self._session_contexts = {k: v for k, v in self._session_contexts.items()
+                                      if now - v[0] < ttl}
+            entry = self._session_contexts.pop(session_key, None)
+            context = entry[1] if entry else IntentContextManager(ttl_seconds=ttl)
+            if len(self._session_contexts) >= 128:
+                self._session_contexts.pop(next(iter(self._session_contexts)))
+            self._session_contexts[session_key] = (now, context)
         t0 = time.time()
         logger.info(f"🎤 [ASR] original=\"{user_text}\"")
 
@@ -948,7 +983,7 @@ class IntentEngine:
         if len(clauses) > 1:
             sub_results: List[IntentResult] = []
             for clause in clauses:
-                sub_res = await self._extract_single(clause)
+                sub_res = await self._extract_single(clause, context)
                 sub_results.append(sub_res)
 
             min_conf = min((r.confidence for r in sub_results), default=0.9)
@@ -966,9 +1001,10 @@ class IntentEngine:
             logger.info(f"⚡ [INTENT] Multi-command resolved: {len(sub_results)} sub-commands")
             return multi_result
 
-        return await self._extract_single(user_text)
+        return await self._extract_single(user_text, context)
 
-    async def _extract_single(self, user_text: str) -> IntentResult:
+    async def _extract_single(self, user_text: str, context=None) -> IntentResult:
+        context = context if context is not None else self.context_manager
         # ── 2. ASR Normalization ──
         norm = self.normalizer.normalize(user_text)
         if norm.corrections:
@@ -979,7 +1015,7 @@ class IntentEngine:
 
         # ── 4. Context Resolution (Multi-turn) ──
         if fast_result:
-            resolved_result = self.context_manager.resolve(fast_result, user_text)
+            resolved_result = context.resolve(fast_result, user_text)
         else:
             resolved_result = None
 
@@ -987,7 +1023,7 @@ class IntentEngine:
         if resolved_result and resolved_result.confidence >= 0.95 and not resolved_result.needs_clarification:
             self.active_engine = "Fast-Path (Instant)"
             final_result = self.validator.validate(resolved_result)
-            self.context_manager.update(final_result)
+            context.update(final_result)
             logger.info(
                 f"⚡ [INTENT] source={final_result.source} intent={final_result.intent} "
                 f"device={final_result.target.device_type} room={final_result.target.room} "
@@ -1012,14 +1048,14 @@ class IntentEngine:
                 raw_text=user_text,
                 needs_clarification=True,
                 clarification_reason="non_smarthome_command",
-                voice_reply="Em nghe chưa rõ khẩu lệnh. Bạn muốn điều khiển thiết bị nào và ở phòng nào ạ?"
+                voice_reply="Chưa rõ khẩu lệnh. Bạn muốn điều khiển thiết bị nào?"
             )
 
         # Nếu Fast-Path có kết quả khả dĩ (MEDIUM confidence) nhưng chưa cần LLM
         if resolved_result and resolved_result.confidence >= 0.60 and not resolved_result.needs_clarification:
             self.active_engine = "Fast-Path (Medium-Confidence)"
             final_result = self.validator.validate(resolved_result)
-            self.context_manager.update(final_result)
+            context.update(final_result)
             logger.info(
                 f"⚡ [INTENT] source={final_result.source} intent={final_result.intent} "
                 f"device={final_result.target.device_type} room={final_result.target.room} "
@@ -1027,8 +1063,23 @@ class IntentEngine:
             )
             return final_result
 
-        # ── 6. Hybrid LLM NLU (Gemini Flash Cloud / Local Qwen) ──
-        mode = getattr(config, "LLM_MODE", "hybrid").lower()
+        # ── 6. Hybrid LLM NLU (Chỉ kích hoạt khi AI_ENABLED = True và LLM_MODE != 'off') ──
+        mode = getattr(config, "LLM_MODE", "off").lower()
+        ai_enabled = getattr(config, "AI_ENABLED", False)
+
+        if not ai_enabled or mode == "off":
+            if resolved_result:
+                self.active_engine = "Fast-Path (Voice Relay)"
+                final_result = self.validator.validate(resolved_result)
+                context.update(final_result)
+                logger.info(
+                    f"⚡ [INTENT-VOICE-RELAY] source={final_result.source} intent={final_result.intent} "
+                    f"device={final_result.target.device_type} room={final_result.target.room} "
+                    f"val={final_result.value} conf={final_result.confidence:.2f}"
+                )
+                return final_result
+            return self._fallback_unknown(user_text)
+
         api_key = getattr(config, "GEMINI_API_KEY", "").strip()
 
         if httpx and mode in ("hybrid", "cloud") and api_key:
@@ -1036,9 +1087,9 @@ class IntentEngine:
             if res_llm:
                 self.active_engine = f"Gemini ({config.GEMINI_MODEL})"
                 final_res = self._convert_llm_result(res_llm, user_text, norm.text, source="cloud_llm")
-                final_res = self.context_manager.resolve(final_res, user_text)
+                final_res = context.resolve(final_res, user_text)
                 final_res = self.validator.validate(final_res)
-                self.context_manager.update(final_res)
+                context.update(final_res)
                 return final_res
             if mode == "cloud":
                 logger.error("Cloud-only mode: Gemini failed and local fallback is disabled")
@@ -1049,9 +1100,9 @@ class IntentEngine:
             res_local = await self._extract_local(norm.text)
             if res_local:
                 final_res = self._convert_llm_result(res_local, user_text, norm.text, source="local_llm")
-                final_res = self.context_manager.resolve(final_res, user_text)
+                final_res = context.resolve(final_res, user_text)
                 final_res = self.validator.validate(final_res)
-                self.context_manager.update(final_res)
+                context.update(final_res)
                 return final_res
 
         # Nếu tất cả thất bại nhưng trước đó có resolved_result từ Fast-Path
@@ -1099,7 +1150,7 @@ class IntentEngine:
             raw_text=raw_text,
             needs_clarification=True,
             clarification_reason="unintelligible_command",
-            voice_reply="Dạ em nghe chưa rõ khẩu lệnh anh ơi. Anh nói lại giúp em với nha~"
+            voice_reply="Chưa rõ khẩu lệnh. Xin vui lòng thử lại."
         )
 
     def _build_minimal_prompt_for_pi4(self, user_text: str) -> str:

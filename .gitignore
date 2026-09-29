@@ -25,6 +25,8 @@ local_config.json
 .pio/
 build/
 target/
+managed_components/
+components/
 
 # Mobile (Flutter)
 .dart_tool/
@@ -36,6 +38,10 @@ target/
 *.db
 auth.db
 memory.db
+
+# Generated Gateway audio and local analysis artifacts
+/Gateway/cache/
+/graphify-out/
 
 # KiCad backup & temporary
 *-save.kicad_pcb

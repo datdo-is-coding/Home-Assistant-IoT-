@@ -24,11 +24,19 @@ for env_candidate in [
             pass
 
 # ─── MQTT ───────────────────────────────────────────
-MQTT_BROKER = "127.0.0.1"
-MQTT_PORT = 1883
-MQTT_USERNAME = "admin"
-MQTT_PASSWORD = "SmarthomePass2026!"
-MQTT_CLIENT_ID = "smarthome_gateway"
+MQTT_BROKER = os.environ.get("MQTT_BROKER", "127.0.0.1")
+MQTT_PORT = int(os.environ.get("MQTT_PORT", "8883"))
+MQTT_TLS_ENABLED = True
+MQTT_CA_FILE = os.environ.get("MQTT_CA_FILE", "")
+MQTT_CERT_FILE = os.environ.get("MQTT_CERT_FILE", "")
+MQTT_KEY_FILE = os.environ.get("MQTT_KEY_FILE", "")
+MQTT_USERNAME = os.environ.get("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD", "")
+MQTT_CLIENT_ID = os.environ.get("MQTT_CLIENT_ID", "smarthome_gateway")
+BOOTSTRAP_PASSWORD = os.environ.get("BOOTSTRAP_PASSWORD", "")
+BOOTSTRAP_USERNAME = os.environ.get("BOOTSTRAP_USERNAME", "admin")
+SESSION_TTL_SECONDS = int(os.environ.get("SESSION_TTL_SECONDS", "43200"))
+WEB_PUBLIC_ORIGIN = os.environ.get("WEB_PUBLIC_ORIGIN", "https://gateway.local").rstrip("/")
 
 # MQTT Topics (compact v2 — xem Gateway/protocol_spec.md)
 TOPIC_REGISTER = "smarthome/register"      # legacy, giữ tương thích
@@ -54,20 +62,36 @@ TOPIC_DEV_OTA_TRIGGER = "home/devices/{device_id}/ota/trigger"
 TOPIC_DEV_OTA_PROGRESS = "home/devices/{device_id}/ota/progress"
 TOPIC_DEV_UNCLAIMED = "home/discovery/unclaimed"
 
-# ─── LLM Orchestration & Hybrid Engine ────────────────
-# Chế độ: "hybrid" (Ưu tiên Gemini Cloud siêu nhanh 0.3s, tự động fallback về Qwen 3B nội bộ khi mất mạng)
-#         "local"  (Luôn dùng Qwen 3B nội bộ trên Pi 4)
-#         "cloud"  (Luôn dùng Cloud Gemini)
-LLM_MODE = os.environ.get("LLM_MODE", "hybrid")
+# ─── Feature Flags: Pure Voice Relay Mode vs AI Option ───────────────
+# Khi AI_ENABLED = False: Hệ thống chạy chế độ điều khiển relay thuần túy bằng giọng nói,
+# hoạt động 100% bằng Fast-Path Rule Engine siêu tốc (<5ms), hoàn toàn offline,
+# không phụ thuộc LLM/Gemini, bỏ qua các module tán gẫu persona / proactive.
+AI_ENABLED = os.environ.get("AI_ENABLED", "false").lower() in ("1", "true", "yes")
+PERSONA_ENABLED = (os.environ.get("PERSONA_ENABLED", "false").lower() in ("1", "true", "yes")) and AI_ENABLED
+PROACTIVE_ENABLED = (os.environ.get("PROACTIVE_ENABLED", "false").lower() in ("1", "true", "yes")) and AI_ENABLED
+PERSONA_NAME = os.environ.get("PERSONA_NAME", "Lumi")
 
-# Cloud LLM: Google Gemini 1.5 Flash (Miễn phí, phản hồi 0.3s, ngữ cảnh 1M tokens)
+# ─── Acoustic Elegance & Audio Feedback Mode ──────────────────────────
+# Chế độ phản hồi âm thanh:
+# "hybrid": Tinh tế nhất (MẶC ĐỊNH) — Phát tiếng chuông chime/earcon êm dịu (listen_success)
+#           xác nhận tức thì cho các lệnh bật/tắt thiết bị; chỉ dùng thoại ngắn khi cần
+#           hỏi lại hoặc báo lỗi.
+# "voice_brief": Thoại ngắn gọn, đĩnh đạc, thanh lịch (ví dụ: "Đã bật đèn.", "Đã tắt quạt.")
+# "chime": Chỉ dùng âm thanh chuông xác nhận (chime tone), không nói thoại.
+AUDIO_FEEDBACK_MODE = os.environ.get("AUDIO_FEEDBACK_MODE", "hybrid").lower()
+
+# ─── LLM Orchestration & Engine (Chỉ kích hoạt khi AI_ENABLED = True) ─
+# Chế độ: "off"    (Tắt hoàn toàn LLM, chỉ dùng Rule Engine - MẶC ĐỊNH)
+#         "hybrid" (Ưu tiên Gemini Cloud, fallback Qwen 3B khi mất mạng)
+#         "local"  (Chỉ dùng Qwen 3B nội bộ trên Pi 4)
+#         "cloud"  (Chỉ dùng Cloud Gemini)
+LLM_MODE = os.environ.get("LLM_MODE", "hybrid" if AI_ENABLED else "off")
+
+# Cloud LLM: Google Gemini 1.5 Flash
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-# ─── Proactive Agent & Lifelike Persona ────────────
-PROACTIVE_ENABLED = os.environ.get("PROACTIVE_ENABLED", "true").lower() in ("1", "true", "yes")
 PROACTIVE_COOLDOWN_HOURS = float(os.environ.get("PROACTIVE_COOLDOWN_HOURS", "2.0"))
 PROACTIVE_QUIET_START = int(os.environ.get("PROACTIVE_QUIET_START", "22"))   # 22h đêm bắt đầu im lặng
 PROACTIVE_QUIET_END = int(os.environ.get("PROACTIVE_QUIET_END", "7"))        # 07h sáng kết thúc im lặng
-PERSONA_NAME = os.environ.get("PERSONA_NAME", "Lumi")
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
@@ -76,8 +100,6 @@ if os.path.exists(_cfg_file):
     try:
         with open(_cfg_file, "r", encoding="utf-8") as _f:
             _loaded = json.load(_f)
-            if "GEMINI_API_KEY" in _loaded and _loaded["GEMINI_API_KEY"].strip():
-                GEMINI_API_KEY = _loaded["GEMINI_API_KEY"].strip()
             if "GEMINI_MODEL" in _loaded and _loaded["GEMINI_MODEL"].strip():
                 GEMINI_MODEL = _loaded["GEMINI_MODEL"].strip()
             if "PROACTIVE_ENABLED" in _loaded:
@@ -141,12 +163,18 @@ AUTH_DB = os.environ.get("AUTH_DB", "/home/pi4/smarthome/auth.db")
 
 
 # ─── WebSocket Audio Server ────────────────────────
-WS_AUDIO_HOST = "0.0.0.0"
+WS_AUDIO_HOST = os.environ.get("WS_AUDIO_HOST", "127.0.0.1")
 WS_AUDIO_PORT = 8765
+WS_AUDIO_TLS_CERT = os.environ.get("WS_AUDIO_TLS_CERT", "")
+WS_AUDIO_TLS_KEY = os.environ.get("WS_AUDIO_TLS_KEY", "")
+WS_AUDIO_TOKEN = os.environ.get("WS_AUDIO_TOKEN", "")
+WS_AUDIO_TOKENS = json.loads(os.environ.get("WS_AUDIO_TOKENS", "{}"))
 
 # ─── Web Monitor Dashboard ─────────────────────────
-WEB_HOST = "0.0.0.0"
-WEB_PORT = 8000
+WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
+if WEB_HOST not in ("127.0.0.1", "::1", "localhost"):
+    raise ValueError("WEB_HOST must be loopback; expose the dashboard through HTTPS reverse proxy")
+WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 
 # ─── InfluxDB ──────────────────────────────────────
 INFLUX_URL = "http://127.0.0.1:8086"
@@ -156,7 +184,7 @@ INFLUX_BUCKET = "telemetry"
 
 # ─── Device Registry (SQLite v1.0 Spec) ─────────────
 REGISTRY_FILE = os.environ.get("REGISTRY_FILE", "/home/pi4/smarthome/device_registry.json")
-if not os.path.exists(os.path.dirname(REGISTRY_FILE)) and not os.path.isabs(REGISTRY_FILE):
+if not os.path.exists(os.path.dirname(REGISTRY_FILE)):
     REGISTRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "device_registry.json")
 
 GATEWAY_DB = os.environ.get("GATEWAY_DB", "/var/lib/smarthome/gateway.db")
@@ -164,7 +192,9 @@ if not os.path.exists(os.path.dirname(GATEWAY_DB)):
     GATEWAY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gateway.db")
 
 # ─── Memory (SQLite) ──────────────────────────────
-MEMORY_DB = "/home/pi4/smarthome/memory.db"
+MEMORY_DB = os.environ.get("MEMORY_DB", "/home/pi4/smarthome/memory.db")
+if not os.path.exists(os.path.dirname(MEMORY_DB)):
+    MEMORY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "memory.db")
 
 # ─── System ────────────────────────────────────────
 LOG_LEVEL = "INFO"

@@ -11,7 +11,12 @@ import os
 import re
 import time
 from typing import Optional, Tuple
-import numpy as np
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    np = None
+    HAS_NUMPY = False
 
 import config
 
@@ -133,21 +138,51 @@ class ASREngine:
         self._hotwords_path = None
         self._using_beam_search = False
 
-    def _generate_hotwords_file(self) -> Optional[str]:
+    def _extract_registry_hotwords(self, registry=None) -> list:
+        """Extract room and device names dynamically from Device Registry."""
+        words = set()
+        if registry and hasattr(registry, "get_all_nodes"):
+            try:
+                nodes = registry.get_all_nodes()
+                for nid, ninfo in nodes.items():
+                    if not isinstance(ninfo, dict):
+                        continue
+                    room = ninfo.get("room") or ""
+                    if room and room != "unknown":
+                        words.add(room.replace("_", " ").upper())
+
+                    for ch_key in ("ch1_name", "ch2_name", "rl1", "rl2", "name", "description"):
+                        val = ninfo.get(ch_key)
+                        if isinstance(val, str) and val.strip():
+                            clean = re.sub(r"[^\w\sÀ-ỹ]", " ", val).strip().upper()
+                            if len(clean) >= 2:
+                                words.add(clean)
+            except Exception as e:
+                logger.warning(f"Error extracting registry hotwords: {e}")
+        return sorted(list(words))
+
+    def _generate_hotwords_file(self, registry=None) -> Optional[str]:
         """Generate hotwords.txt for Sherpa-ONNX modified_beam_search boosting."""
         hotwords_dir = config.ASR_MODEL_DIR
         hotwords_path = os.path.join(hotwords_dir, "hotwords.txt")
         try:
+            words = list(SMARTHOME_HOTWORDS)
+            dyn_words = self._extract_registry_hotwords(registry)
+            for dw in dyn_words:
+                if dw not in words:
+                    words.append(dw)
+
             with open(hotwords_path, "w", encoding="utf-8") as f:
-                for word in SMARTHOME_HOTWORDS:
-                    f.write(word.strip() + "\n")
-            logger.info(f"Generated hotwords.txt with {len(SMARTHOME_HOTWORDS)} entries at {hotwords_path}")
+                for word in words:
+                    if word.strip():
+                        f.write(word.strip() + "\n")
+            logger.info(f"Generated hotwords.txt with {len(words)} entries ({len(dyn_words)} dynamic from registry) at {hotwords_path}")
             return hotwords_path
         except Exception as e:
             logger.warning(f"Failed to generate hotwords.txt: {e}")
             return None
 
-    def initialize(self) -> bool:
+    def initialize(self, registry=None) -> bool:
         _ensure_sherpa()
         model_dir = config.ASR_MODEL_DIR
 
@@ -160,8 +195,8 @@ class ASREngine:
             logger.error(f"Missing transducer model files in {model_dir}")
             return False
 
-        # Generate hotwords file
-        self._hotwords_path = self._generate_hotwords_file()
+        # Generate hotwords file (with dynamic registry keywords)
+        self._hotwords_path = self._generate_hotwords_file(registry)
 
         # Check for BPE vocab (required for Zipformer Vietnamese BPE models)
         bpe_vocab_path = self._find_file(model_dir, "bpe.vocab")
@@ -217,6 +252,11 @@ class ASREngine:
         except Exception as e:
             logger.error(f"ASR initialization failed: {e}")
             return False
+
+    def reload_hotwords(self, registry=None) -> bool:
+        """Dynamically reload hotwords when new devices/rooms are registered."""
+        logger.info("🔄 Reloading ASR hotwords from registry...")
+        return self.initialize(registry)
 
     def transcribe(self, pcm_samples, sample_rate: int = None) -> str:
         """Transcribe audio and return corrected text."""

@@ -20,12 +20,9 @@ logger = logging.getLogger("proactive_agent")
 TZ_VN = timezone(timedelta(hours=7))
 
 SPONTANEOUS_PROMPTS = [
-    "🎶 Tình tính tang tang tính tình... Cuộc đời vẫn đẹp sao, tình yêu vẫn đẹp sao! Anh làm việc vất vả rồi, nhớ uống ngụm nước nghỉ ngơi chút nha anh~ 🎵",
-    "🎵 Một con vịt xòe ra hai cái cánh, nó kêu rằng cáp cáp cáp cạp cạp cạp... Em hát một câu tặng anh cho vui cửa vui nhà nè~ 😊",
-    "🎶 Kìa con bướm vàng, kìa con bướm vàng, xòe đôi cánh, xòe đôi cánh... Em ngân nga chút cho ngôi nhà mình thêm ấm cúng nè anh ơi~",
-    "Dạ anh ơi, hôm nay các thiết bị trong nhà mình đều hoạt động rất tốt và tiết kiệm điện đó ạ. Anh có cần em hỗ trợ gì thêm không nè?",
-    "Anh ơi, làm việc chăm chỉ nhưng cũng đừng quên giữ gìn sức khỏe nhé! Em luôn ở đây đồng hành cùng anh nè~",
-    "Dạo này nhà mình ngăn nắp và ấm cúng ghê anh ha! Em rất vui khi được làm trợ lý nhỏ chăm sóc ngôi nhà cho anh đó ạ~"
+    "Hệ thống nhà thông minh đang vận hành ổn định và tiết kiệm năng lượng.",
+    "Tất cả các kết nối phần cứng và relay đang trong trạng thái tối ưu.",
+    "Nhiệt độ và các thông số khu vực đang được duy trì ở mức lý tưởng."
 ]
 
 
@@ -173,7 +170,7 @@ class ProactiveAgent:
                         # Nếu bật quá 35 phút liên tục
                         if duration_mins >= 35.0:
                             dev_name = ch.get("fullname", dev_type)
-                            alert_text = f"Dạ anh ơi~ Em thấy {dev_name} đã bật liên tục hơn 35 phút rồi đó ạ. Anh nhớ kiểm tra tắt giúp em để vừa an toàn vừa tiết kiệm điện nha anh!"
+                            alert_text = f"Cảnh báo: {dev_name} đã hoạt động hơn 35 phút liên tục. Vui lòng kiểm tra để đảm bảo an toàn điện."
                             logger.warning(f"⚠️ Safety Alert triggered: {alert_text}")
                             await self._speak_if_allowed(alert_text, event_type="safety_alert", node_id=nid)
                             # Reset timer sau khi cảnh báo để không lặp lại liên tục
@@ -195,8 +192,7 @@ class ProactiveAgent:
 
         # 2. Lời chào buổi sáng (07:15 - 08:30)
         if 7 <= hour < 9 and self.today_morning_greeted != today_str:
-            # Kiểm tra xem đã có node online nào hoạt động
-            text = "Dạ, em chào buổi sáng anh yêu quý! Chúc anh một ngày mới ngập tràn năng lượng và thật nhiều niềm vui nha anh~"
+            text = "Xin chào buổi sáng. Chúc bạn một ngày làm việc hiệu quả và tốt lành."
             sent = await self._speak_if_allowed(text, event_type="morning_greeting", force=True)
             if sent:
                 self.today_morning_greeted = today_str
@@ -204,7 +200,7 @@ class ProactiveAgent:
 
         # 3. Lời nhắc nghỉ ngơi buổi tối (21:45 - 22:25)
         if 21 <= hour < 23 and self.today_evening_greeted != today_str and now.minute >= 45:
-            text = "Dạ anh ơi~ Đã gần 10 giờ đêm rồi, anh nhớ chuẩn bị nghỉ ngơi sớm để giữ gìn sức khỏe nhé. Em chúc anh ngủ thật ngon và có giấc mơ đẹp nha~"
+            text = "Đã đến giờ nghỉ ngơi buổi tối. Chúc bạn một giấc ngủ ngon."
             sent = await self._speak_if_allowed(text, event_type="night_reminder", force=True)
             if sent:
                 self.today_evening_greeted = today_str

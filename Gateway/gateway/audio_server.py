@@ -22,9 +22,18 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional, Tuple
-import websockets
-import numpy as np
+from typing import Optional, Tuple, Any
+try:
+    import websockets
+except ImportError:
+    websockets = None
+
+try:
+    import numpy as np
+except ImportError:
+    class _DummyNP:
+        ndarray = Any
+    np = _DummyNP()
 
 try:
     import opuslib
@@ -102,6 +111,8 @@ class AudioServer:
         # Tập hợp tất cả các websocket loa ESP32 vật lý đang hoạt động
         self._active_speakers: set = set()
         self._playback_lock = asyncio.Lock()
+        # ponytail: one recognizer worker; add independent model workers only after profiling.
+        self._asr_lock = asyncio.Lock()
         self._active_voice_session = None  # {"node_id": str, "timestamp": float}
         self.arbiter = StreamArbiter(gateway=self.gateway)
 
@@ -122,7 +133,7 @@ class AudioServer:
     def has_ws(self, node_id: str) -> bool:
         """Kiểm tra xem node_id có kết nối WebSocket audio còn sống hay không."""
         ws = self._ws_nodes.get(node_id)
-        return ws is not None and self._is_ws_alive(ws)
+        return ws is not None and not getattr(ws, "asr_only", False) and self._is_ws_alive(ws)
 
     async def send_relay_ws(self, node_id: str, channel: str, action: str, seq: int = 0) -> bool:
         """Gửi lệnh điều khiển relay trực tiếp qua WebSocket text frame (0ms latency)."""
@@ -168,9 +179,7 @@ class AudioServer:
         logger.info(f"🔗 ESP32 client connected from {client_addr}")
 
         client_node_id = None
-        # Đăng ký ngay websocket vào _active_speakers để sẵn sàng nhận broadcast âm thanh
-        self._active_speakers.add(websocket)
-        logger.info(f"📢 ESP32 speaker registered from {client_addr} (Active speaker pool: {len(self._active_speakers)})")
+        websocket.has_speaker = True
 
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
@@ -207,7 +216,15 @@ class AudioServer:
                             if node_id:
                                 client_node_id = node_id
                                 self._ws_nodes[client_node_id] = websocket
-                                self._active_speakers.add(websocket)
+                                is_spk = cmd.get("speaker") is not False and "subbox" not in str(node_id).lower()
+                                websocket.has_speaker = is_spk
+                                websocket.asr_only = cmd.get("asr_only") is True
+                                if is_spk:
+                                    self._active_speakers.add(websocket)
+                                    logger.info(f"📢 ESP32 speaker registered from {client_addr} (Active speaker pool: {len(self._active_speakers)})")
+                                else:
+                                    self._active_speakers.discard(websocket)
+                                    logger.info(f"🎤 ESP32 ASR-only node '{node_id}' registered from {client_addr}")
 
                             if handled and handled.get("action") == "known":
                                 logger.info(f"✅ Node '{node_id}' registered for WS relay + speaker broadcast (pool: {len(self._active_speakers)})")
@@ -231,6 +248,8 @@ class AudioServer:
                         elif compact_type == "ack":
                             nid = cmd.get("id")
                             rl = cmd.get("rl")
+                            if self.gateway and nid:
+                                self.gateway.mqtt.record_compact_ack(nid, cmd)
                             if nid and isinstance(rl, list):
                                 if self.gateway and hasattr(self.gateway, "registry"):
                                     self.gateway.registry.update_relay_state(nid, rl)
@@ -261,6 +280,7 @@ class AudioServer:
 
                         # ── LEGACY: start / stop / ping (giữ nguyên) ──
                         if msg_type == "start":
+                            websocket.asr_only = cmd.get("asr_only") is True
                             if self._playback_lock.locked():
                                 curr_node = client_node_id or "node_voice"
                                 logger.info(f"🔇 Rejecting mic stream from '{curr_node}': speaker is actively playing TTS audio")
@@ -279,7 +299,11 @@ class AudioServer:
                                 client_node_id = cmd.get("node_id")
                             curr_node = client_node_id or "node_voice"
                             self._ws_nodes[curr_node] = websocket
-                            self._active_speakers.add(websocket)
+                            if cmd.get("speaker") is False or "subbox" in str(curr_node).lower():
+                                websocket.has_speaker = False
+                                self._active_speakers.discard(websocket)
+                            elif getattr(websocket, "has_speaker", True):
+                                self._active_speakers.add(websocket)
                             self.arbiter.register_start(curr_node)
 
                             # Setup Opus decoder if needed
@@ -490,13 +514,26 @@ class AudioServer:
             return
 
         # ─── Step 1: Speech-to-Text with confidence scoring ───
-        text, confidence = self.gateway.asr.transcribe_with_confidence(pcm_samples, sample_rate)
+        # One model invocation at a time; reject overload instead of accumulating PCM.
+        if self._asr_lock.locked():
+            await websocket.send(json.dumps({"type": "transcript", "text": "", "accepted": False,
+                                             "reason": "asr_busy"}))
+            return
+        async with self._asr_lock:
+            inference = asyncio.create_task(asyncio.to_thread(
+                self.gateway.asr.transcribe_with_confidence, pcm_samples, sample_rate))
+            try:
+                text, confidence = await asyncio.shield(inference)
+            except asyncio.CancelledError:
+                # A cancelled socket cannot release the model while its thread is running.
+                await inference
+                raise
 
         if not text:
             logger.warning("ASR returned empty transcript")
             reply = "Em không nghe rõ. Bạn nói lại được không?"
             await websocket.send(json.dumps({
-                "type": "transcript", "text": ""
+                "type": "transcript", "text": "", "accepted": False
             }))
             await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
             return
@@ -505,9 +542,9 @@ class AudioServer:
         from asr_engine import ASREngine
         if confidence < ASREngine.CONFIDENCE_LOW:
             logger.warning(f"ASR confidence too low ({confidence:.2f}): '{text}' — asking user to repeat")
-            reply = f"Em nghe không rõ lắm. Bạn nói lại lần nữa được không ạ?"
+            reply = "Chưa rõ khẩu lệnh."
             await websocket.send(json.dumps({
-                "type": "transcript", "text": text, "confidence": round(confidence, 2)
+                "type": "transcript", "text": "", "confidence": round(confidence, 2), "accepted": False
             }))
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2), "status": "low_confidence"})
@@ -521,8 +558,11 @@ class AudioServer:
         if self.gateway and hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2)})
         await websocket.send(json.dumps({
-            "type": "transcript", "text": text, "confidence": round(confidence, 2)
+            "type": "transcript", "text": text, "confidence": round(confidence, 2), "accepted": True
         }))
+
+        if getattr(websocket, "asr_only", False):
+            return
 
         # ─── Step 2-4: Process command through Gateway ───
         result = await self.gateway.process_voice_command(
@@ -536,9 +576,15 @@ class AudioServer:
             "follow_up": follow_up,
         }))
 
-        # ─── Step 5: Stream TTS audio back to ESP32 speaker (Unicast to caller) ───
+        # ─── Step 5: Stream audio back to ESP32 speaker (Unicast to caller) ───
+        tts_audio = result.get("tts_audio")
+        tts_format = result.get("tts_format", "pcm")
         voice_reply = result.get("voice_reply")
-        if voice_reply:
+        if tts_audio and tts_format == "pcm":
+            await self._send_pcm_stream(websocket, tts_audio, follow_up=follow_up)
+        elif tts_audio and tts_format == "mp3":
+            await self._send_audio_stream_mp3(websocket, tts_audio, follow_up=follow_up)
+        elif voice_reply:
             await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up, broadcast=False)
 
     async def speak_proactive(self, text: str, node_id: str = None) -> bool:
@@ -589,6 +635,10 @@ class AudioServer:
 
     async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False, broadcast: bool = False):
         """Synthesize text to PCM and stream to ESP32 speaker(s) — unicast by default."""
+        if not getattr(websocket, "has_speaker", True) and not broadcast:
+            logger.info("Caller node has no speaker — skipping TTS audio stream")
+            return
+
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available")
             return

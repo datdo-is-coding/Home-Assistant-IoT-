@@ -9,15 +9,23 @@ import re
 import time
 import hashlib
 import logging
+from collections import OrderedDict
+from pathlib import Path
 import asyncio
 from typing import Optional
 
-import edge_tts
+try:
+    import edge_tts
+    HAS_EDGE_TTS = True
+except ImportError:
+    edge_tts = None
+    HAS_EDGE_TTS = False
 
 try:
     from pydub import AudioSegment
     HAS_PYDUB = True
 except ImportError:
+    AudioSegment = None
     HAS_PYDUB = False
 
 import config
@@ -109,7 +117,9 @@ class TTSEngine:
             os.makedirs(self.cache_dir, exist_ok=True)
         except Exception:
             pass
-        self._mem_cache = {}
+        self._mem_cache = OrderedDict()
+        self._mem_cache_bytes = 0
+        self._trim_disk_cache()
 
     @classmethod
     def _sanitize_text(cls, text: str) -> str:
@@ -131,59 +141,34 @@ class TTSEngine:
 
     def beautify_prosody(self, text: str) -> str:
         """
-        Nắn chỉnh ngữ điệu tiếng Việt:
-        - Xưng 'em' - gọi 'anh' tự nhiên, ngọt ngào.
-        - Thêm khoảng ngắt nhịp thở nhẹ nhàng sau từ mở đầu (Dạ, Vâng, Anh ơi).
-        - Uốn lượn âm cuối (luyến láy) với dấu lượn sóng ~ hoặc trợ từ tình thái.
+        Chuẩn hóa âm vị học và ngữ điệu tự nhiên, tinh tế cho giọng đọc tiếng Việt:
+        - Xóa bỏ triệt để các trợ từ sến sẩm (nè, nha, nhé anh, ạ~).
+        - Giữ câu thoại gãy gọn, đĩnh đạc, thanh lịch.
+        - Đảm bảo dấu ngắt câu chuẩn xác cho tổng hợp giọng nói.
         """
         if not text:
             return ""
         t = text.strip()
 
-        # 1. Chuẩn hóa xưng hô: Luôn gọi "anh", xưng "em"
-        t = re.sub(r"\bBạn muốn\b", "Dạ anh muốn", t)
-        t = re.sub(r"\bbạn muốn\b", "anh muốn", t)
-        t = re.sub(r"\bBạn có\b", "Dạ anh có", t)
-        t = re.sub(r"\bbạn có\b", "anh có", t)
-        t = re.sub(r"\bBạn nói\b", "Anh nói", t)
-        t = re.sub(r"\bbạn nói\b", "anh nói", t)
-        t = re.sub(r"\bcho bạn\b", "cho anh", t)
-        t = re.sub(r"\bcủa bạn\b", "của anh", t)
-        t = re.sub(r"\bvới bạn\b", "với anh", t)
-        t = re.sub(r"\bchào bạn\b", "chào anh", t)
-        t = re.sub(r"\bChào bạn\b", "Chào anh", t)
-        t = re.sub(r"\bbạn nhé\b", "anh nhé", t)
-        t = re.sub(r"\bbạn nha\b", "anh nha", t)
-        # Bắt triệt để mọi từ "bạn" / "người dùng" còn lại
-        t = re.sub(r"\bBạn\b", "Anh", t)
-        t = re.sub(r"\bbạn\b", "anh", t)
-        t = re.sub(r"\bngười dùng\b", "anh", t)
+        # Loại bỏ các từ đệm, trợ từ rườm rà sến sẩm
+        t = re.sub(r"\b(nè|nha|nhé|nghe)\b\s*~*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\b(ạ|ơi)\b\s*~*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"~\s*", "", t)
 
-        # 2. Ngắt nhịp thở tự nhiên (~180ms micro-pause) sau từ mở đầu
-        if t.startswith("Dạ ") and not t.startswith("Dạ, "):
-            t = "Dạ, " + t[3:]
-        elif t.startswith("Vâng ") and not t.startswith("Vâng, "):
-            t = "Vâng, " + t[5:]
-        elif t.startswith("Anh ơi ") and not t.startswith("Anh ơi, "):
-            t = "Anh ơi, " + t[7:]
+        # Xóa các từ xưng hô sến lặp đi lặp lại nếu có
+        t = re.sub(r"^Dạ,\s*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"^Dạ\s+", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"^Vâng,\s*", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"^Vâng\s+", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\s+cho\s+(anh|em)\b", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\s+(anh|em)\s+nhé\b", "", t, flags=re.IGNORECASE)
+        t = re.sub(r"\s+rồi\s+nè\b", "", t, flags=re.IGNORECASE)
 
-        # 3. Luyến láy đuôi câu nhẹ nhàng (chuẩn tiếng Việt, không dùng ký tự lạ)
-        if t.endswith("nè.") or t.endswith("nè"):
-            t = t.rstrip(".").rstrip() + " nè."
-        elif t.endswith("nha.") or t.endswith("nha"):
-            t = t.rstrip(".").rstrip()
-            if not t.endswith("anh"):
-                t += " nha anh."
-            else:
-                t += "."
-        elif t.endswith("nhé.") or t.endswith("nhé"):
-            t = t.rstrip(".").rstrip()
-            if not t.endswith("anh"):
-                t += " nha anh."
-            else:
-                t += "."
-        elif t.endswith("ạ.") or t.endswith("ạ"):
-            t = t.rstrip(".").rstrip() + " ạ."
+        # Chuẩn hóa khoảng trắng và dấu chấm câu
+        t = re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"\s+([.,?!])", r"\1", t)
+        if t and not t.endswith((".", "?", "!")):
+            t += "."
 
         return t
 
@@ -198,7 +183,10 @@ class TTSEngine:
 
     async def synthesize_edgetts(self, text: str, rate: str = "-4%", pitch: str = "+2Hz") -> Optional[bytes]:
         """EdgeTTS synthesis with fallback voice, retry logic, and character sanitization."""
-        # Text should already be sanitized by _sanitize_text(), but apply minimal safety strip
+        if not HAS_EDGE_TTS or edge_tts is None:
+            logger.debug("EdgeTTS is not installed or available, skipping.")
+            return None
+
         clean_text = self._sanitize_text(text)
         if not clean_text:
             return None
@@ -218,13 +206,13 @@ class TTSEngine:
             voice = voices_to_try[0] if attempt == 0 else voices_to_try[-1]
             try:
                 communicate = edge_tts.Communicate(clean_text, voice, rate=rate_str, pitch=pitch_str)
-                audio_data = b""
+                audio_data = bytearray()
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
-                        audio_data += chunk["data"]
+                        audio_data.extend(chunk["data"])
                 if audio_data:
                     logger.info(f"EdgeTTS synthesized: \"{clean_text[:45]}...\" [rate={rate_str}, pitch={pitch_str}] → {len(audio_data)} bytes")
-                    return audio_data
+                    return bytes(audio_data)
                 else:
                     logger.warning(f"EdgeTTS returned empty audio (attempt {attempt+1}/{max_retries}, voice={voice})")
             except Exception as e:
@@ -257,6 +245,7 @@ class TTSEngine:
 
         h = self._get_hash(text, "audio")
         if h in self._mem_cache:
+            self._mem_cache.move_to_end(h)
             return self._mem_cache[h]
 
         disk_path = os.path.join(self.cache_dir, f"{h}.audio")
@@ -265,7 +254,7 @@ class TTSEngine:
                 with open(disk_path, "rb") as f:
                     data = f.read()
                 if data:
-                    self._mem_cache[h] = data
+                    self._cache_put(h, data)
                     return data
             except Exception:
                 pass
@@ -290,16 +279,44 @@ class TTSEngine:
             audio_data = await self.synthesize_edgetts(text, rate=rate, pitch=pitch)
 
         if audio_data:
-            self._mem_cache[h] = audio_data
+            self._cache_put(h, audio_data)
             try:
                 with open(disk_path, "wb") as f:
                     f.write(audio_data)
+                self._trim_disk_cache()
             except Exception:
                 pass
             return audio_data
 
         return None
     
+    def _cache_put(self, key, data):
+        limit = 16 * 1024 * 1024
+        old = self._mem_cache.pop(key, b"")
+        self._mem_cache_bytes -= len(old)
+        if len(data) > limit:
+            return
+        while self._mem_cache and (self._mem_cache_bytes + len(data) > limit or len(self._mem_cache) >= 256):
+            _, evicted = self._mem_cache.popitem(last=False)
+            self._mem_cache_bytes -= len(evicted)
+        self._mem_cache[key] = data
+        self._mem_cache_bytes += len(data)
+
+    def _trim_disk_cache(self):
+        # Only generated audio files belong to this cache; leave other files alone.
+        try:
+            files = [(p.stat().st_mtime, p.stat().st_size, p)
+                     for p in Path(self.cache_dir).iterdir()
+                     if p.suffix in (".audio", ".pcm") and p.is_file() and not p.is_symlink()]
+            total = sum(size for _, size, _ in files)
+            for modified, size, path in sorted(files):
+                if total <= 128 * 1024 * 1024 and time.time() - modified <= 7 * 86400:
+                    continue
+                path.unlink(missing_ok=True)
+                total -= size
+        except OSError as exc:
+            logger.warning("TTS cache cleanup failed: %s", exc)
+
     async def speak_alert(self, message: str) -> Optional[bytes]:
         """Synthesize an alert/notification message."""
         return await self.synthesize(message)
@@ -319,6 +336,7 @@ class TTSEngine:
 
         h = self._get_hash(text, f"pcm_{sample_rate}")
         if h in self._mem_cache:
+            self._mem_cache.move_to_end(h)
             logger.info(f"⚡ TTS PCM hit memory cache: '{text[:40]}' ({len(self._mem_cache[h])} bytes)")
             return self._mem_cache[h]
 
@@ -328,7 +346,7 @@ class TTSEngine:
                 with open(disk_path, "rb") as f:
                     data = f.read()
                 if data:
-                    self._mem_cache[h] = data
+                    self._cache_put(h, data)
                     logger.info(f"⚡ TTS PCM hit disk cache: '{text[:40]}' ({len(data)} bytes)")
                     return data
             except Exception:
@@ -382,10 +400,11 @@ class TTSEngine:
                 logger.error(f"ffmpeg conversion failed: {e}")
 
         if pcm_data:
-            self._mem_cache[h] = pcm_data
+            self._cache_put(h, pcm_data)
             try:
                 with open(disk_path, "wb") as f:
                     f.write(pcm_data)
+                self._trim_disk_cache()
                 logger.info(f"💾 Saved TTS PCM to cache: {disk_path}")
             except Exception:
                 pass

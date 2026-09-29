@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import logging
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List, Tuple
 
@@ -23,12 +24,14 @@ TZ_VN = timezone(timedelta(hours=7))
 
 # ── Chuẩn hoá ────────────────────────────────────────────────────────────────
 _slug_re = re.compile(r"[^a-z0-9]+")
+_slug_translation = str.maketrans(
+    "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
+    "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd",
+)
 def slug(s: str) -> str:
     s = (s or "").lower().strip()
     # bỏ dấu tiếng Việt cơ bản
-    tbl = str.maketrans("áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
-                        "aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd")
-    s = s.translate(tbl)
+    s = s.translate(_slug_translation)
     s = _slug_re.sub("_", s).strip("_")
     return s or "unknown"
 
@@ -52,30 +55,41 @@ ROOM_ALIASES = {
 }
 
 class RegistryManager:
-    def __init__(self, registry_path: str = None):
+    def __init__(self, registry_path: str = None, db_path: str = None):
         self.path = registry_path or config.REGISTRY_FILE
-        self.db_path = getattr(config, "GATEWAY_DB", "/var/lib/smarthome/gateway.db")
+        self.db_path = db_path or getattr(config, "GATEWAY_DB", "/var/lib/smarthome/gateway.db")
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
         except Exception:
             pass
         self.data: Dict[str, Any] = {"nodes": {}, "pending": {}, "rooms": {}}
         self._seq: Dict[str, int] = {}  # node_id -> last seq
+        self._persisted = {}
         self._init_sqlite()
         self.load()
 
     # ── SQLite Database Storage Engine (Spec Section 8) ──────────────────
-    def _get_db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_db(self):
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA foreign_keys = ON;")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_sqlite(self):
         try:
             with self._get_db() as conn:
                 conn.executescript("""
+                CREATE TABLE IF NOT EXISTS registry_entries (
+                    kind TEXT NOT NULL, entry_id TEXT NOT NULL, payload TEXT NOT NULL,
+                    PRIMARY KEY(kind, entry_id)
+                );
+                CREATE TABLE IF NOT EXISTS registry_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS rooms (
                     room_id VARCHAR(32) PRIMARY KEY,
                     display_name VARCHAR(64) NOT NULL,
@@ -148,34 +162,48 @@ class RegistryManager:
                     wifi_rssi INTEGER,
                     recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS zones (
+                    zone_id VARCHAR(32) PRIMARY KEY,
+                    display_name VARCHAR(64) NOT NULL,
+                    controller_id VARCHAR(32),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE INDEX IF NOT EXISTS idx_telemetry_dev_time ON telemetry_records(device_id, recorded_at);
                 """)
+                # Safe migration for existing databases
+                try:
+                    conn.execute("ALTER TABLE devices ADD COLUMN zone_id VARCHAR(32);")
+                except Exception:
+                    pass
             logger.info(f"✨ SQLite Gateway Registry initialized: {self.db_path} (WAL Mode)")
         except Exception as e:
             logger.error(f"Failed to initialize SQLite Registry at {self.db_path}: {e}")
+            raise
 
-    def _sync_node_to_sqlite(self, nid: str, n: dict):
+    def _sync_node_to_sqlite(self, nid: str, n: dict, connection=None):
         """Đồng bộ một node vào bảng devices và capabilities của SQLite."""
         try:
             now = datetime.now(TZ_VN).isoformat()
             hw = n.get("firmware", {}).get("hardware", n.get("hardware", "esp32s3"))
-            serial = n.get("firmware", {}).get("serial", n.get("serial", f"S3-2026-{nid[-6:]}"))
+            serial = n.get("hardware_uid") or n.get("serial") or f"legacy:{nid}"
             caps = n.get("capabilities", [])
             dev_type = "voice_node" if "voice_wake" in caps or "microphone" in caps else "relay_node"
             name = n.get("name", nid)
             room = n.get("room", "unknown")
             location = n.get("location", "")
             description = n.get("description", "")
-            mac = n.get("address", {}).get("mac", n.get("mac", ""))
-            ip = n.get("address", {}).get("ip", n.get("ip", ""))
-            rssi = n.get("address", {}).get("rssi", n.get("rssi"))
+            raw_mac = n.get("address", {}).get("mac", n.get("mac", "")) if isinstance(n.get("address"), dict) else n.get("mac", "")
+            mac = raw_mac if isinstance(raw_mac, str) else ""
+            raw_ip = n.get("address", {}).get("ip", n.get("ip", "")) if isinstance(n.get("address"), dict) else n.get("ip", "")
+            ip = raw_ip if isinstance(raw_ip, str) else ""
+            rssi = n.get("address", {}).get("rssi", n.get("rssi")) if isinstance(n.get("address"), dict) else n.get("rssi")
             status = n.get("status", "online")
             des_ver = n.get("desired_config_version", n.get("cfg_version", 1))
             rep_ver = n.get("reported_config_version", des_ver)
             sync_st = n.get("sync_status", "SYNCED")
             last_seen = n.get("last_seen", now)
 
-            with self._get_db() as conn:
+            with (nullcontext(connection) if connection is not None else self._get_db()) as conn:
                 if room and room != "unknown":
                     conn.execute("""
                         INSERT OR IGNORE INTO rooms (room_id, display_name)
@@ -229,50 +257,35 @@ class RegistryManager:
                 ))
         except Exception as e:
             logger.warning(f"_sync_node_to_sqlite error for {nid}: {e}")
+            raise
 
     # ── Persistence ─────────────────────────────────────────────────────
     def load(self):
-        # 1. Load JSON file first if available
-        if os.path.exists(self.path):
-            with open(self.path, "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if "nodes" in raw:
-                self.data["nodes"] = raw.get("nodes", {})
-                self.data["pending"] = raw.get("pending", {})
-                self.data["rooms"] = raw.get("rooms", {})
-                for nid, n in list(self.data["nodes"].items()):
-                    self._migrate_node(nid, n)
+        with self._get_db() as conn:
+            initialized = conn.execute("SELECT 1 FROM registry_meta WHERE key='initialized'").fetchone()
+            if initialized:
+                for row in conn.execute("SELECT kind, entry_id, payload FROM registry_entries"):
+                    self.data[row['kind']][row['entry_id']] = json.loads(row['payload'])
+                    self._persisted[(row['kind'], row['entry_id'])] = row['payload']
                 self._rebuild_rooms()
-                logger.info(f"Registry loaded: {len(self.data['nodes'])} nodes, {len(self.data['pending'])} pending")
-            else:
-                self.data = {"nodes": {}, "pending": {}, "rooms": {}}
-        else:
-            self.save()
-            logger.info("Created empty registry v2")
-
-        # 2. Check SQLite: Auto-migration or sync
-        try:
-            with self._get_db() as conn:
-                cur = conn.execute("SELECT count(*) as cnt FROM devices")
-                cnt = cur.fetchone()["cnt"]
-                if cnt == 0 and self.data["nodes"]:
-                    logger.info(f"Auto-migrating {len(self.data['nodes'])} nodes from JSON to SQLite...")
-                    for nid, n in self.data["nodes"].items():
-                        self._sync_node_to_sqlite(nid, n)
-                elif cnt > 0:
-                    cur = conn.execute("SELECT * FROM devices")
-                    for row in cur.fetchall():
-                        did = row["device_id"]
-                        if did in self.data["nodes"]:
-                            n = self.data["nodes"][did]
-                            n["desired_config_version"] = row["desired_config_version"]
-                            n["reported_config_version"] = row["reported_config_version"]
-                            n["sync_status"] = row["sync_status"]
-                            n["serial"] = row["serial_number"]
-                            n["location"] = row["location"] or n.get("location", "")
-                            n["description"] = row["description"] or n.get("description", "")
-        except Exception as e:
-            logger.warning(f"SQLite sync in load() failed: {e}")
+                return
+            old_devices = list(conn.execute("SELECT * FROM devices"))
+            # One-time upgrade of the old dual store: JSON contains channel metadata
+            # absent from old SQL tables. Preserve it, then overlay authoritative SQL fields.
+            if os.path.exists(self.path):
+                with open(self.path, encoding='utf-8') as source:
+                    legacy = json.load(source)
+                self.data['nodes'] = legacy.get('nodes', {})
+                self.data['pending'] = legacy.get('pending', {})
+            for row in old_devices:
+                node = self.data['nodes'].setdefault(row['device_id'], {})
+                node.update(name=row['name'], room=row['room_id'] or 'unknown', mac=row['mac_address'],
+                            desired_config_version=row['desired_config_version'],
+                            reported_config_version=row['reported_config_version'], sync_status=row['sync_status'])
+            for nid, node in self.data['nodes'].items():
+                self._migrate_node(nid, node)
+        self.save()
+        logger.info('Migrated registry to SQLite; legacy JSON is now backup-only')
 
     def _migrate_node(self, nid: str, n: dict):
         if "room" not in n and "area" in n:
@@ -300,15 +313,34 @@ class RegistryManager:
             rooms.setdefault(r, []).append(nid)
         self.data["rooms"] = rooms
 
-    def save(self):
+    def save(self, changed_node=None):
         self._rebuild_rooms()
-        tmp = self.path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, self.path)
-        # Sync all nodes to SQLite
-        for nid, n in self.data["nodes"].items():
-            self._sync_node_to_sqlite(nid, n)
+        pending = {}
+        for kind in ('nodes', 'pending'):
+            entries = self.data.get(kind, {})
+            for nid, node in entries.items():
+                if changed_node is None or (kind == 'nodes' and nid == changed_node):
+                    pending[(kind, nid)] = json.dumps(node, ensure_ascii=False, sort_keys=True)
+        changed = {key: value for key, value in pending.items() if self._persisted.get(key) != value}
+        deleted = set(self._persisted) - set(pending) if changed_node is None else set()
+        with self._get_db() as conn:
+            for (kind, nid), value in changed.items():
+                conn.execute('INSERT OR REPLACE INTO registry_entries VALUES (?, ?, ?)', (kind, nid, value))
+                if kind == 'nodes':
+                    self._sync_node_to_sqlite(nid, self.data[kind][nid], connection=conn)
+            for kind, nid in deleted:
+                conn.execute('DELETE FROM registry_entries WHERE kind=? AND entry_id=?', (kind, nid))
+            conn.execute("INSERT OR IGNORE INTO registry_meta VALUES ('initialized','1')")
+        self._persisted.update(changed)
+        for key in deleted:
+            self._persisted.pop(key, None)
+
+    def export_json(self, path):
+        """Explicit backup only; normal operation never writes the legacy JSON."""
+        tmp = str(path) + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as target:
+            json.dump(self.data, target, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
 
     # ── HELLO / Pending flow ────────────────────────────────────────────
     def on_hello(self, payload: dict, ws_available: bool = False) -> dict:
@@ -426,8 +458,10 @@ class RegistryManager:
     def update_relay_state(self, node_id: str, rl: list) -> bool:
         """Cập nhật trạng thái relay thực tế vào registry và lưu tức thì."""
         if node_id in self.data["nodes"]:
+            if self.data["nodes"][node_id].get("relay_state") == list(rl):
+                return True
             self.data["nodes"][node_id]["relay_state"] = list(rl)
-            self.save()
+            self.save(changed_node=node_id)
             return True
         return False
 
@@ -519,6 +553,13 @@ class RegistryManager:
         rl = pending.get("rl", [0, 0])
 
         room_s = slug(room)
+        
+        # Enforce 4-ActionBox limit per room
+        room_nodes = [n for n in self.data["nodes"].values() if n.get("room") == room_s]
+        if len(room_nodes) >= 4 and actual_id not in self.data["nodes"]:
+            logger.warning(f"Provision rejected: Room '{room_s}' already has {len(room_nodes)} nodes (limit 4).")
+            return None
+
         rl1_c = canon_device(rl1) if rl1 else "light"
         rl2_c = canon_device(rl2) if rl2 else "fan"
 
@@ -1023,7 +1064,7 @@ class RegistryManager:
         return True
 
     # ── Resolver 2 lớp (chống ảo giác) ──────────────────────────────────
-    def find_node_by_device(self, device_type: str, area: str = None) -> Optional[Tuple[str, str]]:
+    def find_device_candidates(self, device_type: str, area: str = None) -> List[Tuple[str, str]]:
         """
         Từ intent (device, location) → (node_id, channel).
         - device_type/location có thể là None → suy luận
@@ -1039,9 +1080,10 @@ class RegistryManager:
                 return True
             ct = slug(ch.get("device_type", ""))
             aliases = [slug(a) for a in ch.get("aliases", [])]
-            if dev == ct or dev in aliases or ct in dev: return True
+            if dev == slug(ch.get('name', '')) or dev == slug(ch.get('fullname', '')): return True
+            if dev == ct or dev in aliases or (ct and ct in dev): return True
             # substring
-            if dev in ct or ct in dev: return True
+            if ct and (dev in ct or ct in dev): return True
             if any(dev in a or a in dev for a in aliases): return True
             return False
 
@@ -1057,27 +1099,17 @@ class RegistryManager:
                 if nr in [slug(x) for x in alist] and area_s == canon: return True
             return False
 
-        # Pass 1: đúng phòng + đúng thiết bị
+        candidates = []
         for nid, node in self.data["nodes"].items():
             if node.get("status") != "online": continue
             if not matches_room(node): continue
             for ch_id, ch in node.get("channels", {}).items():
-                if matches_channel(ch_id, ch): return (nid, ch_id)
-
-        # Nếu người dùng nêu rõ phòng nhưng phòng đó không có thiết bị -> Trả về None để thông báo không tìm thấy
-        if area_s:
-            return None
-
-        # Nếu không nói phòng -> ưu tiên node duy nhất nếu cả nhà chỉ có 1 thiết bị loại này
-        candidates = []
-        for nid, node in self.data["nodes"].items():
-            if node.get("status") != "online": continue
-            for ch_id, ch in node.get("channels", {}).items():
                 if matches_channel(ch_id, ch): candidates.append((nid, ch_id))
-        if len(candidates) == 1:
-            return candidates[0]
-        # nếu mơ hồ (có nhiều thiết bị) mà không rõ phòng -> trả None để hỏi lại, tránh bấm nhầm
-        return None
+        return candidates
+
+    def find_node_by_device(self, device_type: str, area: str = None) -> Optional[Tuple[str, str]]:
+        candidates = self.find_device_candidates(device_type, area)
+        return candidates[0] if len(candidates) == 1 else None
 
     def resolve_fullname(self, node_id: str, channel: str) -> str:
         ch = self.data["nodes"].get(node_id, {}).get("channels", {}).get(channel, {})
@@ -1111,8 +1143,8 @@ class RegistryManager:
                 for a in ch.get("aliases", []):
                     sa = slug(a)
                     if sa: devs.add(sa)
-        # luôn cho phép các thiết bị cơ bản
-        devs.update(["den", "quat", "tivi", "dieu_hoa", "binh_nong_lanh", "den_ngu", "den_tran", "light", "fan"])
+        # luôn cho phép các thiết bị cơ bản và các kênh relay / all
+        devs.update(["den", "quat", "tivi", "dieu_hoa", "binh_nong_lanh", "den_ngu", "den_tran", "light", "fan", "ch1", "ch2", "relay_1", "relay_2", "all"])
         return sorted(devs)
 
     def inventory_for_prompt(self) -> str:
@@ -1163,9 +1195,67 @@ ws ::= [ \\t\\n]*
 
     def update_heartbeat(self, node_id: str):
         if node_id in self.data["nodes"]:
+            if self.data['nodes'][node_id].get('status') == 'NEEDS_REPROVISION':
+                return
             self.data["nodes"][node_id]["last_seen"] = datetime.now(TZ_VN).isoformat()
             self.data["nodes"][node_id]["status"] = "online"
+            self.save(changed_node=node_id)
     def mark_offline(self, node_id: str):
         if node_id in self.data["nodes"]:
             self.data["nodes"][node_id]["status"] = "offline"
+            self.save(changed_node=node_id)
             logger.warning(f"Node offline: {node_id}")
+
+    # ── 3-Tier Zone Management ──────────────────────────────────────────
+    def register_zone(self, zone_id: str, display_name: str, controller_id: Optional[str] = None):
+        """Đăng ký Zone (Tầng 2) quản lý một cụm các node chấp hành T1."""
+        try:
+            with self._get_db() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO zones (zone_id, display_name, controller_id) VALUES (?, ?, ?)",
+                    (zone_id, display_name, controller_id)
+                )
+                logger.info(f"🏡 Registered Zone: {zone_id} ({display_name}), controller={controller_id}")
+        except Exception as e:
+            logger.error(f"Failed to register zone {zone_id}: {e}")
+
+    def get_zones(self) -> List[Dict[str, Any]]:
+        """Lấy danh sách tất cả các Zone trong hệ thống 3 tầng."""
+        try:
+            with self._get_db() as conn:
+                rows = conn.execute("SELECT * FROM zones ORDER BY zone_id ASC").fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to get zones: {e}")
+            return []
+
+    def get_zone(self, zone_id: str) -> Optional[Dict[str, Any]]:
+        """Lấy thông tin một Zone cụ thể."""
+        try:
+            with self._get_db() as conn:
+                row = conn.execute("SELECT * FROM zones WHERE zone_id = ?", (zone_id,)).fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to get zone {zone_id}: {e}")
+            return None
+
+    def assign_device_zone(self, device_id: str, zone_id: str):
+        """Gán node T1 hoặc controller T2 vào Zone."""
+        try:
+            with self._get_db() as conn:
+                conn.execute("UPDATE devices SET zone_id = ? WHERE device_id = ?", (zone_id, device_id))
+            if device_id in self.data["nodes"]:
+                self.data["nodes"][device_id]["zone_id"] = zone_id
+            logger.info(f"🔗 Assigned node {device_id} to zone {zone_id}")
+        except Exception as e:
+            logger.error(f"Failed to assign device to zone: {e}")
+
+    def get_zone_nodes(self, zone_id: str) -> List[Dict[str, Any]]:
+        """Lấy danh sách thiết bị thuộc một Zone."""
+        try:
+            with self._get_db() as conn:
+                rows = conn.execute("SELECT * FROM devices WHERE zone_id = ?", (zone_id,)).fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to get nodes in zone {zone_id}: {e}")
+            return []

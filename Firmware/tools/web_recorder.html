@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DTV Voice Dataset Collector — ESP32-S3 USB</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #131b2e;
+      --card-border: #1e293b;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+    .container {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    header h1 {
+      font-size: 1.8rem;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 6px;
+    }
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .controls-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    button {
+      padding: 12px 18px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-connect {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: white;
+    }
+    .btn-connect.connected {
+      background: linear-gradient(135deg, #059669, #047857);
+    }
+    .btn-rec {
+      background: linear-gradient(135deg, #e11d48, #be123c);
+      color: white;
+    }
+    .btn-rec.active {
+      animation: pulse-red 1.2s infinite;
+    }
+    .btn-stop {
+      background: #334155;
+      color: white;
+    }
+    @keyframes pulse-red {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.6); }
+      50% { transform: scale(1.02); box-shadow: 0 0 20px 4px rgba(225, 29, 72, 0.4); }
+    }
+    .label-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .label-group input {
+      flex: 1;
+      padding: 10px 14px;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: white;
+      font-size: 0.95rem;
+    }
+    .label-group input:focus {
+      outline: none;
+      border-color: var(--accent-cyan);
+    }
+    /* Oscilloscope Canvas */
+    canvas {
+      width: 100%;
+      height: 120px;
+      background: #090d16;
+      border-radius: 12px;
+      border: 1px solid #1e293b;
+      margin-bottom: 12px;
+    }
+    /* VU Meter */
+    .vu-wrapper {
+      height: 12px;
+      background: #0f172a;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid #1e293b;
+      position: relative;
+    }
+    .vu-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #10b981 60%, #f59e0b 85%, #f43f5e 100%);
+      transition: width 0.05s ease;
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+    /* Samples List */
+    .samples-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .sample-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      background: #0f172a;
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+      margin-bottom: 8px;
+      gap: 12px;
+    }
+    .sample-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 140px;
+    }
+    .sample-name {
+      font-weight: 600;
+      color: #38bdf8;
+      font-size: 0.95rem;
+    }
+    .sample-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    audio {
+      height: 36px;
+      flex: 1;
+      max-width: 320px;
+    }
+    .btn-download {
+      background: #1e293b;
+      color: #38bdf8;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .btn-download:hover {
+      background: #38bdf8;
+      color: #0b0f19;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎙️ ESP32-S3 Voice Dataset Studio</h1>
+      <p>Thu âm & Stream âm thanh 16kHz sạch qua USB (Hỗ trợ PC & Điện thoại Android OTG)</p>
+    </header>
+
+    <div class="card">
+      <div class="controls-grid">
+        <button id="btnConnect" class="btn-connect" onclick="toggleConnect()">
+          🔌 Kết nối ESP32-S3
+        </button>
+        <button id="btnRecord" class="btn-rec" onclick="sendCmd('r')" disabled>
+          ⏺️ Bắt đầu Thu (hoặc nhấn BUT1)
+        </button>
+        <button id="btnStop" class="btn-stop" onclick="sendCmd('s')" disabled>
+          ⏹️ Dừng Thu
+        </button>
+      </div>
+
+      <div class="label-group">
+        <label style="font-size: 0.9rem; color: var(--text-muted);">Nhãn (Label):</label>
+        <input type="text" id="labelInput" value="bat_den" placeholder="VD: bat_den, tat_den, dieu_hoa...">
+      </div>
+
+      <canvas id="scopeCanvas"></canvas>
+
+      <div class="vu-wrapper">
+        <div id="vuBar" class="vu-bar"></div>
+      </div>
+      <div class="status-row">
+        <span id="connStatus">⚪ Chưa kết nối USB</span>
+        <span id="recStatus">IDLE</span>
+        <span id="sampleStats">0 mẫu</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="samples-header">
+        <h3>📂 Danh sách âm thanh đã thu</h3>
+        <button class="btn-stop" style="padding: 6px 12px; font-size: 0.8rem;" onclick="clearSamples()">Xóa danh sách</button>
+      </div>
+      <div id="samplesList">
+        <p style="color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 20px;">
+          Chưa có mẫu nào. Hãy kết nối ESP32-S3 và bấm nút BUT1 để thu mẫu đầu tiên!
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let port = null;
+    let reader = null;
+    let writer = null;
+    let keepReading = false;
+
+    let isRecording = false;
+    let recordingPcm = [];
+    let sampleCounter = 1;
+
+    const MAGIC_0 = 0xAA;
+    const MAGIC_1 = 0x55;
+    const PKT_TYPE_AUDIO = 0x01;
+    const PKT_TYPE_START = 0x02;
+    const PKT_TYPE_END   = 0x03;
+
+    // Canvas setup
+    const canvas = document.getElementById('scopeCanvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    let wavePoints = new Array(100).fill(canvas.height / 2);
+
+    function drawWave(latestSamples) {
+      if (!latestSamples || latestSamples.length === 0) return;
+      const step = Math.floor(latestSamples.length / 10);
+      for (let i = 0; i < 10; i++) {
+        const val = latestSamples[i * step] || 0;
+        const norm = (val / 32768.0) * (canvas.height * 0.45);
+        wavePoints.push(canvas.height / 2 + norm);
+        wavePoints.shift();
+      }
+
+      ctx.fillStyle = '#090d16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid line
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, canvas.height / 2);
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+
+      // Waveform
+      ctx.strokeStyle = isRecording ? '#f43f5e' : '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const dx = canvas.width / wavePoints.length;
+      for (let i = 0; i < wavePoints.length; i++) {
+        if (i === 0) ctx.moveTo(0, wavePoints[i]);
+        else ctx.lineTo(i * dx, wavePoints[i]);
+      }
+      ctx.stroke();
+    }
+
+    async function toggleConnect() {
+      if (!port) {
+        try {
+          if (!('serial' in navigator)) {
+            alert("Trình duyệt của bạn không hỗ trợ Web Serial API. Vui lòng sử dụng Google Chrome trên Máy tính hoặc Điện thoại Android.");
+            return;
+          }
+          port = await navigator.serial.requestPort();
+          await port.open({ baudRate: 115200, bufferSize: 8192 });
+
+          document.getElementById('btnConnect').innerText = "🟢 Đã kết nối ESP32-S3";
+          document.getElementById('btnConnect').classList.add('connected');
+          document.getElementById('btnRecord').disabled = false;
+          document.getElementById('btnStop').disabled = false;
+          document.getElementById('connStatus').innerText = "🟢 Đã kết nối (COM/USB)";
+
+          writer = port.writable.getWriter();
+          keepReading = true;
+          readSerialLoop();
+        } catch (err) {
+          console.error(err);
+          alert("Lỗi kết nối: " + err.message);
+        }
+      } else {
+        keepReading = false;
+        if (reader) await reader.cancel();
+        if (writer) await writer.releaseLock();
+        await port.close();
+        port = null;
+        document.getElementById('btnConnect').innerText = "🔌 Kết nối ESP32-S3";
+        document.getElementById('btnConnect').classList.remove('connected');
+        document.getElementById('btnRecord').disabled = true;
+        document.getElementById('btnStop').disabled = true;
+        document.getElementById('connStatus').innerText = "⚪ Chưa kết nối";
+      }
+    }
+
+    async function sendCmd(char) {
+      if (writer) {
+        const enc = new TextEncoder();
+        await writer.write(enc.encode(char));
+      }
+    }
+
+    async function readSerialLoop() {
+      let syncState = 0;
+      let hdr = [];
+      let payload = [];
+      let pktType = 0, pktFlags = 0, pktLen = 0, pktSeq = 0;
+
+      while (port && port.readable && keepReading) {
+        try {
+          reader = port.readable.getReader();
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              for (let i = 0; i < value.length; i++) {
+                const b = value[i];
+                if (syncState === 0) {
+                  if (b === MAGIC_0) syncState = 1;
+                } else if (syncState === 1) {
+                  if (b === MAGIC_1) {
+                    syncState = 2;
+                    hdr = [];
+                  } else {
+                    syncState = 0;
+                  }
+                } else if (syncState === 2) {
+                  hdr.push(b);
+                  if (hdr.length === 6) {
+                    pktType = hdr[0];
+                    pktFlags = hdr[1];
+                    pktLen = hdr[2] | (hdr[3] << 8);
+                    pktSeq = hdr[4] | (hdr[5] << 8);
+                    payload = [];
+                    syncState = 3;
+                  }
+                } else if (syncState === 3) {
+                  payload.push(b);
+                  if (payload.length === pktLen) {
+                    syncState = 4; // wait for checksum byte
+                  }
+                } else if (syncState === 4) {
+                  const chk = b;
+                  // Verify XOR Checksum
+                  let exp = 0;
+                  [MAGIC_0, MAGIC_1, ...hdr, ...payload].forEach(x => exp ^= x);
+                  if (exp === chk) {
+                    handlePacket(pktType, pktFlags, payload);
+                  }
+                  syncState = 0;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Serial read warning:", err);
+        } finally {
+          if (reader) reader.releaseLock();
+        }
+      }
+    }
+
+    function handlePacket(type, flags, payload) {
+      if (type === PKT_TYPE_START) {
+        isRecording = true;
+        recordingPcm = [];
+        document.getElementById('btnRecord').classList.add('active');
+        document.getElementById('recStatus').innerText = "🔴 ĐANG THU ÂM...";
+        document.getElementById('recStatus').style.color = "#f43f5e";
+      } else if (type === PKT_TYPE_AUDIO) {
+        // Convert uint8 bytes to int16 samples
+        const sampleCount = payload.length / 2;
+        const int16Array = new Int16Array(sampleCount);
+        let sumSq = 0;
+        for (let i = 0; i < sampleCount; i++) {
+          const s = (payload[i*2] | (payload[i*2+1] << 8));
+          const signed = (s > 32767) ? s - 65536 : s;
+          int16Array[i] = signed;
+          sumSq += signed * signed;
+        }
+
+        if (isRecording) {
+          recordingPcm.push(...int16Array);
+        }
+
+        const rms = Math.sqrt(sumSq / sampleCount);
+        const vuPercent = Math.min(100, (rms / 1500) * 100);
+        document.getElementById('vuBar').style.width = vuPercent + "%";
+
+        const dur = (recordingPcm.length / 16000).toFixed(2);
+        document.getElementById('sampleStats').innerText = `${dur}s (${recordingPcm.length} samples)`;
+
+        drawWave(int16Array);
+      } else if (type === PKT_TYPE_END) {
+        if (isRecording && recordingPcm.length > 0) {
+          saveToSamplesList(new Int16Array(recordingPcm));
+        }
+        isRecording = false;
+        recordingPcm = [];
+        document.getElementById('btnRecord').classList.remove('active');
+        document.getElementById('recStatus').innerText = "🟢 SẴN SÀNG";
+        document.getElementById('recStatus').style.color = "#10b981";
+        document.getElementById('vuBar').style.width = "0%";
+      }
+    }
+
+    function createWavBlob(int16Samples, sampleRate = 16000) {
+      const buffer = new ArrayBuffer(44 + int16Samples.length * 2);
+      const view = new DataView(buffer);
+
+      function writeString(offset, str) {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      }
+
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + int16Samples.length * 2, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true); // PCM
+      view.setUint16(22, 1, true); // Mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true); // Block align
+      view.setUint16(34, 16, true); // Bits per sample
+      writeString(36, 'data');
+      view.setUint32(40, int16Samples.length * 2, true);
+
+      for (let i = 0; i < int16Samples.length; i++) {
+        view.setInt16(44 + i * 2, int16Samples[i], true);
+      }
+      return new Blob([buffer], { type: 'audio/wav' });
+    }
+
+    function saveToSamplesList(int16Samples) {
+      const label = document.getElementById('labelInput').value.trim() || 'sample';
+      const filename = `${label}_${String(sampleCounter).padStart(4, '0')}.wav`;
+      sampleCounter++;
+
+      const wavBlob = createWavBlob(int16Samples);
+      const audioUrl = URL.createObjectURL(wavBlob);
+      const duration = (int16Samples.length / 16000).toFixed(2);
+      const sizeKb = (wavBlob.size / 1024).toFixed(1);
+
+      const list = document.getElementById('samplesList');
+      if (list.querySelector('p')) list.innerHTML = '';
+
+      const item = document.createElement('div');
+      item.className = 'sample-item';
+      item.innerHTML = `
+        <div class="sample-info">
+          <span class="sample-name">${filename}</span>
+          <span class="sample-meta">${duration}s • ${sizeKb} KB</span>
+        </div>
+        <audio controls src="${audioUrl}"></audio>
+        <a class="btn-download" href="${audioUrl}" download="${filename}">⬇️ Tải về</a>
+      `;
+      list.prepend(item);
+    }
+
+    function clearSamples() {
+      document.getElementById('samplesList').innerHTML = `
+        <p style="color: var(--text-muted); font-size: 0.9rem; text-align: center; padding: 20px;">
+          Danh sách trống.
+        </p>
+      `;
+    }
+
+    drawWave([]);
+  </script>
+</body>
+</html>

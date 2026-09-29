@@ -27,15 +27,31 @@ from tts_engine import TTSEngine
 from asr_engine import ASREngine
 from audio_server import AudioServer
 from verify_engine import CommandVerifier, VerifyResult
-from memory_engine import MemoryEngine
 from display_names import get_room_name, get_device_name, clean_voice_text
 from web_server import WebServer
 from discovery_manager import DiscoveryManager
-from persona_engine import PersonaEngine
-from proactive_agent import ProactiveAgent
 from ota_manager import OTAManager
 from auth_manager import AuthManager
 from sound_manager import SoundManager
+
+# Optional AI Modules (chỉ load khi AI_ENABLED = True)
+if getattr(config, "AI_ENABLED", False):
+    try:
+        from memory_engine import MemoryEngine
+    except Exception:
+        MemoryEngine = None
+    try:
+        from persona_engine import PersonaEngine
+    except Exception:
+        PersonaEngine = None
+    try:
+        from proactive_agent import ProactiveAgent
+    except Exception:
+        ProactiveAgent = None
+else:
+    MemoryEngine = None
+    PersonaEngine = None
+    ProactiveAgent = None
 
 try:
     from telemetry_writer import TelemetryWriter
@@ -57,17 +73,19 @@ class SmartHomeGateway:
         self.tts = TTSEngine()
         self.asr = ASREngine()
         self.audio_server = AudioServer(self)
-        self.memory = MemoryEngine()
         self.verifier = CommandVerifier(self.mqtt, self.registry)
         # verifier cần biết audio_server để chọn WS vs MQTT
         self.verifier.audio_server = self.audio_server
         self.discovery = DiscoveryManager(self)
-        self.persona = PersonaEngine()
-        self.proactive = ProactiveAgent(self)
         self.ota = OTAManager(self)
         self.auth = AuthManager()
         self.sound = SoundManager(self)
         self.web_server = WebServer(self)
+
+        # AI Optional Modules — Tạm thời bỏ qua/tắt mặc định, ưu tiên thuần relay voice control
+        self.memory = MemoryEngine() if (getattr(config, "AI_ENABLED", False) and MemoryEngine) else None
+        self.persona = PersonaEngine() if (getattr(config, "PERSONA_ENABLED", False) and PersonaEngine) else None
+        self.proactive = ProactiveAgent(self) if (getattr(config, "PROACTIVE_ENABLED", False) and ProactiveAgent) else None
 
         self.telemetry_writer = None
         if HAS_INFLUX:
@@ -88,8 +106,8 @@ class SmartHomeGateway:
         logger.info("  Inventory: %s", self.registry.inventory_for_prompt())
         logger.info("=" * 60)
 
-        logger.info("Initializing ASR engine...")
-        self.asr.initialize()
+        logger.info("Initializing ASR engine (with dynamic registry hotwords)...")
+        self.asr.initialize(self.registry)
 
         await self.audio_server.start()
         await self.web_server.start()
@@ -98,6 +116,9 @@ class SmartHomeGateway:
             self.telemetry_writer.initialize()
 
         # MQTT handlers: compact + legacy + Home Assistant Discovery
+        self._subbox_voice_requests = {}
+        self.mqtt.on_message("home/subbox/+/voice/request", self._on_subbox_voice)
+        self.mqtt.on_message("home/subbox/+/event/actionbox", self._on_subbox_actionbox)
         self.mqtt.on_message("smarthome/hello", self._on_hello)
         self.mqtt.on_message("smarthome/register", self._on_node_register)  # legacy
         self.mqtt.on_message("smarthome/discovery/#", self._on_native_discovery)
@@ -160,7 +181,7 @@ class SmartHomeGateway:
         # Xử lý lệnh hủy trực tiếp
         if any(w in user_text.lower().strip().split() for w in ("thôi", "hủy", "dừng", "cancel")):
             self.dialog.clear_session(client_node_id)
-            reply = "Dạ, em đã hủy lệnh cho anh rồi nè~"
+            reply = "Đã hủy lệnh."
             result["voice_reply"] = reply
             result["follow_up"] = False
             result["verify"] = "cancelled"
@@ -177,7 +198,7 @@ class SmartHomeGateway:
         ))
         if is_alarm:
             self.dialog.clear_session(client_node_id)
-            reply = "Dạ, em phát giai điệu báo thức buổi sáng cho anh ngay đây ạ~ Chúc anh một ngày mới ngập tràn năng lượng nha anh!"
+            reply = "Đang phát chuông báo thức."
             result["voice_reply"] = reply
             result["verify"] = "alarm_played"
             result["follow_up"] = False
@@ -188,8 +209,8 @@ class SmartHomeGateway:
                 asyncio.create_task(self.sound.play_sound_and_speak(SoundManager.SOUND_MORNING, reply, target_node=client_node_id))
             return result
 
-        # ─── BƯỚC 0: Hội thoại người thật / Hát hò / Hỏi thăm (Persona Engine) ───
-        if hasattr(self, "persona") and self.persona and self.persona.is_conversational(user_text):
+        # ─── BƯỚC 0: Hội thoại người thật (CHỈ chạy khi bật option AI / Persona) ───
+        if getattr(config, "PERSONA_ENABLED", False) and hasattr(self, "persona") and self.persona and self.persona.is_conversational(user_text):
             self.dialog.clear_session(client_node_id)
             logger.info(f"🗣️ Conversational query detected: '{user_text}'")
             reply = await self.persona.reply(user_text)
@@ -229,14 +250,14 @@ class SmartHomeGateway:
             self.dialog.clear_session(client_node_id)
             result["engine"] = f"{getattr(self.intent, 'active_engine', 'Hybrid')} (Follow-Up)"
         else:
-            intent = await self.intent.extract(user_text)
+            intent = await self.intent.extract(user_text, session_key=client_node_id)
             result["engine"] = getattr(self.intent, "active_engine", "unknown")
             logger.info(f'Engine selected: {result["engine"]}')
 
             if not intent or not self.intent.validate_intent(intent):
                 if hasattr(self, "sound") and self.sound:
                     asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
-                reply = "Dạ, em nghe chưa hiểu ý anh lắm. Anh nói lại với em nha~"
+                reply = "Chưa rõ khẩu lệnh."
                 result["voice_reply"] = reply
                 result["follow_up"] = True
                 result["tts_audio"] = await self.tts.synthesize(reply)
@@ -251,7 +272,7 @@ class SmartHomeGateway:
             if cmd.get("action") == "unknown":
                 if hasattr(self, "sound") and self.sound:
                     asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
-                reply = intent.get("voice_reply") or "Dạ em nghe chưa rõ khẩu lệnh. Anh muốn em bật tắt thiết bị nào ở phòng nào vậy anh?"
+                reply = intent.get("voice_reply") or "Chưa rõ khẩu lệnh."
                 reply = clean_voice_text(reply)
                 result["voice_reply"] = reply
                 result["follow_up"] = True
@@ -292,25 +313,45 @@ class SmartHomeGateway:
             all_online = self.registry.get_online_nodes()
             room_filter = str(location).lower().strip() if location else None
             affected_count = 0
+            failed_count = 0
             for nid, node in all_online.items():
                 if room_filter and str(node.get("room", "")).lower().strip() != room_filter:
                     continue
                 for cid in node.get("channels", {}).keys():
                     seq = self.registry.next_seq(nid)
-                    await self.verifier.verify_command(nid, cid, action, seq=seq)
-                    affected_count += 1
+                    verified, *_ = await self.verifier.verify_command(nid, cid, action, seq=seq)
+                    if verified == VerifyResult.SUCCESS:
+                        affected_count += 1
+                    else:
+                        failed_count += 1
             r_vn = get_room_name(location)
             act_vn = "bật" if action == "turn_on" else "tắt"
             if r_vn:
-                reply = f"Dạ, em đã {act_vn} toàn bộ thiết bị ở {r_vn} cho anh rồi nè~"
+                reply = f"Đã {act_vn} thiết bị ở {r_vn}."
             else:
-                reply = f"Dạ, em đã {act_vn} hết tất cả thiết bị trong nhà cho anh rồi nè~"
+                reply = f"Đã {act_vn} tất cả thiết bị."
+            if not affected_count:
+                reply = "Chưa có thiết bị nào xác nhận lệnh."
+            elif failed_count:
+                reply = f"Có {affected_count} thiết bị xác nhận, {failed_count} thiết bị chưa xác nhận."
+            result["verify"] = "success" if affected_count and not failed_count else "partial" if affected_count else "timeout"
             result["voice_reply"] = reply
-            result["tts_audio"] = await self.tts.synthesize(reply)
-            result["verify"] = "success"
+
+            fb_mode = getattr(config, "AUDIO_FEEDBACK_MODE", "hybrid").lower()
+            if result["verify"] == "success" and fb_mode in ("hybrid", "chime") and hasattr(self, "sound") and self.sound:
+                chime = self.sound.get_pcm_data(SoundManager.SOUND_LISTEN_SUCCESS)
+                if chime:
+                    result["tts_audio"] = chime
+                    result["tts_format"] = "pcm"
+                    result["audio_effect"] = SoundManager.SOUND_LISTEN_SUCCESS
+            if not result.get("tts_audio"):
+                pcm = await self.tts.synthesize_pcm(reply)
+                result["tts_audio"] = pcm or await self.tts.synthesize(reply)
+                result["tts_format"] = "pcm" if pcm else "mp3"
+
             result["follow_up"] = False
             self.broadcast_event("command_result", {
-                "voice_reply": reply, "verify": "success", "engine": result["engine"], "follow_up": False
+                "voice_reply": reply, "verify": result["verify"], "engine": result["engine"], "follow_up": False
             })
             logger.info(f"Bulk {action} executed for {affected_count} channels (room={location})")
             return result
@@ -323,25 +364,25 @@ class SmartHomeGateway:
             # Phân biệt: mơ hồ (nhiều node cùng tên) vs không tồn tại
             all_online = self.registry.get_online_nodes()
             if not all_online:
-                reply = "Dạ anh ơi, hiện em chưa thấy có thiết bị nào trong nhà được kết nối. Anh thêm ở giao diện web giúp em nhé~"
+                reply = "Chưa có thiết bị kết nối."
                 follow_up = False
             elif device and location:
                 dev_name = get_device_name(device)
                 room_name = get_room_name(location)
-                reply = clean_voice_text(f"Dạ, em không tìm thấy {dev_name} ở {room_name} anh ơi. Anh kiểm tra lại giúp em nha~")
+                reply = clean_voice_text(f"Không tìm thấy {dev_name} ở {room_name}.")
                 follow_up = False
             elif device and not location:
                 # mơ hồ: có nhiều node cùng device nhưng không nói phòng -> Hỏi lại và mở mic!
                 room_names = [get_room_name(r) for r in self.registry.allowed_rooms()]
                 dev_name = get_device_name(device)
-                reply = clean_voice_text(f"Dạ anh muốn điều khiển {dev_name} ở phòng nào vậy anh? Em thấy có {', '.join(room_names)} nè~")
+                reply = clean_voice_text(f"Điều khiển {dev_name} ở phòng nào?")
                 follow_up = True
                 self.dialog._sessions[client_node_id] = DialogSession(
                     node_id=client_node_id, client_id=client_node_id,
                     pending_intent=intent, missing_slot="location"
                 )
             else:
-                reply = intent.get("voice_reply") or "Dạ anh muốn điều khiển thiết bị nào và ở phòng nào vậy anh?"
+                reply = intent.get("voice_reply") or "Chưa rõ thiết bị cần điều khiển."
                 reply = clean_voice_text(reply)
                 follow_up = True
                 self.dialog._sessions[client_node_id] = DialogSession(
@@ -350,7 +391,9 @@ class SmartHomeGateway:
                 )
             result["voice_reply"] = reply
             result["follow_up"] = follow_up
-            result["tts_audio"] = await self.tts.synthesize(reply)
+            pcm = await self.tts.synthesize_pcm(reply)
+            result["tts_audio"] = pcm or await self.tts.synthesize(reply)
+            result["tts_format"] = "pcm" if pcm else "mp3"
             self.broadcast_event("command_result", {
                 "voice_reply": reply, "verify": "not_found", "follow_up": follow_up
             })
@@ -369,31 +412,55 @@ class SmartHomeGateway:
         )
         result["verify"] = verify_result.value
 
+        action_str = "bật" if action == "turn_on" else "tắt"
+        dev_str = get_device_name(device or channel)
+        room_str = get_room_name(location)
         if verify_result == VerifyResult.SUCCESS:
-            voice_reply = intent.get("voice_reply") or f"Dạ, em đã {('bật' if action=='turn_on' else 'tắt')} {get_device_name(device)} ở {get_room_name(location)} cho anh rồi nè~"
-        elif verify_result == VerifyResult.FAILED:
-            voice_reply = self.verifier.generate_failure_message(action, device or channel, location or "", verify_result)
+            if room_str:
+                voice_reply = intent.get("voice_reply") or f"Đã {action_str} {dev_str} {room_str}."
+            else:
+                voice_reply = intent.get("voice_reply") or f"Đã {action_str} {dev_str}."
         else:
-            voice_reply = intent.get("voice_reply") or "Dạ, em đã thực hiện xong cho anh rồi ạ~"
+            voice_reply = self.verifier.generate_failure_message(action, device or channel, location or "", verify_result)
 
         # Luôn làm sạch voice_reply để loại bỏ id_room hay fullname trước khi phát ra loa
         voice_reply = clean_voice_text(voice_reply)
         result["voice_reply"] = voice_reply
-        # PCM ưu tiên cho ESP32 I2S
-        pcm = await self.tts.synthesize_pcm(voice_reply)
-        if pcm:
-            result["tts_audio"] = pcm
-            result["tts_format"] = "pcm"
-        else:
-            result["tts_audio"] = await self.tts.synthesize(voice_reply)
-            result["tts_format"] = "mp3"
 
-        self.memory.record_command(
-            user_text=user_text, action=action, device=device or channel,
-            area=location or self.registry.get_all_nodes().get(node_id, {}).get("room",""),
-            node_id=node_id, channel=channel,
-            verify_result=verify_result.value, power_before=p_before, power_after=p_after,
-        )
+        # ─── Acoustic Feedback Engine (Tinh tế, êm dịu, sang trọng) ───
+        fb_mode = getattr(config, "AUDIO_FEEDBACK_MODE", "hybrid").lower()
+        if fb_mode in ("hybrid", "chime") and verify_result == VerifyResult.SUCCESS:
+            chime_pcm = self.sound.get_pcm_data(SoundManager.SOUND_LISTEN_SUCCESS) if hasattr(self, "sound") and self.sound else None
+            if chime_pcm:
+                result["tts_audio"] = chime_pcm
+                result["tts_format"] = "pcm"
+                result["audio_effect"] = SoundManager.SOUND_LISTEN_SUCCESS
+            else:
+                pcm = await self.tts.synthesize_pcm(voice_reply)
+                result["tts_audio"] = pcm or await self.tts.synthesize(voice_reply)
+                result["tts_format"] = "pcm" if pcm else "mp3"
+        elif fb_mode == "chime" and verify_result == VerifyResult.FAILED:
+            wrong_pcm = self.sound.get_pcm_data(SoundManager.SOUND_WRONG) if hasattr(self, "sound") and self.sound else None
+            if wrong_pcm:
+                result["tts_audio"] = wrong_pcm
+                result["tts_format"] = "pcm"
+                result["audio_effect"] = SoundManager.SOUND_WRONG
+        else:
+            pcm = await self.tts.synthesize_pcm(voice_reply)
+            if pcm:
+                result["tts_audio"] = pcm
+                result["tts_format"] = "pcm"
+            else:
+                result["tts_audio"] = await self.tts.synthesize(voice_reply)
+                result["tts_format"] = "mp3"
+
+        if hasattr(self, "memory") and self.memory:
+            self.memory.record_command(
+                user_text=user_text, action=action, device=device or channel,
+                area=location or self.registry.get_all_nodes().get(node_id, {}).get("room",""),
+                node_id=node_id, channel=channel,
+                verify_result=verify_result.value, power_before=p_before, power_after=p_after,
+            )
         # broadcast để WebUI cập nhật relay ngay
         self.broadcast_event("command_result", {
             "voice_reply": voice_reply, "verify": verify_result.value,
@@ -408,6 +475,53 @@ class SmartHomeGateway:
             self.web_server.broadcast_event(event_name, data)
 
     # ── MQTT Callbacks ─────────────────────────────────────────────────
+    async def _on_subbox_voice(self, topic, payload):
+        if not isinstance(payload, dict):
+            return
+        text, origin, request = payload.get("text"), payload.get("origin_node"), payload.get("request_id")
+        if not isinstance(text, str) or not text.strip() or len(text) > 256 or not isinstance(origin, str) or not isinstance(request, int):
+            return
+        subbox = topic.split("/")[2]
+        key = (subbox, origin, request)
+        response_topic = f"home/subbox/{subbox}/voice/response"
+        if key in self._subbox_voice_requests:
+            cached = self._subbox_voice_requests[key]
+            if cached is not None:
+                await self.mqtt.publish(response_topic, cached)
+            return
+        if len(self._subbox_voice_requests) >= 128:
+            oldest = next((k for k, v in self._subbox_voice_requests.items() if v is not None), None)
+            if oldest is None:
+                return
+            self._subbox_voice_requests.pop(oldest)
+        self._subbox_voice_requests[key] = None
+        try:
+            result = await self.process_voice_command(text, client_node_id=f"{subbox}:{origin}")
+            response = {"origin_node": origin, "request_id": request,
+                        "voice_reply": result.get("voice_reply", ""), "verify": result.get("verify")}
+        except Exception:
+            logger.exception("SubBox voice request failed")
+            response = {"origin_node": origin, "request_id": request, "voice_reply": "Không thể xử lý yêu cầu."}
+        self._subbox_voice_requests[key] = response
+        await self.mqtt.publish(response_topic, response)
+
+    async def _on_subbox_actionbox(self, topic, payload):
+        if not isinstance(payload, dict) or not isinstance(payload.get("channels"), list):
+            return
+        node_id = payload.get("node_id")
+        if not isinstance(node_id, str):
+            return
+        channels = payload["channels"]
+        if node_id not in self.registry.get_all_nodes():
+            # Discovery uses the existing provisioning UI; never invent an approved device.
+            if node_id not in self.registry.data.get("pending", {}):
+                self.registry.on_hello({"id": node_id, "hardware": "ActionBox", "state": "FACTORY_NEW"})
+            return
+        states = {c.get("channel"): c.get("state") == "ON" for c in channels if isinstance(c, dict)}
+        if 1 in states and 2 in states:
+            self.registry.update_relay_state(node_id, [int(states[1]), int(states[2])])
+        self.registry.update_heartbeat(node_id)
+
     async def _on_hello(self, topic: str, payload: dict):
         """Node mới hoặc đã provision gửi hello qua MQTT (compact)."""
         if not isinstance(payload, dict):
@@ -469,6 +583,7 @@ class SmartHomeGateway:
         if isinstance(payload, dict):
             # compact ack: {"t":"ack","id":"...","rl":[1,0],"seq":n}
             if payload.get("t") == "ack":
+                self.mqtt.record_compact_ack(node_id, payload)
                 rl = payload.get("rl", [])
                 if rl and hasattr(self.registry, "update_relay_state"):
                     self.registry.update_relay_state(node_id, rl)

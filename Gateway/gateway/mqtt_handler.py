@@ -7,6 +7,11 @@ command dispatch, and telemetry caching.
 import asyncio
 import json
 import logging
+import secrets
+import time
+import ssl
+import math
+import re
 from typing import Callable, Dict, List, Any, Optional
 
 try:
@@ -49,6 +54,55 @@ class MQTTHandler:
         self._running = False
         self.latest_telemetry: Dict[str, Dict[str, Any]] = {}
         self.latest_power: Dict[str, float] = {}
+        self.session_id = secrets.randbits(32)
+        self.node_routes = {}
+        self.command_acks = {}
+        self.load_reports = {}
+        self.node_identities = {}
+        self.conflicting_nodes = set()
+        self.on_message("home/subbox/+/event/actionbox", self._on_actionbox)
+
+    async def _on_actionbox(self, topic, payload):
+        if not isinstance(payload, dict) or not isinstance(payload.get("node_id"), str):
+            return
+        node_id = payload["node_id"]
+        uid = payload.get('hardware_uid')
+        if (not re.fullmatch(r'[A-Za-z0-9_-]{1,32}', node_id)
+                or not isinstance(uid, str) or not re.fullmatch(r'[0-9A-Fa-f]{12}', uid)
+                or payload.get('protocol_version') != 3
+                or type(payload.get('config_version')) is not int or payload['config_version'] < 1):
+            return
+        uid = uid.upper()
+        existing = self.node_identities.get(node_id)
+        if existing and existing['hardware_uid'] != uid:
+            self.conflicting_nodes.add(node_id)
+            self.node_routes.pop(node_id, None)
+            return
+        if node_id in self.conflicting_nodes:
+            return
+        self.node_identities[node_id] = {'hardware_uid': uid, 'config_version': payload['config_version'], 'protocol_version': 3}
+        self.node_routes[node_id] = (topic.split("/")[2], time.monotonic())
+        channels = payload.get("channels")
+        if isinstance(channels, list):
+            powers = [c.get('power_w', 0) for c in channels if isinstance(c, dict)]
+            if all(type(p) in (int, float) and math.isfinite(p) for p in powers):
+                self.latest_power[node_id] = sum(powers)
+        request = payload.get("request_id")
+        if type(request) is int and payload.get('session_id') == self.session_id:
+            if payload.get('type') == 'LOAD_REPORT':
+                cache = self.load_reports
+            elif payload.get('status') in ('OK', 'ERROR'):
+                cache = self.command_acks
+            else:
+                return
+            cache[(node_id, request)] = {**payload, '_received_at': time.monotonic()}
+            while len(cache) > 128:
+                cache.pop(next(iter(cache)))
+
+    def subbox_route(self, node_id):
+        route = self.node_routes.get(node_id)
+        return route[0] if node_id not in self.conflicting_nodes and route and time.monotonic() - route[1] < 30 else None
+
 
     def on_message(self, topic_pattern: str, callback: Callable):
         """Register an async or sync callback for a topic pattern."""
@@ -57,12 +111,19 @@ class MQTTHandler:
         self.callbacks[topic_pattern].append(callback)
         logger.debug(f"Registered MQTT callback for pattern: {topic_pattern}")
 
+    def record_compact_ack(self, node_id, payload):
+        seq, states = payload.get("seq"), payload.get("rl")
+        if isinstance(seq, int) and isinstance(states, list):
+            self.command_acks[(node_id, seq)] = {"status": "OK", "relay_states": states}
+            while len(self.command_acks) > 128:
+                self.command_acks.pop(next(iter(self.command_acks)))
+
     def get_current_power(self, node_id: str) -> float:
         """Get the latest recorded power (watts) for a node."""
         return self.latest_power.get(node_id, 0.0)
 
     async def send_command(self, node_id: str, channel: str, action: str,
-                           seq: int = None) -> bool:
+                           seq: int = None, settle_ms: int = 500) -> bool:
         """
         Send a control command to a node via MQTT (compact v2).
         Topic: smarthome/cmd/{node_id}
@@ -71,6 +132,23 @@ class MQTTHandler:
         Kênh cũ smarthome/command/{node_id} vẫn gửi {channel, action} cho firmware
         legacy chưa nâng cấp lên compact protocol.
         """
+        if action not in ('turn_on', 'on', 'open', 'turn_off', 'off', 'close') or node_id in self.conflicting_nodes:
+            return False
+        route = self.subbox_route(node_id)
+        if route:
+            channel_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel)
+            command = {"turn_on": "TURN_ON", "on": "TURN_ON", "open": "TURN_ON",
+                       "turn_off": "TURN_OFF", "off": "TURN_OFF", "close": "TURN_OFF"}.get(action)
+            if not channel_number or not command:
+                return False
+            return await self.publish(f"home/subbox/{route}/command", {
+                "version": 3, **self.node_identities[node_id], "node_id": node_id, "channel": channel_number,
+                "settle_ms": settle_ms,
+                "cmd": command, "request_id": seq or secrets.randbelow(0x7ffffffe) + 1, "session_id": self.session_id,
+            }, qos=1)
+        # A known three-tier device must never fall back to unrelated legacy topics.
+        if node_id in self.node_identities:
+            return False
         # Map channel names -> channel number
         ch_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel, 0)
         if ch_number in (1, 2):
@@ -83,8 +161,12 @@ class MQTTHandler:
             ind_topic = f"home/devices/{node_id}/relay/{ch_number}/set"
             await self.publish(ind_topic, {"state": s})
 
+            # 3-Tier Zone routing topic (picked up by T2 Zone Controller for T1 nodes)
+            zone_node_topic = f"home/nodes/{node_id}/relay/{ch_number}/set"
+            await self.publish(zone_node_topic, {"state": s})
+
             if ok:
-                logger.info(f"📤 CMD[compact+ind] {node_id} ch{ch_number}={s} seq={seq}")
+                logger.info(f"📤 CMD[compact+ind+zone] {node_id} ch{ch_number}={s} seq={seq}")
             return ok
         # legacy
         topic = config.TOPIC_COMMAND.format(node_id=node_id)
@@ -111,13 +193,23 @@ class MQTTHandler:
     async def send_relay_set(self, device_id: str, channel: int, state: int) -> bool:
         """
         Điều khiển relay theo chuẩn Industrial Topic: home/devices/{device_id}/relay/{channel}/set
-        Đồng thời gửi kênh compact smarthome/cmd/{device_id} để đảm bảo tương thích 100%.
+        Đồng thời gửi:
+          - home/nodes/{device_id}/relay/{channel}/set (cho T2 Zone Controller route xuống T1)
+          - smarthome/cmd/{device_id} (compact backward-compat)
         """
+        if channel not in (1, 2) or state not in (0, 1):
+            return False
+        return await self.send_command(device_id, channel, 'turn_on' if state else 'turn_off')
+        # Legacy fan-out removed: one selected route owns each command.
         topic = getattr(config, "TOPIC_DEV_RELAY_SET", "home/devices/{device_id}/relay/{channel}/set").format(
             device_id=device_id, channel=channel
         )
         payload = {"state": 1 if state else 0}
         ok = await self.publish(topic, payload, qos=1)
+
+        # 3-Tier Zone routing topic (picked up by T2 Zone Controller for T1 nodes)
+        zone_node_topic = f"home/nodes/{device_id}/relay/{channel}/set"
+        await self.publish(zone_node_topic, payload, qos=1)
 
         # Compact backward-compat
         compact_topic = config.TOPIC_CMD_SHORT.format(node_id=device_id)
@@ -146,7 +238,7 @@ class MQTTHandler:
                 await asyncio.wait_for(self._connected.wait(), timeout=5.0)
 
             await self.client.publish(topic, payload=payload_str, qos=qos, retain=retain)
-            logger.info(f"📤 Published to {topic}: {payload_str}")
+            logger.debug('Published topic=%s bytes=%s', topic, len(payload_str))
             return True
         except Exception as e:
             logger.error(f"Failed to publish to {topic}: {e}")
@@ -173,6 +265,14 @@ class MQTTHandler:
                 if config.MQTT_USERNAME and config.MQTT_PASSWORD:
                     client_kwargs["username"] = config.MQTT_USERNAME
                     client_kwargs["password"] = config.MQTT_PASSWORD
+                if getattr(config, 'MQTT_TLS_ENABLED', True):
+                    ca = getattr(config, 'MQTT_CA_FILE', '')
+                    if not ca:
+                        raise ValueError('MQTT_CA_FILE is required for TLS')
+                    context = ssl.create_default_context(cafile=ca)
+                    if getattr(config, 'MQTT_CERT_FILE', ''):
+                        context.load_cert_chain(config.MQTT_CERT_FILE, config.MQTT_KEY_FILE)
+                    client_kwargs['tls_context'] = context
 
                 async with aiomqtt.Client(**client_kwargs) as client:
                     self.client = client
@@ -230,6 +330,10 @@ class MQTTHandler:
         if topic.startswith("smarthome/telemetry/") or topic.startswith("smarthome/tele/"):
             node_id = topic.split("/")[-1]
         elif topic.startswith("home/devices/") and topic.endswith("/telemetry"):
+            parts = topic.split("/")
+            if len(parts) >= 4:
+                node_id = parts[2]
+        elif topic.startswith("home/") and (topic.endswith("/power") or topic.endswith("/status")):
             parts = topic.split("/")
             if len(parts) >= 4:
                 node_id = parts[2]

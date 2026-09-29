@@ -100,7 +100,7 @@ class DialogManager:
             if value is None:
                 r_name = get_room_name(location)
                 loc_str = f"ở {r_name}" if r_name else ""
-                question = clean_voice_text(f"Dạ anh muốn cài đặt điều hòa {loc_str} bao nhiêu độ vậy anh?")
+                question = clean_voice_text(f"Cài đặt điều hòa {loc_str} bao nhiêu độ?")
                 session = DialogSession(
                     node_id=client_key, client_id=client_key,
                     pending_intent=intent, missing_slot="value", detected_room=location
@@ -140,7 +140,7 @@ class DialogManager:
                 ch_names = " hay ".join(matching_channels[:2])
                 act_vn = "bật" if action == "turn_on" else "tắt"
                 r_name = get_room_name(location)
-                question = clean_voice_text(f"Dạ anh muốn {act_vn} {ch_names} {('ở ' + r_name) if r_name else ''} vậy ạ?")
+                question = clean_voice_text(f"Bạn muốn {act_vn} {ch_names} {('ở ' + r_name) if r_name else ''}?")
                 session = DialogSession(
                     node_id=client_key, client_id=client_key,
                     pending_intent=intent, missing_slot="channel", detected_room=location
@@ -170,7 +170,7 @@ class DialogManager:
                 room_list_str = ", ".join(room_names)
                 dev_vn = get_device_name(device)
                 act_vn = "bật" if action == "turn_on" else "tắt"
-                question = clean_voice_text(f"Dạ anh muốn {act_vn} {dev_vn} ở phòng nào thế anh? Hiện có {room_list_str} nè~")
+                question = clean_voice_text(f"Bạn muốn {act_vn} {dev_vn} ở phòng nào ({room_list_str})?")
                 session = DialogSession(
                     node_id=client_key, client_id=client_key,
                     pending_intent=intent, missing_slot="location", detected_room=None

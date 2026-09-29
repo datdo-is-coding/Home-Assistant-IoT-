@@ -1,0 +1,4 @@
+dependencies:
+  espressif/mqtt: "*"
+  espressif/esp_websocket_client: "^1.2.0"
+  espressif/cjson: "^1.7.18"

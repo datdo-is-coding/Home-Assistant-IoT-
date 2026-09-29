@@ -71,9 +71,13 @@ DEVICE_DISPLAY_NAMES = {
     "may_tinh": "máy tính",
     "may_in": "máy in",
     "sac_xe_dien": "sạc xe điện",
-    "bom_hoi": "máy bơm hơi",
-    "he_thong_chong_trom": "hệ thống chống trộm",
-    "cam_bien": "cảm biến"
+    "cam_bien": "cảm biến",
+    "relay_1": "relay 1",
+    "relay_2": "relay 2",
+    "ch1": "kênh 1",
+    "ch2": "kênh 2",
+    "relay": "relay",
+    "all": "tất cả thiết bị"
 }
 
 
