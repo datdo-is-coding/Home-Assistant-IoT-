@@ -67,7 +67,7 @@ extern "C" {
  * If no communication is received from SubBox within 10s, scan channels 1-13.
  * NOTE: Local button and relay safety control continues unimpeded!
  */
-#define SAFETY_COMMS_TIMEOUT_MS         10000
+#define SAFETY_COMMS_TIMEOUT_MS         5000
 
 /**
  * @brief Task Watchdog Timer (TWDT) Timeout in Milliseconds

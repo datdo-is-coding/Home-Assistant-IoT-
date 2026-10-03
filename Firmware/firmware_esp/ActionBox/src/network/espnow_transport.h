@@ -68,6 +68,11 @@ void espnow_transport_get_local_mac(uint8_t *out_mac);
  */
 void espnow_transport_scan_channels(void);
 
+/**
+ * @brief Non-blocking single-channel hop across channels 1-13
+ */
+void espnow_transport_hop_channel(void);
+
 #ifdef __cplusplus
 }
 #endif

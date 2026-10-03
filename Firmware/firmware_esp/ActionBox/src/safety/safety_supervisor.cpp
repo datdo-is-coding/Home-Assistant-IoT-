@@ -30,7 +30,7 @@ typedef struct {
 
 static SafetyChannelState s_ch_state[BOARD_RELAY_CHANNEL_COUNT];
 static fault_alert_cb_t s_fault_callback = NULL;
-static int64_t s_last_network_heartbeat_us = 0;
+static std::atomic<int64_t> s_last_network_heartbeat_us(0);
 static bool s_safety_initialized = false;
 static std::atomic<uint32_t> s_last_sample_ms[BOARD_RELAY_CHANNEL_COUNT];
 static std::atomic<bool> s_sample_seen[BOARD_RELAY_CHANNEL_COUNT];
@@ -46,7 +46,7 @@ void safety_check_sensor_timeouts(void) {
     for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ++ch) {
         if (!safety_sensor_ready(ch) && relay_get_state(ch) == RELAY_STATE_ON) {
             relay_set_fault(ch, RELAY_FAULT_HARDWARE);
-            led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
+            if (ch != 1) led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
             if (s_fault_callback) s_fault_callback(ch, RELAY_FAULT_HARDWARE, 0);
         }
     }
@@ -61,7 +61,8 @@ esp_err_t safety_supervisor_init(void) {
         s_ch_state[i].peak_current_ma = 0;
     }
 
-    s_last_network_heartbeat_us = esp_timer_get_time();
+    /* Start in timed out state until first packet from SubBox */
+    s_last_network_heartbeat_us = 0;
 
     /* Configure Task Watchdog Timer */
 #if defined(CONFIG_ESP_TASK_WDT_EN)
@@ -110,7 +111,7 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
                  channel, meas->current_rms_ma, SAFETY_ABSOLUTE_MAX_CURRENT_MA);
 
         relay_set_fault(channel, RELAY_FAULT_OVERCURRENT);
-        led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
+        if (channel != 1) led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
 
         if (s_fault_callback) {
             s_fault_callback(channel, RELAY_FAULT_OVERCURRENT, meas->current_rms_ma);
@@ -134,7 +135,7 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
 
                 /* Trip relay immediately */
                 relay_set_fault(channel, RELAY_FAULT_OVERCURRENT);
-                led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
+                if (channel != 1) led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
 
                 if (s_fault_callback) {
                     s_fault_callback(channel, RELAY_FAULT_OVERCURRENT, meas->current_rms_ma);
@@ -180,11 +181,13 @@ bool safety_validate_command(const ActionBoxCommand *cmd, char *out_err_msg, siz
 }
 
 void safety_feed_network_watchdog(void) {
-    s_last_network_heartbeat_us = esp_timer_get_time();
+    s_last_network_heartbeat_us.store(esp_timer_get_time());
 }
 
 bool safety_is_network_timed_out(void) {
-    int64_t elapsed_ms = (esp_timer_get_time() - s_last_network_heartbeat_us) / 1000;
+    int64_t last = s_last_network_heartbeat_us.load();
+    if (last == 0) return true;
+    int64_t elapsed_ms = (esp_timer_get_time() - last) / 1000;
     return (elapsed_ms >= SAFETY_COMMS_TIMEOUT_MS);
 }
 
@@ -220,18 +223,18 @@ void safety_apply_startup_state(void) {
             case STARTUP_MODE_ALWAYS_ON:
                 ESP_LOGI(TAG, "Ch%u startup policy: ALWAYS_ON", ch);
                 relay_on(ch);
-                led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
+                if (ch != 1) led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
                 break;
 
             case STARTUP_MODE_RESTORE_LAST:
                 if (cfg->last_states[i] == RELAY_STATE_ON) {
                     ESP_LOGI(TAG, "Ch%u startup policy: RESTORE_LAST (Previous: ON)", ch);
                     relay_on(ch);
-                    led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
+                    if (ch != 1) led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
                 } else {
                     ESP_LOGI(TAG, "Ch%u startup policy: RESTORE_LAST (Previous: OFF)", ch);
                     relay_off(ch);
-                    led_set_pattern(ch, LED_PATTERN_OFF);
+                    if (ch != 1) led_set_pattern(ch, LED_PATTERN_OFF);
                 }
                 break;
 
@@ -239,7 +242,7 @@ void safety_apply_startup_state(void) {
             default:
                 ESP_LOGI(TAG, "Ch%u startup policy: ALWAYS_OFF", ch);
                 relay_off(ch);
-                led_set_pattern(ch, LED_PATTERN_OFF);
+                if (ch != 1) led_set_pattern(ch, LED_PATTERN_OFF);
                 break;
         }
     }

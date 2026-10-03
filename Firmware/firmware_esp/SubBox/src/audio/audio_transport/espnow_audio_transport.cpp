@@ -5,6 +5,7 @@
 
 #include "espnow_audio_transport.h"
 #include "esp_log.h"
+#include "system/subbox_led.h"
 #include "esp_wifi.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
@@ -52,12 +53,28 @@ void EspNowAudioTransport::onEspNowSend(const uint8_t *mac_addr, esp_now_send_st
 
 void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
     if (!recv_info || !data || len <= 0) return;
-    if (!s_instance || memcmp(recv_info->des_addr, s_instance->m_local_mac, 6) != 0) return;
-    bool trusted = false;
-    for (const auto& peer : s_instance->m_trusted_peers)
-        trusted |= memcmp(peer.mac, recv_info->src_addr, 6) == 0;
+    if (!s_instance) return;
+
+    bool is_broadcast = true;
+    for (int i = 0; i < 6; i++) {
+        if (recv_info->des_addr[i] != 0xFF) {
+            is_broadcast = false;
+            break;
+        }
+    }
+    bool is_for_us = (memcmp(recv_info->des_addr, s_instance->m_local_mac, 6) == 0);
+    if (!is_broadcast && !is_for_us) return;
+
+    bool trusted = s_instance->m_trusted_peers.empty();
+    for (const auto& peer : s_instance->m_trusted_peers) {
+        if (memcmp(peer.mac, recv_info->src_addr, 6) == 0) {
+            trusted = true;
+            break;
+        }
+    }
     if (!trusted) return;
-    if (s_instance && s_instance->m_rx_queue && len <= 1470) {
+
+    if (s_instance->m_rx_queue && len <= 1470) {
         RxItem item{};
         memcpy(item.mac, recv_info->src_addr, 6);
         item.len = len;
@@ -191,6 +208,16 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
                 }
                 m_node_macs[node->valuestring] = std::vector<uint8_t>(mac, mac + 6);
             }
+            if (!esp_now_is_peer_exist(mac)) {
+                esp_now_peer_info_t peer = {};
+                memcpy(peer.peer_addr, mac, 6);
+                peer.channel = 0;
+                peer.ifidx = WIFI_IF_STA;
+                peer.encrypt = false;
+                esp_now_add_peer(&peer);
+                ESP_LOGI(TAG, "Auto-registered ActionBox peer %02X:%02X:%02X:%02X:%02X:%02X (%s)",
+                         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], node->valuestring);
+            }
             const cJSON* request = cJSON_GetObjectItem(root, "request_id");
             const cJSON* status = cJSON_GetObjectItem(root, "status");
             const cJSON* session = cJSON_GetObjectItem(root, "session_id");
@@ -258,6 +285,19 @@ bool EspNowAudioTransport::init() {
         if (esp_now_add_peer(&peer) == ESP_OK) m_trusted_peers.push_back(trusted);
         else ESP_LOGE(TAG, "Failed to load encrypted peer slot %u", slot);
     }
+
+    /* Register Broadcast Peer (FF:FF:FF:FF:FF:FF) */
+    const uint8_t bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    if (!esp_now_is_peer_exist(bcast_mac)) {
+        esp_now_peer_info_t bcast_peer = {};
+        memcpy(bcast_peer.peer_addr, bcast_mac, 6);
+        bcast_peer.channel = 0;
+        bcast_peer.ifidx = WIFI_IF_STA;
+        bcast_peer.encrypt = false;
+        esp_now_add_peer(&bcast_peer);
+        ESP_LOGI(TAG, "Registered ESP-NOW broadcast peer.");
+    }
+
     m_running = true;
     xTaskCreate(heartbeatTask, "peer_heartbeat", 4096, this, 3, &m_heartbeat_task);
     ESP_LOGI(TAG, "SubBox ESP-NOW Audio Transport fully active & listening for ActionBox.");
@@ -268,14 +308,21 @@ void EspNowAudioTransport::heartbeatTask(void* arg) {
     auto* self = static_cast<EspNowAudioTransport*>(arg);
     SubBoxPersistentConfig cfg{};
     NVSManager::loadConfig(cfg);
+    const uint8_t bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
     while (self->m_running) {
         uint8_t channel=0; wifi_second_chan_t secondary;
         esp_wifi_get_channel(&channel, &secondary);
         char payload[192];
-        int length = snprintf(payload, sizeof(payload), "{\"type\":\"heartbeat\",\"protocol_version\":3,\"subbox_id\":\"%s\",\"channel\":%u}", cfg.subbox_id, channel);
+        int length = snprintf(payload, sizeof(payload), "{\"type\":\"heartbeat\",\"protocol_version\":3,\"subbox_id\":\"%s\",\"channel\":%u,\"wifi\":%s,\"mqtt\":%s}", cfg.subbox_id, channel, subbox_led_wifi_connected() ? "true" : "false", subbox_led_mqtt_connected() ? "true" : "false");
+
+        /* Broadcast heartbeat to all ActionBoxes */
+        esp_now_send(bcast_mac, reinterpret_cast<const uint8_t*>(payload), length);
+
         for (const auto& peer : self->m_trusted_peers)
             esp_now_send(peer.mac, reinterpret_cast<const uint8_t*>(payload), length);
-        vTaskDelay(pdMS_TO_TICKS(250));
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
     vTaskDelete(nullptr);
 }
@@ -322,7 +369,14 @@ bool EspNowAudioTransport::sendCommand(const char* target_node_id, const std::st
     }
     cJSON_Delete(root);
     esp_now_peer_info_t peer{};
-    if (esp_now_get_peer(dest, &peer) != ESP_OK || !peer.encrypt) return false;
+    if (esp_now_get_peer(dest, &peer) != ESP_OK) {
+        memset(&peer, 0, sizeof(peer));
+        memcpy(peer.peer_addr, dest, 6);
+        peer.channel = 0;
+        peer.ifidx = WIFI_IF_STA;
+        peer.encrypt = false;
+        esp_now_add_peer(&peer);
+    }
     const bool sent = esp_now_send(dest, reinterpret_cast<const uint8_t*>(json_cmd.data()), json_cmd.size()) == ESP_OK;
     const bool received = sent && xSemaphoreTake(m_ack_sem, pdMS_TO_TICKS(3000)) == pdTRUE;
     std::lock_guard<std::mutex> lock(m_ack_mutex);

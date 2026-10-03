@@ -13,6 +13,7 @@ import os
 import time
 import urllib.parse
 from http.cookies import SimpleCookie
+from datetime import datetime, timezone
 from typing import Set, Dict, Any, Optional
 
 import config
@@ -1939,6 +1940,24 @@ class WebServer:
         if hasattr(self.gateway, "auth") and self.gateway.auth:
             all_nodes = self.gateway.auth.filter_nodes(user, all_nodes)
 
+        # A persisted "online" flag is not a live connection. Legacy telemetry
+        # reports every 30s; allow 90s before hiding controls in the app.
+        all_nodes = {key: dict(value) for key, value in all_nodes.items()}
+        now = datetime.now(timezone.utc)
+        for node in all_nodes.values():
+            if node.get("status") != "online":
+                continue
+            try:
+                seen = datetime.fromisoformat(node.get("last_seen", ""))
+                if seen.tzinfo is None:
+                    seen = seen.replace(tzinfo=timezone.utc)
+                age = (now - seen).total_seconds()
+                fresh = 0 <= age < 90
+            except (ValueError, TypeError):
+                fresh = False
+            if not fresh:
+                node["status"] = "offline"
+
         disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
         return {
             "nodes": all_nodes,
@@ -2075,16 +2094,16 @@ class WebServer:
                 try:
                     d = json.loads(body.decode() or "{}")
                     node_id = d.get("node_id")
-                    channel = d.get("channel") or d.get("ch", "ch1")
-                    action = d.get("action") or d.get("s", "turn_on")
+                    channel = d.get("channel", d.get("ch"))
+                    action = d.get("action", d.get("s"))
                     
                     if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", 1, 2, "1", "2"):
                         await self._respond(writer, 400, {"error": "Use an explicit relay state and valid channel"}); return
-                    action = "TURN_ON" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "TURN_OFF"
+                    action = "turn_on" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "turn_off"
                     channel = "ch1" if channel in ("ch1", 1, "1") else "ch2"
-                    result = await self.gateway.verifier.verify_command(node_id, channel, action)
+                    result, *_ = await self.gateway.verifier.verify_command(node_id, channel, action)
                     outcome = result.value
-                    resp_data = {"success": outcome.upper() == "CONFIRMED_LOAD", "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
+                    resp_data = {"success": outcome in {"ack_only", "confirmed_load"}, "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()

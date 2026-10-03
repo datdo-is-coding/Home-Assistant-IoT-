@@ -1,148 +1,102 @@
 import 'package:flutter/material.dart';
+import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/provisioning_screen.dart';
-import 'screens/ota_update_screen.dart';
-import 'screens/analytics_screen.dart';
-import 'screens/settings_screen.dart';
-import 'services/energy_service.dart';
-import 'services/notification_service.dart';
-import 'services/theme_service.dart';
-import 'widgets/weather_glass_overlay.dart';
+import 'services/gateway_client.dart';
+
+final gateway = GatewayClient();
+final appTheme = ValueNotifier<ThemeMode>(ThemeMode.system);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final hasSession = await EnergyService().loadSettings();
-  await NotificationService().init();
-  await ThemeService().loadTheme();
-  runApp(DTVEnergyApp(hasValidSession: hasSession));
+  await gateway.restore();
+  runApp(const DTVEnergyApp());
+}
+
+ThemeData homeTheme(Brightness brightness) {
+  final dark = brightness == Brightness.dark;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF147D68),
+    brightness: brightness,
+    primary: dark ? const Color(0xFF80D8BE) : const Color(0xFF147D68),
+    secondary: const Color(0xFFCC8A27),
+    surface: dark ? const Color(0xFF191D1C) : Colors.white,
+  );
+  return ThemeData(
+    useMaterial3: true,
+    colorScheme: scheme,
+    scaffoldBackgroundColor:
+        dark ? const Color(0xFF101312) : const Color(0xFFF4F6F5),
+    textTheme: const TextTheme(
+      headlineMedium: TextStyle(
+          fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: 0),
+      titleLarge: TextStyle(
+          fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: 0),
+      titleMedium: TextStyle(
+          fontSize: 16, fontWeight: FontWeight.w600, letterSpacing: 0),
+      bodyMedium: TextStyle(fontSize: 14, height: 1.45, letterSpacing: 0),
+    ),
+    appBarTheme: AppBarTheme(
+        backgroundColor:
+            dark ? const Color(0xFF101312) : const Color(0xFFF4F6F5),
+        scrolledUnderElevation: 0),
+    cardTheme: CardThemeData(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        color: scheme.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+                color: scheme.outlineVariant.withValues(alpha: .55)))),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surface,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide(color: scheme.outlineVariant)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+            minimumSize: const Size(48, 52),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            textStyle: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: 0))),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+            minimumSize: const Size(48, 48),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)))),
+    navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: scheme.surface,
+        elevation: 0,
+        indicatorColor: scheme.primaryContainer,
+        labelTextStyle: const WidgetStatePropertyAll(
+            TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+    dividerTheme:
+        DividerThemeData(color: scheme.outlineVariant.withValues(alpha: .5)),
+  );
 }
 
 class DTVEnergyApp extends StatelessWidget {
-  final bool hasValidSession;
-  const DTVEnergyApp({super.key, required this.hasValidSession});
-
+  const DTVEnergyApp({super.key, this.client});
+  final GatewayClient? client;
   @override
   Widget build(BuildContext context) {
+    final service = client ?? gateway;
     return ListenableBuilder(
-      listenable: ThemeService(),
-      builder: (context, child) {
-        final currentTheme = ThemeService().currentTheme;
-        return MaterialApp(
-          title: 'AETHERIA OS — Spatial Smart Home',
-          debugShowCheckedModeBanner: false,
-          theme: ThemeData(
-            brightness: Brightness.dark,
-            scaffoldBackgroundColor: currentTheme.bg,
-            colorScheme: ColorScheme.dark(
-              primary: currentTheme.primary,
-              secondary: currentTheme.secondary,
-              surface: currentTheme.surface,
-            ),
-            useMaterial3: true,
-          ),
-          home: hasValidSession ? const MainTabNavigator() : const LoginScreen(),
-        );
-      },
-    );
-  }
-}
-
-class MainTabNavigator extends StatefulWidget {
-  const MainTabNavigator({super.key});
-
-  @override
-  State<MainTabNavigator> createState() => _MainTabNavigatorState();
-}
-
-class _MainTabNavigatorState extends State<MainTabNavigator> {
-  int _currentIndex = 0;
-
-  final List<Widget> _screens = const [
-    DashboardScreen(),
-    ProvisioningScreen(),
-    OTAUpdateScreen(),
-    AnalyticsScreen(),
-    SettingsScreen(),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = ThemeService().currentTheme;
-    return Scaffold(
-      backgroundColor: theme.bg,
-      body: WeatherGlassOverlay(
-        child: IndexedStack(
-          index: _currentIndex,
-          children: _screens,
-        ),
-      ),
-      bottomNavigationBar: Container(
-        margin: const EdgeInsets.fromLTRB(14, 0, 14, 16),
-        height: 64,
-        decoration: BoxDecoration(
-          color: theme.surface.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: theme.primary.withOpacity(0.3), width: 1.2),
-          boxShadow: [
-            BoxShadow(
-              color: theme.primary.withOpacity(0.12),
-              blurRadius: 20,
-              spreadRadius: 2,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _navItem(0, Icons.grid_view_rounded, "Tổng Quan", theme),
-            _navItem(1, Icons.sensors_rounded, "Gán Thiết Bị", theme),
-            _navItem(2, Icons.system_update_rounded, "OTA", theme),
-            _navItem(3, Icons.show_chart_rounded, "Phân Tích", theme),
-            _navItem(4, Icons.settings_rounded, "Cài Đặt", theme),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _navItem(int index, IconData icon, String label, AppThemeData theme) {
-    final isSelected = _currentIndex == index;
-    return GestureDetector(
-      onTap: () => setState(() => _currentIndex = index),
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: isSelected
-            ? BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [theme.primary.withOpacity(0.25), theme.secondary.withOpacity(0.25)],
-                ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: theme.primary.withOpacity(0.5)),
-              )
-            : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isSelected ? theme.primary : Colors.white.withOpacity(0.5),
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
-              ),
-            ),
-          ],
-        ),
+      listenable: Listenable.merge([service, appTheme]),
+      builder: (context, _) => MaterialApp(
+        key: ValueKey(service.authenticated),
+        title: 'SIC Home',
+        debugShowCheckedModeBanner: false,
+        theme: homeTheme(Brightness.light),
+        darkTheme: homeTheme(Brightness.dark),
+        themeMode: appTheme.value,
+        home: service.authenticated
+            ? HomeScreen(gateway: service)
+            : LoginScreen(client: service),
       ),
     );
   }

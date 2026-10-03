@@ -515,7 +515,12 @@ class SmartHomeGateway:
         if node_id not in self.registry.get_all_nodes():
             # Discovery uses the existing provisioning UI; never invent an approved device.
             if node_id not in self.registry.data.get("pending", {}):
-                self.registry.on_hello({"id": node_id, "hardware": "ActionBox", "state": "FACTORY_NEW"})
+                identity = self.mqtt.node_identities.get(node_id)
+                if not identity or node_id in self.mqtt.conflicting_nodes:
+                    return
+                uid = identity["hardware_uid"]
+                self.registry.on_hello({"id": node_id, "hardware": "ActionBox", "state": "FACTORY_NEW",
+                    "serial": uid, "mac": ":".join(uid[i:i+2] for i in range(0, 12, 2))})
             return
         states = {c.get("channel"): c.get("state") == "ON" for c in channels if isinstance(c, dict)}
         if 1 in states and 2 in states:

@@ -5,6 +5,7 @@
 
 #include "led_driver.h"
 #include "board_pins.h"
+#include "../../../../common/connection_status.h"
 
 #include "driver/gpio.h"
 #include "esp_timer.h"
@@ -73,6 +74,7 @@ void led_set_pattern(uint8_t channel, LedPattern pattern) {
     if (channel < 1 || channel > BOARD_RELAY_CHANNEL_COUNT) return;
     uint8_t idx = channel - 1;
 
+    if (s_leds[idx].pattern != pattern) s_leds[idx].last_toggle_us = esp_timer_get_time();
     s_leds[idx].pattern = pattern;
     if (pattern == LED_PATTERN_OFF) {
         s_leds[idx].current_level = false;
@@ -100,10 +102,16 @@ void led_driver_tick(void) {
                 break;
 
             case LED_PATTERN_BLINK_SLOW:
-            case LED_PATTERN_BLINK_FAST: {
-                /* Slow: 500ms per level; fast: 100ms per level. */
-                const int64_t interval_ms =
-                    (led->pattern == LED_PATTERN_BLINK_SLOW) ? 500 : 100;
+            case LED_PATTERN_BLINK_FAST:
+            case LED_PATTERN_BLINK_2S: {
+                int64_t interval_ms = 100;
+                if (led->pattern == LED_PATTERN_BLINK_2S) {
+                    interval_ms = 1000; /* 1000ms ON / 1000ms OFF = 2s period (nháy 2s 1 lần) */
+                } else if (led->pattern == LED_PATTERN_BLINK_SLOW) {
+                    interval_ms = 500;
+                } else {
+                    interval_ms = 100;  /* 100ms ON / 100ms OFF = nháy liên tục */
+                }
                 int64_t elapsed_ms = (now_us - led->last_toggle_us) / 1000;
                 if (elapsed_ms >= interval_ms) {
                     led->current_level = !led->current_level;
@@ -113,6 +121,13 @@ void led_driver_tick(void) {
                 break;
             }
 
+            case LED_PATTERN_ERROR_1:
+            case LED_PATTERN_ERROR_2:
+            case LED_PATTERN_ERROR_3:
+            case LED_PATTERN_ERROR_4:
+                apply_led_level(led->pin, status_led_level(led->pattern - LED_PATTERN_ERROR_1 + 1,
+                    (now_us - led->last_toggle_us) / 1000));
+                break;
             case LED_PATTERN_PULSE_ONCE: {
                 int64_t elapsed_ms = (now_us - led->pulse_start_us) / 1000;
                 if (elapsed_ms >= 120) {

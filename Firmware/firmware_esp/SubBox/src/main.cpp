@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_sntp.h"
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 
@@ -51,6 +52,7 @@
 static const char *TAG = "SUBBOX_MAIN";
 
 #include "system/wifi_provisioning.h"
+#include "system/subbox_led.h"
 
 static int s_wifi_retry_count = 0;
 
@@ -58,21 +60,27 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi Station started, connecting to AP '%s'...", (const char*)arg);
-        esp_wifi_connect();
+        if (((const char*)arg)[0]) esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        subbox_led_set_wifi_connected(false);
+        subbox_led_set_mqtt_connected(false);
         s_wifi_retry_count++;
         ESP_LOGW(TAG, "Wi-Fi disconnected (attempt %d/5)...", s_wifi_retry_count);
         if (s_wifi_retry_count >= 5 && !wifi_provisioning_is_active()) {
             ESP_LOGW(TAG, "⚠️ Wi-Fi unreachable after 5 attempts -> Launching SoftAP Captive Portal!");
             wifi_provisioning_start();
-        } else if (!wifi_provisioning_is_active()) {
-            vTaskDelay(pdMS_TO_TICKS(2000));
-            esp_wifi_connect();
         }
+        esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_wifi_retry_count = 0;
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         ESP_LOGI(TAG, "✅ SubBox Wi-Fi Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        subbox_led_set_wifi_connected(true);
+        if (!esp_sntp_enabled()) {
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_init();
+        }
     }
 }
 
@@ -125,7 +133,7 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
     wifi_config_t wifi_config = {};
     strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
     strncpy((char*)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_config.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -136,6 +144,9 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
 }
 
 extern "C" void app_main(void) {
+    /* 0. Initialize Status LED (LED1: GPIO 48) */
+    subbox_led_init();
+
     /* 1. Initialize NVS Storage */
     ESP_ERROR_CHECK(NVSManager::init());
 
@@ -210,7 +221,7 @@ extern "C" void app_main(void) {
     });
 
     /* 5. Start Audio Transport Receiver */
-    transport->init();
+    if (!transport->init()) subbox_led_set_error(true);
 
     /* 6. Start Multi-Core FreeRTOS Pipeline */
     auto task_mgr = std::make_shared<TaskManager>(
@@ -218,7 +229,7 @@ extern "C" void app_main(void) {
         context_mgr, registry, command_router, rule_engine,
         room_mgr, mqtt
     );
-    task_mgr->init();
+    if (!task_mgr->init()) subbox_led_set_error(true);
 
     /* 7. Start MQTT Client (Asynchronous reconnect loop) */
     mqtt->init();

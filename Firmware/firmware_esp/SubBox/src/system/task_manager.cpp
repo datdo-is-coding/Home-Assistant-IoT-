@@ -10,6 +10,7 @@
 #include "nlu/intent/intent_parser.h"
 #include "nlu/entity/entity_extractor.h"
 #include "cJSON.h"
+#include "subbox_led.h"
 
 static const char* TAG = "TASK_MGR";
 
@@ -90,6 +91,7 @@ bool TaskManager::init() {
         const cJSON* uid = cJSON_GetObjectItem(root, "hardware_uid");
         const cJSON* revision = cJSON_GetObjectItem(root, "config_version");
         if (cJSON_IsString(id) && cJSON_IsString(uid) && cJSON_IsNumber(revision) && cJSON_IsArray(channels)) {
+            subbox_led_peer_seen();
             const cJSON* ch;
             cJSON_ArrayForEach(ch, channels) {
                 const cJSON* number = cJSON_GetObjectItem(ch, "channel");
@@ -107,7 +109,7 @@ bool TaskManager::init() {
                     node.has_relay = node.has_current_sensor = node.has_microphone = true;
                 }
                 node.hardware_uid = uid->valuestring;
-                node.config_version = revision->valueint;
+                node.config_version = static_cast<uint32_t>(revision->valuedouble);
                 const cJSON* label = cJSON_GetObjectItem(ch, "label");
                 node.label = cJSON_IsString(label) ? label->valuestring : key;
                 m_registry->registerNode(node);

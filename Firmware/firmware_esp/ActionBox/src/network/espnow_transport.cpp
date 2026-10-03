@@ -223,3 +223,10 @@ void espnow_transport_scan_channels(void) {
     }
     esp_wifi_set_channel(orig_ch, WIFI_SECOND_CHAN_NONE);
 }
+
+void espnow_transport_hop_channel(void) {
+    static uint8_t s_scan_ch = 1;
+    s_scan_ch = (s_scan_ch % 13) + 1;
+    esp_wifi_set_channel(s_scan_ch, WIFI_SECOND_CHAN_NONE);
+    ESP_LOGD(TAG, "Scanning Wi-Fi channel %u for SubBox heartbeat...", s_scan_ch);
+}

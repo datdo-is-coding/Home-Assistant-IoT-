@@ -1,7 +1,7 @@
 [Unit]
 Description=AETHERIA OS Smart Home Gateway
-After=network-online.target docker.service llama-server.service
-Wants=network-online.target docker.service llama-server.service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
 
 [Service]
 Type=simple
