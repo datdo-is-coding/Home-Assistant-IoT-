@@ -131,7 +131,7 @@ typedef struct __attribute__((packed)) {
     uint16_t sample_rate;        /* 16000 */
     uint8_t  bits_per_sample;    /* 16 */
     uint8_t  channels;           /* 1 (mono) */
-    uint8_t  wake_word_index;    /* 0 = "Hi ESP", 1 = VAD energy onset */
+    uint8_t  wake_word_index;    /* 0 = "Hi ESP" (WakeNet), 2 = button push-to-talk */
     uint8_t  codec;              /* CODEC_RAW_PCM */
     uint32_t timestamp_ms;
 } ActionBoxAudioStartPacket;

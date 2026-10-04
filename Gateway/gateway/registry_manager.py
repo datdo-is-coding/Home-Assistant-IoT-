@@ -486,6 +486,7 @@ class RegistryManager:
                 conn.execute("DELETE FROM devices WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM device_configs WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM device_capabilities WHERE device_id = ?", (node_id,))
+                conn.execute("DELETE FROM registry_entries WHERE entry_id = ?", (node_id,))
                 conn.commit()
             deleted = True
         except Exception as e:
@@ -1099,9 +1100,21 @@ class RegistryManager:
                 if nr in [slug(x) for x in alist] and area_s == canon: return True
             return False
 
+        now_utc = datetime.now(timezone.utc)
         candidates = []
         for nid, node in self.data["nodes"].items():
             if node.get("status") != "online": continue
+            # Check last_seen freshness for mock nodes without physical MAC
+            last_seen_str = node.get("last_seen")
+            if last_seen_str and not node.get("mac"):
+                try:
+                    dt = datetime.fromisoformat(last_seen_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if (now_utc - dt).total_seconds() > 300:
+                        continue
+                except Exception:
+                    pass
             if not matches_room(node): continue
             for ch_id, ch in node.get("channels", {}).items():
                 if matches_channel(ch_id, ch): candidates.append((nid, ch_id))
@@ -1109,7 +1122,32 @@ class RegistryManager:
 
     def find_node_by_device(self, device_type: str, area: str = None) -> Optional[Tuple[str, str]]:
         candidates = self.find_device_candidates(device_type, area)
-        return candidates[0] if len(candidates) == 1 else None
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            # 1. Prioritize nodes with physical MAC and fresh heartbeat (< 120s)
+            now_utc = datetime.now(timezone.utc)
+            fresh_candidates = []
+            for nid, ch_id in candidates:
+                n = self.data["nodes"].get(nid, {})
+                last_seen_str = n.get("last_seen")
+                if last_seen_str and n.get("mac"):
+                    try:
+                        dt = datetime.fromisoformat(last_seen_str)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if 0 <= (now_utc - dt).total_seconds() < 120:
+                            fresh_candidates.append((nid, ch_id))
+                    except Exception:
+                        pass
+            if len(fresh_candidates) == 1:
+                return fresh_candidates[0]
+            # 2. If room was unspecified and all fresh candidates belong to the same physical node
+            if not area and len(fresh_candidates) > 1:
+                unique_nodes = {nid for nid, ch in fresh_candidates}
+                if len(unique_nodes) == 1:
+                    return fresh_candidates[0]
+        return None
 
     def resolve_fullname(self, node_id: str, channel: str) -> str:
         ch = self.data["nodes"].get(node_id, {}).get("channels", {}).get(channel, {})

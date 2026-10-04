@@ -20,7 +20,9 @@ public:
 
     bool init() override;
     bool start() override;
+    void setSourceNodeId(const char* node_id) override;
     void stop() override;
+    void cancel() override;
     bool feedAudio(const int16_t* pcm, size_t samples) override;
     bool hasPartialResult() const override;
     bool hasFinalResult() const override;
@@ -47,6 +49,7 @@ private:
     std::string m_ca, m_headers;
     std::atomic<int64_t> m_disconnected_at{0};
     std::string m_node_id;
+    std::string m_source_node_id;
     esp_websocket_client_handle_t m_client;
     std::atomic<bool> m_connected;
     std::atomic<bool> m_streaming;

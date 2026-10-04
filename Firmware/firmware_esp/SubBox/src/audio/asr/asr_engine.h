@@ -24,10 +24,15 @@ public:
      */
     virtual bool start() = 0;
 
+    // A relay must preserve the physical microphone identity for Pi room routing.
+    virtual void setSourceNodeId(const char* node_id) {}
+
     /**
      * @brief Notify engine that speech audio input has ended
      */
     virtual void stop() {}
+
+    virtual void cancel() { reset(); }
 
     /**
      * @brief Feed 16-bit PCM audio samples to the acoustic model

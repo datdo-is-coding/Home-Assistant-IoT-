@@ -6,8 +6,8 @@
  * - Local Brain & Audio Hub of one room
  * - Does NOT directly use a microphone; receives audio streams from ActionBoxes
  * - Selects best active speech signal among up to 4 ActionBoxes in room
- * - Performs VAD, Vietnamese ASR (TinyML / Dummy), NLU intent & entity extraction
- * - Executes local commands without Pi4, routes cross-room/complex tasks to Pi4
+ * - Relays microphone PCM to Pi4, which owns ASR and voice command extraction
+ * - Executes explicit gateway commands over ESP-NOW; no local voice fallback
  * - Routes audio responses / TTS back to originating ActionBox speaker
  */
 
@@ -36,8 +36,6 @@
 #include "audio/audio_buffer/audio_ring_buffer.h"
 #include "audio/vad/energy_vad.h"
 #include "audio/asr/ws_asr.h"
-#include "audio/asr/fallback_asr.h"
-#include "audio/asr/dummy_asr.h"
 #include "audio/audio_manager/audio_manager.h"
 #include "audio/audio_output/audio_output_router.h"
 #include "tts/tts_manager.h"
@@ -154,14 +152,7 @@ extern "C" void app_main(void) {
     NVSManager::loadConfig(cfg);
 
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    bool psram_ok = free_psram > (1024 * 1024); // Ensure at least 1MB PSRAM
-    if (!psram_ok) {
-        ESP_LOGE(TAG, "PSRAM check failed. Cannot load offline model.");
-        // Disable voice but keep buttons and protection
-    } else {
-        ESP_LOGI(TAG, "PSRAM check passed. Ready to load model from 'model' partition.");
-        // Load model...
-    }
+    ESP_LOGI(TAG, "Audio relay PSRAM available: %u KB; local ASR/NLU disabled", (unsigned)(free_psram / 1024));
 
     /* 2. Print Startup Banner */
     print_banner(cfg);
@@ -186,11 +177,9 @@ extern "C" void app_main(void) {
         SUBBOX_VAD_MAX_SPEECH_DURATION_MS
     );
 
-    // Primary online ASR (WebSocket to Pi 4) + Fallback offline KWS (ESP32-S3)
-    auto ws_asr = std::make_shared<WsASR>(SUBBOX_DEFAULT_WS_GATEWAY_URI, cfg.subbox_id);
-    auto offline_kws = std::make_shared<DummyASR>("Aetheria bật đèn");
-    auto asr = std::make_shared<FallbackASR>(ws_asr.get(), psram_ok ? offline_kws.get() : nullptr);
-    asr->init();
+    // Pi4 owns voice recognition and commands. A failed connection never invents a local command.
+    auto asr = std::make_shared<WsASR>(SUBBOX_DEFAULT_WS_GATEWAY_URI, cfg.subbox_id);
+    if (!asr->init()) ESP_LOGE(TAG, "Pi4 audio relay unavailable; voice control disabled until configured/restarted");
 
     auto audio_mgr = std::make_shared<AudioManager>(vad, asr);
     audio_mgr->init();

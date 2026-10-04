@@ -130,27 +130,6 @@ class AudioServer:
         except Exception:
             return False
 
-    def has_ws(self, node_id: str) -> bool:
-        """Kiểm tra xem node_id có kết nối WebSocket audio còn sống hay không."""
-        ws = self._ws_nodes.get(node_id)
-        return ws is not None and not getattr(ws, "asr_only", False) and self._is_ws_alive(ws)
-
-    async def send_relay_ws(self, node_id: str, channel: str, action: str, seq: int = 0) -> bool:
-        """Gửi lệnh điều khiển relay trực tiếp qua WebSocket text frame (0ms latency)."""
-        ws = self._ws_nodes.get(node_id)
-        if not ws or not self._is_ws_alive(ws):
-            return False
-        ch_num = 1 if channel in ("ch1", 1, "1") else 2
-        s = 1 if action in ("turn_on", "on", "1", 1) else 0
-        cmd = {"t": "rl", "ch": ch_num, "s": s, "seq": seq}
-        try:
-            await ws.send(json.dumps(cmd))
-            logger.info(f"⚡ [WS Relay] Sent to {node_id}: {cmd}")
-            return True
-        except Exception as e:
-            logger.warning(f"Failed to send WS relay to {node_id}: {e}")
-            return False
-
     async def start(self):
         """Start the WebSocket server."""
         self._running = True
@@ -219,6 +198,7 @@ class AudioServer:
                                 is_spk = cmd.get("speaker") is not False and "subbox" not in str(node_id).lower()
                                 websocket.has_speaker = is_spk
                                 websocket.asr_only = cmd.get("asr_only") is True
+                                websocket.audio_relay = cmd.get("audio_relay") is True
                                 if is_spk:
                                     self._active_speakers.add(websocket)
                                     logger.info(f"📢 ESP32 speaker registered from {client_addr} (Active speaker pool: {len(self._active_speakers)})")
@@ -281,6 +261,7 @@ class AudioServer:
                         # ── LEGACY: start / stop / ping (giữ nguyên) ──
                         if msg_type == "start":
                             websocket.asr_only = cmd.get("asr_only") is True
+                            websocket.audio_relay = cmd.get("audio_relay") is True
                             if self._playback_lock.locked():
                                 curr_node = client_node_id or "node_voice"
                                 logger.info(f"🔇 Rejecting mic stream from '{curr_node}': speaker is actively playing TTS audio")
@@ -320,7 +301,15 @@ class AudioServer:
                                 "type": "status", "state": "recording"
                             }))
 
+                        elif msg_type == "cancel":
+                            recording = False
+                            pcm_chunks.clear()
+                            self.arbiter.active_streams.pop(client_node_id, None)
+                            await websocket.send(json.dumps({"type": "status", "state": "cancelled"}))
+
                         elif msg_type == "stop":
+                            if not recording:
+                                continue
                             recording = False
                             now_ts = time.monotonic()
                             elapsed = now_ts - record_start_time
@@ -459,10 +448,8 @@ class AudioServer:
     def has_ws(self, node_id: str) -> bool:
         """Check if node has a stable WS audio connection (relay over WS available)."""
         ws = self._ws_nodes.get(node_id)
-        try:
-            return ws is not None and getattr(ws, "open", True)
-        except Exception:
-            return False
+        return (ws is not None and not getattr(ws, "asr_only", False)
+                and not getattr(ws, "audio_relay", False) and self._is_ws_alive(ws))
 
     async def send_relay_ws(self, node_id: str, channel: str, action: str, seq: int) -> bool:
         """
@@ -471,7 +458,7 @@ class AudioServer:
         TEXT frame xen kẽ vẫn giữ luồng PCM 2 chiều ổn định.
         """
         ws = self._ws_nodes.get(node_id)
-        if ws is None:
+        if not self.has_ws(node_id):
             return False
         ch = {"ch1": 1, "ch2": 2}.get(channel, 0)
         if ch not in (1, 2):
@@ -679,6 +666,10 @@ class AudioServer:
         Pacing is calibrated: 8 pre-buffer chunks (~512ms) then 70% real-time pacing (~45ms)
         so ESP32 512KB PSRAM DMA buffer never underflows.
         """
+        targets = [ws for ws in targets if getattr(ws, "has_speaker", True)
+                   and not getattr(ws, "audio_relay", False) and self._is_ws_alive(ws)]
+        if not targets:
+            return
         async with self._playback_lock:
             valid_targets = [ws for ws in targets if self._is_ws_alive(ws)]
             if not valid_targets:
@@ -778,6 +769,8 @@ class AudioServer:
         Fallback: Stream MP3 audio data back to ESP32.
         ESP32 would need an MP3 decoder for this path.
         """
+        if not getattr(websocket, "has_speaker", True) or getattr(websocket, "audio_relay", False):
+            return
         total_len = len(audio_bytes)
         chunk_size = config.WS_SEND_CHUNK_SIZE
 

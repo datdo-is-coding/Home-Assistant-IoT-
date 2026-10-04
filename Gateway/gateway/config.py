@@ -163,7 +163,7 @@ AUTH_DB = os.environ.get("AUTH_DB", "/home/pi4/smarthome/auth.db")
 
 
 # ─── WebSocket Audio Server ────────────────────────
-WS_AUDIO_HOST = os.environ.get("WS_AUDIO_HOST", "127.0.0.1")
+WS_AUDIO_HOST = os.environ.get("WS_AUDIO_HOST", "0.0.0.0")
 WS_AUDIO_PORT = 8765
 WS_AUDIO_TLS_CERT = os.environ.get("WS_AUDIO_TLS_CERT", "")
 WS_AUDIO_TLS_KEY = os.environ.get("WS_AUDIO_TLS_KEY", "")

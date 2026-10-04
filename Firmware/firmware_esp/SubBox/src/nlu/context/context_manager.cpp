@@ -87,15 +87,21 @@ CommandResolution ContextManager::resolve(
             }
             ESP_LOGI(TAG, "Resolved pronoun reference -> Device: %s, Room: %s",
                      deviceToString(res.device), roomToString(res.target_room));
-        } else if (intent == IntentType::INCREASE || intent == IntentType::DECREASE || intent == IntentType::STOP) {
-            // "tăng lên", "giảm đi", "dừng lại" without naming device inherits last device
+        } else if (intent == IntentType::INCREASE || intent == IntentType::DECREASE || intent == IntentType::STOP ||
+                   intent == IntentType::TURN_ON || intent == IntentType::TURN_OFF || intent == IntentType::TOGGLE) {
+            // Bare action commands ("tắt", "bật", "tăng lên", "giảm đi", "dừng lại") inherit last device
             if (usable_history && m_last_device != DeviceType::NONE) {
                 res.device = m_last_device;
                 res.resolved_via_context = true;
+                if (entities.room == RoomType::UNSPECIFIED && m_last_target_room != RoomType::UNSPECIFIED) {
+                    res.target_room = m_last_target_room;
+                }
+                ESP_LOGI(TAG, "Resolved bare action (%s) via context -> Device: %s, Room: %s",
+                         intentToString(intent), deviceToString(res.device), roomToString(res.target_room));
             } else {
                 res.device = DeviceType::NONE;
                 res.is_valid = false;
-                res.error_reason = "Không rõ thiết bị nào cần điều chỉnh";
+                res.error_reason = "Không rõ thiết bị nào cần điều khiển";
             }
         } else if (intent == IntentType::COMPLEX) {
             // Complex commands are valid for Pi4 forwarding even without local device resolution

@@ -124,16 +124,13 @@ bool TaskManager::init() {
         if (m_mqtt) m_mqtt->publishEvent("actionbox", json);
         cJSON_Delete(root);
     });
-    m_audio_mgr->registerUtteranceCallback([this](const std::string& node_id, const std::string& text) {
-        this->queueUtterance(node_id, text);
-    });
+    // Voice PCM is processed and dispatched by Pi4; never route transcripts locally.
 
     // Spawn tasks across Dual-Core ESP32-S3:
     // Core 1 (DSP / AI / Audio): audio_manager, nlu, audio_tx
     // Core 0 (Network / System): command, device_manager, telemetry, system
 
     xTaskCreatePinnedToCore(audioManagerTask, "audio_mgr_task", TASK_STACK_AUDIO_MANAGER, this, TASK_PRIO_AUDIO_MANAGER, &m_h_audio_mgr, 1);
-    xTaskCreatePinnedToCore(nluTask,          "nlu_task",       TASK_STACK_NLU,           this, TASK_PRIO_NLU,           &m_h_nlu,       1);
     xTaskCreatePinnedToCore(audioTxTask,      "audio_tx_task",  TASK_STACK_AUDIO_TX,      this, TASK_PRIO_AUDIO_TX,      &m_h_tx,        1);
 
     xTaskCreatePinnedToCore(commandTask,      "cmd_task",       TASK_STACK_COMMAND,       this, TASK_PRIO_COMMAND,       &m_h_cmd,       0);

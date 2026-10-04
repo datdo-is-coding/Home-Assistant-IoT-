@@ -469,10 +469,11 @@ class IntentContextManager:
 
         text = raw_user_text.lower()
         has_pronoun = bool(re.search(r"\b(nó|cái này|cái kia|cái đó|thiết bị đó|ở đó)\b", text))
+        is_bare_action = not raw_intent.target.device_type and raw_intent.intent in ("turn_on", "turn_off", "toggle") and len(text.strip().split()) <= 3
 
-        # Trường hợp 1: Đại từ thay thế ("bật nó lên", "tắt nó đi")
-        if has_pronoun:
-            if not raw_intent.target.device_type and self.last_device_type:
+        # Trường hợp 1: Đại từ thay thế hoặc lệnh ngắn ("bật nó lên", "tắt nó đi", "tắt", "bật")
+        if (has_pronoun or is_bare_action) and self.last_device_type:
+            if not raw_intent.target.device_type:
                 raw_intent.target.device_type = self.last_device_type
             if not raw_intent.target.room and self.last_room:
                 raw_intent.target.room = self.last_room
