@@ -38,6 +38,7 @@
 #include "audio/asr/ws_asr.h"
 #include "audio/audio_manager/audio_manager.h"
 #include "audio/audio_output/audio_output_router.h"
+#include "audio/audio_output/sound_player.h"
 #include "tts/tts_manager.h"
 #include "nlu/context/context_manager.h"
 #include "actionbox/registry/actionbox_registry.h"
@@ -167,6 +168,11 @@ extern "C" void app_main(void) {
     }
 
     /* 4. Instantiate Core Subsystems */
+    /* Initialize SubBox Acoustic Sound Player (MAX98357A I2S Speaker) */
+    if (SoundPlayer::instance().init() == ESP_OK) {
+        SoundPlayer::instance().play(SoundType::BOOTUP);
+    }
+
     auto room_mgr = std::make_shared<RoomManager>(cfg.subbox_id, cfg.room_type);
     room_mgr->setRoomName(cfg.room_name);
 

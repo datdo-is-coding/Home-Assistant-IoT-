@@ -10,6 +10,7 @@
 #include <cstdio>
 #include "storage/security_config.h"
 #include "esp_timer.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "WS_ASR";
 
@@ -308,21 +309,49 @@ void WsASR::handleTextMessage(const char* data, int len) {
             cJSON* text = cJSON_GetObjectItem(root, "text");
             cJSON* conf = cJSON_GetObjectItem(root, "confidence");
             float confidence = (conf && cJSON_IsNumber(conf)) ? (float)conf->valuedouble : 1.0f;
+            const bool accepted = cJSON_IsTrue(cJSON_GetObjectItem(root, "accepted"));
 
             if (cJSON_IsString(text) && text->valuestring) {
                 std::lock_guard<std::mutex> lock(m_mutex);
-                // Fail closed if the Gateway does not explicitly accept recognition.
-                const bool accepted = cJSON_IsTrue(cJSON_GetObjectItem(root, "accepted"));
                 m_final_result = accepted ? text->valuestring : "";
                 m_confidence = confidence;
                 m_has_final = true;
 
-                ESP_LOGI(TAG, "📢 [REAL VIETNAMESE ASR] Decoded: \"%s\" (Confidence: %.2f)",
-                         m_final_result.c_str(), m_confidence);
+                ESP_LOGI(TAG, "📢 [REAL VIETNAMESE ASR] Decoded: \"%s\" (Confidence: %.2f, Accepted: %d)",
+                         m_final_result.c_str(), m_confidence, accepted);
 
                 if (m_result_sem) {
                     xSemaphoreGive(m_result_sem);
                 }
+            }
+
+            if (!accepted) {
+                ESP_LOGW(TAG, "ASR transcript rejected -> Triggering acoustic error feedback");
+                SoundPlayer::instance().play(SoundType::ERROR);
+            }
+        } else if (strcmp(type->valuestring, "command_result") == 0) {
+            cJSON* verify = cJSON_GetObjectItem(root, "verify");
+            cJSON* reply = cJSON_GetObjectItem(root, "voice_reply");
+            const char* v_str = cJSON_IsString(verify) ? verify->valuestring : "";
+            const char* r_str = cJSON_IsString(reply) ? reply->valuestring : "";
+
+            ESP_LOGI(TAG, "🎯 [COMMAND_RESULT] Verify: \"%s\" | Reply: \"%s\"", v_str, r_str);
+
+            if (strcmp(v_str, "success") == 0 || strcmp(v_str, "alarm_played") == 0 || strcmp(v_str, "conversational") == 0) {
+                ESP_LOGI(TAG, "Acoustic feedback: Command SUCCESS -> Melodic confirmation chime");
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            } else {
+                ESP_LOGW(TAG, "Acoustic feedback: Command FAILED (%s) -> Negative error cue", v_str);
+                SoundPlayer::instance().play(SoundType::ERROR);
+            }
+
+            CommandResultCallback cb_copy = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                cb_copy = m_cmd_result_cb;
+            }
+            if (cb_copy) {
+                cb_copy(v_str, r_str);
             }
         } else if (strcmp(type->valuestring, "status") == 0) {
             cJSON* state = cJSON_GetObjectItem(root, "state");

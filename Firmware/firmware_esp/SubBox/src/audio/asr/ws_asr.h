@@ -9,12 +9,15 @@
 #include <string>
 #include <mutex>
 #include <atomic>
+#include <functional>
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 class WsASR : public ASREngine {
 public:
+    using CommandResultCallback = std::function<void(const std::string& verify, const std::string& voice_reply)>;
+
     WsASR(const std::string& ws_uri, const std::string& node_id);
     ~WsASR() override;
 
@@ -41,6 +44,11 @@ public:
     float getLastConfidence() const { std::lock_guard<std::mutex> lock(m_mutex); return m_confidence; }
     int64_t disconnectedAt() const { return m_disconnected_at.load(); }
 
+    void registerCommandResultCallback(CommandResultCallback cb) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_cmd_result_cb = cb;
+    }
+
 private:
     static void wsEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
     void handleTextMessage(const char* data, int len);
@@ -55,6 +63,7 @@ private:
     std::atomic<bool> m_streaming;
 
     mutable std::mutex m_mutex;
+    CommandResultCallback m_cmd_result_cb;
     std::string m_partial_result;
     std::string m_final_result;
     float m_confidence;

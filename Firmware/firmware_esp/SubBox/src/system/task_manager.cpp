@@ -11,6 +11,7 @@
 #include "nlu/entity/entity_extractor.h"
 #include "cJSON.h"
 #include "subbox_led.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "TASK_MGR";
 
@@ -75,9 +76,18 @@ bool TaskManager::init() {
         m_mqtt->registerVoiceResponseCallback([this](const std::string&, const std::string& payload, const uint8_t*, size_t) {
             cJSON* root = cJSON_Parse(payload.c_str());
             if (!root) return;
-            const cJSON* id = cJSON_GetObjectItem(root, "origin_node");
-            const cJSON* text = cJSON_GetObjectItem(root, "voice_reply");
-            if (cJSON_IsString(id) && cJSON_IsString(text)) queueResponse(id->valuestring, text->valuestring);
+            const cJSON* verify = cJSON_GetObjectItem(root, "verify");
+            if (cJSON_IsString(verify)) {
+                if (strcmp(verify->valuestring, "success") == 0 ||
+                    strcmp(verify->valuestring, "alarm_played") == 0 ||
+                    strcmp(verify->valuestring, "conversational") == 0) {
+                    SoundPlayer::instance().play(SoundType::SUCCESS);
+                } else {
+                    SoundPlayer::instance().play(SoundType::ERROR);
+                }
+            } else {
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            }
             cJSON_Delete(root);
         });
     }
@@ -248,11 +258,11 @@ void TaskManager::commandTask(void* pvParameters) {
                     exec.response_text = "Không kết nối được máy chủ xử lý.";
             }
 
-            // Queue response audio / chime to ActionBox speaker only if speaker hardware exists
-            ActionBoxNode target_node;
-            bool has_spk = (self->m_registry->findNodeById(res.origin_node_id, target_node) && target_node.has_speaker);
-            if (!exec.response_text.empty() && has_spk) {
-                self->queueResponse(res.origin_node_id, exec.response_text);
+            // Acoustic feedback on SubBox
+            if (exec.success) {
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            } else if (!exec.forwarded_to_pi4 && !exec.success) {
+                SoundPlayer::instance().play(SoundType::ERROR);
             }
         }
     }

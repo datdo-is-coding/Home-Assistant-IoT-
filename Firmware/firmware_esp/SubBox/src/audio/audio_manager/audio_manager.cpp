@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "AUDIO_MGR";
 
@@ -159,6 +160,7 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         m_session_failed = false;
         if (m_vad) m_vad->reset();
         ESP_LOGI(TAG, "🎙️ [STREAM_START] Explicit session lock onto ActionBox: %s (ASR started)", node_id.c_str());
+        SoundPlayer::instance().play(SoundType::WAKE);
         return;
     }
 
@@ -203,6 +205,7 @@ void AudioManager::evaluateSourceSelection() {
 
         ESP_LOGI(TAG, "🎙️ Source Arbitrator selected best active ActionBox: %s (RMS=%.1f, Score=%.0f)",
                  best_candidate.c_str(), m_channels[best_candidate].latest_rms, best_score);
+        SoundPlayer::instance().play(SoundType::WAKE);
     }
 }
 
