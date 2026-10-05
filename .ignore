@@ -1,0 +1,6 @@
+# Keep ordinary code searches focused; rg --no-ignore includes archived/vendor code.
+archive/
+graphify-out/
+.cleanup-work/
+**/managed_components/
+**/components/espressif__*/

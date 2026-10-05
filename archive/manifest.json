@@ -1,0 +1,65 @@
+[
+  {
+    "source": "App",
+    "destination": "archive/App",
+    "files": 7452,
+    "sha256_inventory": "76fa3c321c8166593a74967c3b6192a64ad6ffadef7b47e59ee4b29475ea7018",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Firmware/firmware_esp/Esp32S3_Master",
+    "destination": "archive/Firmware/firmware_esp/Esp32S3_Master",
+    "files": 960,
+    "sha256_inventory": "4ed9ab6aff0c6743113687b3351b6f031a081877c32a7a596387000b54d06ca8",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Firmware/firmware_esp/shared",
+    "destination": "archive/Firmware/firmware_esp/shared",
+    "files": 14,
+    "sha256_inventory": "212153a701ed70a4aaf14857043a965e5ef68a4843fe0444604a6f161c1fabaf",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Firmware/firmware_esp/components",
+    "destination": "archive/Firmware/firmware_esp/components",
+    "files": 8,
+    "sha256_inventory": "140031554810777c65d21618f628850c0bb79f9f54c3cc53ecf7c7f211c722f1",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Firmware/firmware_esp/ActionBox/_legacy_code",
+    "destination": "archive/Firmware/firmware_esp/ActionBox/_legacy_code",
+    "files": 11,
+    "sha256_inventory": "b1dc181ddc0c3e255be86f94d9d060996ef28623518a0b45f7b163c5fcfcccea",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Firmware/firmware_esp/SubBox/_legacy_code",
+    "destination": "archive/Firmware/firmware_esp/SubBox/_legacy_code",
+    "files": 14,
+    "sha256_inventory": "a5f45b100b11eacf81eeb0d0e889df840c5f2ffdd33e4007accbc8a3c5654ec6",
+    "verified_unchanged": true
+  },
+  {
+    "source": "Hardware",
+    "destination": "Hardware",
+    "files": 3692,
+    "sha256_inventory": "84c2888e7921a6073cf2d4cb266c504e1b5abb6f91ed5315946cce1990a5875f",
+    "verified_unchanged": true
+  },
+  {
+    "source": "sound",
+    "destination": "sound",
+    "files": 10,
+    "sha256_inventory": "9f8c6014421ee27990f7ec61d5a583428f17c7436393fff41f036f73079fe87f",
+    "verified_unchanged": true
+  },
+  {
+    "source": "apk",
+    "destination": "apk",
+    "files": 2,
+    "sha256_inventory": "c7c090a07f71edc370611669b83c0e0a5fbf3b1318e179017a38a172984eab38",
+    "verified_unchanged": true
+  }
+]

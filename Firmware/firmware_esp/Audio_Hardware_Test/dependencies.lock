@@ -1,0 +1,17 @@
+dependencies:
+  espressif/esp-dsp:
+    dependencies: []
+    source:
+      path: ../Esp32S3_Master/managed_components/espressif__esp-dsp
+      type: local
+    version: 1.4.12
+  idf:
+    source:
+      type: idf
+    version: 6.0.2
+direct_dependencies:
+- espressif/esp-dsp
+- idf
+manifest_hash: 46e8b5c3dd35b7010ca4b55ce6194f796f307f16da0eebf64f7d65a7792bbb5b
+target: esp32s3
+version: 3.0.0

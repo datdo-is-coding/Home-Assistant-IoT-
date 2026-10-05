@@ -1,0 +1,27 @@
+dependencies:
+  espressif/esp-dsp:
+    component_hash: 3e7bbd487f1357a1d4944d0c85966d049501ea281b8a4c7f93f7cfedd5b7f23d
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.4.12
+  espressif/esp-sr:
+    component_hash: 9b41fd5ae5960c393bfd3559cd6e5fa2a95c0bf833915cebafe57fb8c4e4c396
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.9.5
+  espressif/esp_websocket_client:
+    component_hash: dc00233af846f3a744ada283a300e0d586040aadc3ee67361645ecdce4523672
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.8.0
+  idf:
+    component_hash: null
+    source:
+      type: idf
+    version: 5.3.1
+manifest_hash: b8046a9d66e71af6b6f84b9e0aa9ccb45d9c3fe1493f6c69c9adcbd384ef2881
+target: esp32s3
+version: 1.0.0

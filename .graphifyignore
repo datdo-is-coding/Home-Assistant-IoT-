@@ -1,0 +1,9 @@
+# Keep the architecture graph scoped to maintained code and its documentation.
+archive/
+.cleanup-work/
+.agents/
+Hardware/
+sound/
+apk/
+**/managed_components/
+**/components/espressif__*/

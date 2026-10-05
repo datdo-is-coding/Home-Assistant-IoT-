@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aetheria IoT Mesh Visualizer — ESP32-S3 T1 & T2</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #070a13;
+            --bg-card: rgba(14, 22, 39, 0.7);
+            --bg-card-hover: rgba(20, 32, 57, 0.85);
+            --border-glow: rgba(0, 240, 255, 0.2);
+            --border-glow-t2: rgba(245, 158, 11, 0.2);
+            --neon-cyan: #00f0ff;
+            --neon-amber: #f59e0b;
+            --neon-purple: #a855f7;
+            --neon-green: #10b981;
+            --neon-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 15% 25%, rgba(0, 240, 255, 0.07) 0%, transparent 40%),
+                radial-gradient(circle at 85% 75%, rgba(245, 158, 11, 0.06) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.04) 0%, transparent 60%);
+        }
+
+        /* Top Navigation */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: rgba(10, 15, 29, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+            color: #000;
+            font-weight: 800;
+            font-size: 0.9rem;
+            padding: 4px 10px;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .brand-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(to right, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand-sub {
+            font-size: 0.75rem;
+            color: var(--neon-cyan);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+
+        .header-status {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .dot-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: var(--neon-green);
+            box-shadow: 0 0 10px var(--neon-green);
+            animation: pulse 1.8s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        /* Main Content Container */
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* Mesh Topology View */
+        .mesh-viewport {
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 2rem;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+        }
+
+        .viewport-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .viewport-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mesh-grid {
+            display: grid;
+            grid-template-columns: 1fr 180px 1fr;
+            gap: 1.5rem;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Node Cards */
+        .node-card {
+            background: rgba(10, 18, 34, 0.9);
+            border-radius: 18px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .node-card.t1-node {
+            border-color: rgba(0, 240, 255, 0.3);
+        }
+
+        .node-card.t1-node:hover {
+            border-color: var(--neon-cyan);
+            box-shadow: 0 0 35px rgba(0, 240, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .node-card.t2-node {
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+
+        .node-card.t2-node:hover {
+            border-color: var(--neon-amber);
+            box-shadow: 0 0 35px rgba(245, 158, 11, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .node-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.2rem;
+        }
+
+        .node-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }
+
+        .badge-t1 {
+            background: rgba(0, 240, 255, 0.15);
+            color: var(--neon-cyan);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+        }
+
+        .badge-t2 {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--neon-amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+        }
+
+        .node-name {
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        .node-mac {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .specs-tag {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.04);
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-top: 6px;
+            display: inline-block;
+        }
+
+        /* Modules Section inside Node */
+        .modules-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 1.2rem;
+        }
+
+        .module-item {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .module-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        /* Energy VU Meter */
+        .energy-meter-container {
+            height: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .energy-meter-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--neon-amber));
+            border-radius: 4px;
+            transition: width 0.1s ease-out;
+        }
+
+        .energy-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--neon-cyan);
+        }
+
+        /* Voice Streaming Banner */
+        .stream-banner {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(90deg, rgba(168, 85, 247, 0.2), rgba(0, 240, 255, 0.2));
+            border: 1px solid var(--neon-purple);
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-top: 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #fff;
+            animation: pulse 1s infinite;
+        }
+
+        .stream-banner.active {
+            display: flex;
+        }
+
+        /* Relays Grid */
+        .relay-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .relay-box {
+            background: rgba(255, 255, 255, 0.04);
+            border-radius: 10px;
+            padding: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .relay-box.on {
+            background: rgba(16, 185, 129, 0.12);
+            border-color: var(--neon-green);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+        }
+
+        .relay-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .relay-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .relay-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #334155;
+            transition: all 0.2s ease;
+        }
+
+        .relay-box.on .relay-indicator {
+            background: var(--neon-green);
+            box-shadow: 0 0 10px var(--neon-green);
+        }
+
+        /* Interactive Buttons */
+        .btn-toggle {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            width: 100%;
+        }
+
+        .btn-toggle:hover {
+            background: rgba(255, 255, 255, 0.18);
+            transform: scale(1.02);
+        }
+
+        .btn-toggle:active {
+            transform: scale(0.98);
+        }
+
+        /* Mesh Highway (Middle Connection) */
+        .mesh-highway {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            position: relative;
+        }
+
+        .highway-badge {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            color: var(--neon-cyan);
+            letter-spacing: 0.5px;
+            text-align: center;
+        }
+
+        .highway-line-wrapper {
+            width: 100%;
+            height: 60px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .highway-line {
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, var(--neon-cyan), var(--neon-purple), var(--neon-amber));
+            position: relative;
+            border-radius: 2px;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+        }
+
+        .packet-particle {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            top: -4.5px;
+            background: #fff;
+            box-shadow: 0 0 12px #fff;
+            opacity: 0;
+        }
+
+        .particle-t1-to-t2 {
+            animation: moveT1ToT2 1.2s infinite ease-in-out;
+            background: var(--neon-cyan);
+            box-shadow: 0 0 15px var(--neon-cyan);
+        }
+
+        .particle-audio {
+            animation: moveT1ToT2 0.4s infinite linear;
+            background: var(--neon-purple);
+            box-shadow: 0 0 18px var(--neon-purple);
+        }
+
+        .particle-t2-to-t1 {
+            animation: moveT2ToT1 1.2s infinite ease-in-out;
+            background: var(--neon-amber);
+            box-shadow: 0 0 15px var(--neon-amber);
+        }
+
+        @keyframes moveT1ToT2 {
+            0% { left: 0%; opacity: 0; transform: scale(0.5); }
+            20% { opacity: 1; transform: scale(1.2); }
+            80% { opacity: 1; transform: scale(1.2); }
+            100% { left: 100%; opacity: 0; transform: scale(0.5); }
+        }
+
+        @keyframes moveT2ToT1 {
+            0% { left: 100%; opacity: 0; transform: scale(0.5); }
+            20% { opacity: 1; transform: scale(1.2); }
+            80% { opacity: 1; transform: scale(1.2); }
+            100% { left: 0%; opacity: 0; transform: scale(0.5); }
+        }
+
+        .recent-packet-pill {
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 4px 10px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            max-width: 170px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            transition: all 0.3s ease;
+        }
+
+        /* T2 Module Controls */
+        .t2-controls-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .action-card-btn {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 12px;
+            color: #fff;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .action-card-btn:hover {
+            background: rgba(245, 158, 11, 0.15);
+            border-color: var(--neon-amber);
+            transform: translateY(-2px);
+        }
+
+        .action-card-btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+
+        .btn-desc {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Dual Console Logs */
+        .console-section {
+            background: var(--bg-card);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .console-tabs {
+            display: flex;
+            gap: 10px;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            font-weight: 600;
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tab-btn.active {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .console-window {
+            height: 260px;
+            background: #04060a;
+            border-radius: 12px;
+            padding: 1rem;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            line-height: 1.5;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 10px;
+            word-break: break-all;
+        }
+
+        .log-t1 {
+            color: var(--neon-cyan);
+        }
+
+        .log-t2 {
+            color: var(--neon-amber);
+        }
+
+        .log-time {
+            color: var(--text-dim);
+            min-width: 65px;
+        }
+
+        /* Toast feedback */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: rgba(16, 24, 40, 0.95);
+            border: 1px solid var(--neon-cyan);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(12px);
+            display: none;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            z-index: 1000;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="brand-container">
+            <span class="logo-badge">AETHERIA</span>
+            <div>
+                <h1 class="brand-title">3-Tier IoT Mesh Visualizer</h1>
+                <div class="brand-sub">Native ESP-IDF v6.0.2 Protocol Highway</div>
+            </div>
+        </div>
+        <div class="header-status">
+            <div class="status-pill">
+                <span class="dot-pulse" id="ws-indicator"></span>
+                <span id="ws-label">WebSocket Live</span>
+            </div>
+            <div class="status-pill">
+                <span>Mesh Channel:</span>
+                <strong style="color: var(--neon-cyan);">11 (2.412 GHz)</strong>
+            </div>
+            <div class="status-pill">
+                <span>Zone:</span>
+                <strong style="color: var(--neon-amber);" id="zone-name">living_room</strong>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container">
+
+        <!-- MESH TOPOLOGY & REALTIME CARDS -->
+        <section class="mesh-viewport">
+            <div class="viewport-header">
+                <div class="viewport-title">
+                    <span>🌐</span> Realtime Mesh Topology &amp; P2P Radio Highway
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-dim);">
+                    Protocol: <strong>ESP-NOW 250kbps + Energy VAD + RMT IR</strong>
+                </div>
+            </div>
+
+            <div class="mesh-grid">
+
+                <!-- T1 ACTUATOR NODE -->
+                <div class="node-card t1-node">
+                    <div class="node-top">
+                        <div>
+                            <span class="node-badge badge-t1">NODE T1 (COM8)</span>
+                            <div class="node-name">Actuator &amp; Voice Edge</div>
+                            <div class="node-mac" id="t1-mac">28:84:85:35:0A:24</div>
+                        </div>
+                        <span class="specs-tag">ESP32-S3 (240MHz)</span>
+                    </div>
+
+                    <!-- Modules -->
+                    <div class="modules-list">
+                        <!-- Mic VAD Module -->
+                        <div class="module-item">
+                            <div class="module-item-header">
+                                <span>🎙️ Micro INMP441 + Energy VAD</span>
+                                <span class="energy-val" id="energy-text">0</span>
+                            </div>
+                            <div class="energy-meter-container">
+                                <div class="energy-meter-bar" id="energy-bar"></div>
+                            </div>
+                            <!-- Stream banner -->
+                            <div class="stream-banner" id="stream-banner">
+                                <span>⚡</span> Streaming PCM Audio via ESP-NOW...
+                            </div>
+                        </div>
+
+                        <!-- 2-Channel Relays -->
+                        <div class="module-item">
+                            <div class="module-item-header">
+                                <span>⚡ 2-Channel Relays</span>
+                                <span style="font-size: 0.75rem; color: var(--text-dim);">Direct GPIO Control</span>
+                            </div>
+                            <div class="relay-grid">
+                                <!-- Relay 1 -->
+                                <div class="relay-box" id="r1-box">
+                                    <div class="relay-header">
+                                        <span class="relay-title">Relay 1 (Light)</span>
+                                        <span class="relay-indicator"></span>
+                                    </div>
+                                    <button class="btn-toggle" onclick="sendCmd('r1_toggle')">Toggle R1</button>
+                                </div>
+                                <!-- Relay 2 -->
+                                <div class="relay-box" id="r2-box">
+                                    <div class="relay-header">
+                                        <span class="relay-title">Relay 2 (Fan)</span>
+                                        <span class="relay-indicator"></span>
+                                    </div>
+                                    <button class="btn-toggle" onclick="sendCmd('r2_toggle')">Toggle R2</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- MESH HIGHWAY LINK -->
+                <div class="mesh-highway">
+                    <div class="highway-badge">ESP-NOW P2P</div>
+                    <div class="highway-line-wrapper">
+                        <div class="highway-line">
+                            <div class="packet-particle particle-t1-to-t2" id="p-t1"></div>
+                            <div class="packet-particle particle-audio" id="p-audio" style="display: none;"></div>
+                            <div class="packet-particle particle-t2-to-t1" id="p-t2"></div>
+                        </div>
+                    </div>
+                    <div class="recent-packet-pill" id="recent-packet">
+                        Ready (Kênh 11)
+                    </div>
+                </div>
+
+                <!-- T2 ZONE CONTROLLER -->
+                <div class="node-card t2-node">
+                    <div class="node-top">
+                        <div>
+                            <span class="node-badge badge-t2">NODE T2 (COM9)</span>
+                            <div class="node-name">Zone Mesh Master</div>
+                            <div class="node-mac" id="t2-mac">28:84:85:35:0B:54</div>
+                        </div>
+                        <span class="specs-tag">ESP32-S3 (Coordinator)</span>
+                    </div>
+
+                    <!-- Modules & Quick Actions -->
+                    <div class="modules-list">
+                        <!-- Audio Speaker DAC -->
+                        <div class="module-item">
+                            <div class="module-item-header">
+                                <span>🔊 Loa I2S MAX98357A</span>
+                                <span style="font-size: 0.75rem; color: var(--neon-amber);">16kHz Audio Feedback</span>
+                            </div>
+                            <button class="action-card-btn" style="width: 100%;" onclick="sendCmd('chime')">
+                                <span class="btn-label">✨ Phát Chuông Ding! (Chime)</span>
+                                <span class="btn-desc">Phát âm thanh chuông phản hồi trên loa T2</span>
+                            </button>
+                        </div>
+
+                        <!-- IR Blaster Module -->
+                        <div class="module-item">
+                            <div class="module-item-header">
+                                <span>📡 IR Blaster 38kHz (GPIO 21)</span>
+                                <span style="font-size: 0.75rem; color: var(--text-dim);">RMT Peripheral</span>
+                            </div>
+                            <div class="t2-controls-grid">
+                                <button class="action-card-btn" onclick="sendCmd('ir_daikin')">
+                                    <span class="btn-label">❄️ Daikin AC</span>
+                                    <span class="btn-desc">Bật 24°C, Cool</span>
+                                </button>
+                                <button class="action-card-btn" onclick="sendCmd('ir_nec')">
+                                    <span class="btn-label">📺 NEC TV Code</span>
+                                    <span class="btn-desc">0x1234 : 0x01</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- LIVE DUAL LOG CONSOLE -->
+        <section class="console-section">
+            <div class="console-header">
+                <div style="font-size: 1rem; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                    <span>📜</span> Live Serial Telemetry Terminal
+                </div>
+                <div class="console-tabs">
+                    <button class="tab-btn active" onclick="filterLogs('ALL')">All Logs</button>
+                    <button class="tab-btn" onclick="filterLogs('T1')">T1 (COM8)</button>
+                    <button class="tab-btn" onclick="filterLogs('T2')">T2 (COM9)</button>
+                    <button class="tab-btn" onclick="clearLogs()" style="color: var(--neon-red);">Clear</button>
+                </div>
+            </div>
+            <div class="console-window" id="console-window"></div>
+        </section>
+
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast">
+        <span id="toast-icon">⚡</span>
+        <span id="toast-msg">Action Triggered</span>
+    </div>
+
+    <script>
+        const wsIndicator = document.getElementById('ws-indicator');
+        const wsLabel = document.getElementById('ws-label');
+        const energyBar = document.getElementById('energy-bar');
+        const energyText = document.getElementById('energy-text');
+        const streamBanner = document.getElementById('stream-banner');
+        const r1Box = document.getElementById('r1-box');
+        const r2Box = document.getElementById('r2-box');
+        const recentPacket = document.getElementById('recent-packet');
+        const pAudio = document.getElementById('p-audio');
+        const consoleWindow = document.getElementById('console-window');
+        const toast = document.getElementById('toast');
+
+        let currentFilter = 'ALL';
+        let ws;
+
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.hostname}:8766`);
+
+            ws.onopen = () => {
+                wsIndicator.style.backgroundColor = 'var(--neon-green)';
+                wsIndicator.style.boxShadow = '0 0 10px var(--neon-green)';
+                wsLabel.innerText = 'WebSocket Live';
+                showToast('🚀 Kết nối trực tiếp với ESP32 Mesh Gateway!', '✅');
+            };
+
+            ws.onclose = () => {
+                wsIndicator.style.backgroundColor = 'var(--neon-red)';
+                wsIndicator.style.boxShadow = '0 0 10px var(--neon-red)';
+                wsLabel.innerText = 'Reconnecting...';
+                setTimeout(connectWebSocket, 2000);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+        }
+
+        function handleMessage(data) {
+            if (data.type === 'init') {
+                updateRelays(data.state.r1_state, data.state.r2_state);
+            } else if (data.type === 'energy') {
+                // Scale energy value (0 to 1,000,000+)
+                const val = data.value;
+                energyText.innerText = val.toLocaleString();
+                const pct = Math.min(100, Math.round((val / 600000) * 100));
+                energyBar.style.width = pct + '%';
+            } else if (data.type === 'stream_state') {
+                if (data.active) {
+                    streamBanner.classList.add('active');
+                    pAudio.style.display = 'block';
+                } else {
+                    streamBanner.classList.remove('active');
+                    pAudio.style.display = 'none';
+                }
+            } else if (data.type === 'relay_state') {
+                updateRelays(data.r1, data.r2);
+            } else if (data.type === 'packet') {
+                recentPacket.innerText = data.desc;
+                recentPacket.style.borderColor = (data.from === 'T1') ? 'var(--neon-cyan)' : 'var(--neon-amber)';
+            } else if (data.type === 'chime') {
+                showToast('Loa T2 phát chuông Ding! (LISTEN_SUCCESS)', '🔊');
+            } else if (data.type === 'ir') {
+                showToast(`Mắt IR phát mã: ${data.protocol}`, '📡');
+            } else if (data.type === 'log') {
+                appendLog(data.source, data.text);
+            }
+        }
+
+        function updateRelays(r1, r2) {
+            if (r1) r1Box.classList.add('on'); else r1Box.classList.remove('on');
+            if (r2) r2Box.classList.add('on'); else r2Box.classList.remove('on');
+        }
+
+        function sendCmd(action) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: action }));
+                showToast(`Đã gửi lệnh: ${action}`, '⚡');
+            } else {
+                showToast('Chưa kết nối WebSocket', '⚠️');
+            }
+        }
+
+        function appendLog(source, text) {
+            if (currentFilter !== 'ALL' && currentFilter !== source) return;
+
+            const row = document.createElement('div');
+            row.className = `log-entry log-${source.toLowerCase()}`;
+            row.dataset.source = source;
+
+            const timeStr = new Date().toTimeString().split(' ')[0];
+            row.innerHTML = `<span class="log-time">[${timeStr}] [${source}]</span> <span>${escapeHtml(text)}</span>`;
+
+            consoleWindow.appendChild(row);
+
+            // Limit logs to last 200 entries
+            if (consoleWindow.children.length > 200) {
+                consoleWindow.removeChild(consoleWindow.children[0]);
+            }
+            consoleWindow.scrollTop = consoleWindow.scrollHeight;
+        }
+
+        function filterLogs(source) {
+            currentFilter = source;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            Array.from(consoleWindow.children).forEach(el => {
+                if (source === 'ALL' || el.dataset.source === source) {
+                    el.style.display = 'flex';
+                } else {
+                    el.style.display = 'none';
+                }
+            });
+        }
+
+        function clearLogs() {
+            consoleWindow.innerHTML = '';
+        }
+
+        function showToast(msg, icon = '⚡') {
+            document.getElementById('toast-icon').innerText = icon;
+            document.getElementById('toast-msg').innerText = msg;
+            toast.style.display = 'flex';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        // Start WebSocket
+        connectWebSocket();
+    </script>
+</body>
+</html>

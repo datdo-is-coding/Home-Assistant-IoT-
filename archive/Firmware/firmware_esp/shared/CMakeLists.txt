@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS
+        "relay_driver.c"
+        "button_handler.c"
+        "device_identity.c"
+        "node_prov.c"
+        "adpcm.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        esp_driver_gpio
+        cjson
+        nvs_flash
+        esp_timer
+        esp_system
+        freertos
+)
