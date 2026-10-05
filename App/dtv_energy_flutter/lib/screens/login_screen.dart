@@ -47,10 +47,11 @@ class _LoginScreenState extends State<LoginScreen> {
             url: _url.text, username: _username.text, password: _secret.text);
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error = e is GatewayException
             ? e.message
             : 'Không thể lưu phiên đăng nhập. Vui lòng thử lại.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -78,13 +79,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             height: 48,
                             decoration: BoxDecoration(
                                 color: colors.primary,
-                                borderRadius: BorderRadius.circular(12)),
-                            child: const Icon(Icons.home_rounded,
-                                color: Colors.white, size: 30)),
+                                borderRadius: BorderRadius.circular(14)),
+                            child: Icon(Icons.home_rounded,
+                                color: colors.onPrimary, size: 28)),
                         const SizedBox(width: 12),
                         const Text('SIC Home',
                             style: TextStyle(
-                                fontSize: 24, fontWeight: FontWeight.w700)),
+                                fontSize: 24,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.4)),
                       ]),
                       const SizedBox(height: 36),
                       Text('Ngôi nhà của bạn',

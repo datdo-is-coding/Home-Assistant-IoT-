@@ -23,8 +23,9 @@ class _ManageScreenState extends State<ManageScreen> {
         isScrollControlled: true,
         useSafeArea: true,
         builder: (_) => PairSheet(client: widget.client, id: id, node: node));
-    if (result == true && mounted)
+    if (result == true && mounted) {
       showMessage(context, 'Đã thêm thiết bị vào nhà.');
+    }
   }
 
   @override
@@ -123,17 +124,19 @@ class _PairSheetState extends State<PairSheet> {
             'rl2': _second,
           },
           timeout: const Duration(seconds: 20));
-      if (result['success'] == false || result['error'] != null)
+      if (result['success'] == false || result['error'] != null) {
         throw GatewayException(
             '${result['error'] ?? 'Không thể thêm thiết bị'}');
+      }
       await widget.client.refresh();
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _error = e.toString();
           _busy = false;
         });
+      }
     }
   }
 
@@ -237,9 +240,10 @@ class _FirmwareScreenState extends State<FirmwareScreen> {
     });
     try {
       final data = await widget.client.request('/api/ota/list');
-      if (mounted)
+      if (mounted) {
         setState(() =>
             _files = (data['firmwares'] as List? ?? []).map(asMap).toList());
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -254,8 +258,9 @@ class _FirmwareScreenState extends State<FirmwareScreen> {
           type: FileType.custom, allowedExtensions: ['bin'], withData: true);
       if (selected == null) return;
       final file = selected.files.single;
-      if (file.bytes == null)
+      if (file.bytes == null) {
         throw const GatewayException('Không đọc được file firmware.');
+      }
       await widget.client.uploadFirmware(file.name, file.bytes!);
       await _load();
       if (mounted) showMessage(context, 'Đã tải firmware lên Gateway.');
@@ -319,12 +324,14 @@ class _FirmwareScreenState extends State<FirmwareScreen> {
       final result = await widget.client.request('/api/ota/flash',
           body: {'filename': file['filename'], 'node_id': nodeId},
           timeout: const Duration(seconds: 30));
-      if (result['success'] != true)
+      if (result['success'] != true) {
         throw GatewayException(
             '${result['error'] ?? 'Không gửi được yêu cầu cập nhật'}');
-      if (mounted)
+      }
+      if (mounted) {
         showMessage(
             context, 'Đã gửi yêu cầu cập nhật. Chờ thiết bị kết nối lại.');
+      }
     } catch (e) {
       if (mounted) showMessage(context, e.toString());
     } finally {

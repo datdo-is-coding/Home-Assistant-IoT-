@@ -57,11 +57,12 @@ void main() {
     final client = GatewayClient(
         persistSession: false,
         client: MockClient((req) async {
-          if (req.url.path.endsWith('/telemetry'))
+          if (req.url.path.endsWith('/telemetry')) {
             return http.Response(
                 '{"telemetry":[{"power":52.8,"recorded_at":"2026-10-02T03:30:00Z"},{"power":42.0,"recorded_at":"2026-10-02T03:29:00Z"}]}',
                 200);
-          if (req.url.path == '/api/auth/me')
+          }
+          if (req.url.path == '/api/auth/me') {
             return http.Response(
                 jsonEncode({
                   'authenticated': true,
@@ -69,6 +70,7 @@ void main() {
                 }),
                 200,
                 headers: {'content-type': 'application/json; charset=utf-8'});
+          }
           return http.Response(
               jsonEncode({
                 'nodes': {
@@ -152,10 +154,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.text('ActionBox phòng khách'));
     await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Số đo gần nhất'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pageBack();
     await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
     tester.view.physicalSize = const Size(390, 844);
     appTheme.value = ThemeMode.dark;
     await tester.pump();

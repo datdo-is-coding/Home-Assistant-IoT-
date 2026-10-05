@@ -5,6 +5,7 @@ import '../main.dart' show appTheme;
 import '../services/gateway_client.dart';
 import 'device_screen.dart';
 import 'manage_screen.dart';
+import '../widgets/huawei_boot_screen.dart';
 
 String roomName(String id) =>
     const {
@@ -53,15 +54,52 @@ IconData deviceIcon(String type) => switch (type) {
       _ => Icons.power_outlined,
     };
 
+Color deviceColor(String type, {bool isDark = true}) =>
+    switch (type.toLowerCase()) {
+      'light' ||
+      'lamp' =>
+        isDark ? const Color(0xFFF59E0B) : const Color(0xFFD97706),
+      'fan' => isDark ? const Color(0xFF0EA5E9) : const Color(0xFF0284C7),
+      'ac' ||
+      'air_conditioner' =>
+        isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1),
+      'pump' => isDark ? const Color(0xFF14B8A6) : const Color(0xFF0D9488),
+      'switch' ||
+      'outlet' =>
+        isDark ? const Color(0xFF10B981) : const Color(0xFF059669),
+      _ => isDark ? const Color(0xFF8B5CF6) : const Color(0xFF7C3AED),
+    };
+
 String channelName(String channel, dynamic info) {
   final data = asMap(info);
-  return '${data['name'] ?? data['description'] ?? const {
-        'light': 'Đèn',
-        'fan': 'Quạt',
-        'pump': 'Máy bơm',
-        'ac': 'Điều hòa'
-      }[data['device_type'] ?? info] ?? channel.toUpperCase()}';
+  final raw = data['name'] ?? data['description'];
+  if (raw != null && raw.toString().trim().isNotEmpty) {
+    final s = raw.toString().trim();
+    final lower = s.toLowerCase();
+    if (lower == 'light' || lower == 'lamp') return 'Đèn';
+    if (lower == 'fan') return 'Quạt';
+    if (lower == 'pump') return 'Máy bơm';
+    if (lower == 'ac' || lower == 'air_conditioner') return 'Điều hòa';
+    if (lower == 'switch') return 'Công tắc';
+    final mLight = RegExp(r'^(light|lamp)[_\s]+(\d+)$', caseSensitive: false).firstMatch(s);
+    if (mLight != null) return 'Đèn ${mLight.group(2)}';
+    final mFan = RegExp(r'^fan[_\s]+(\d+)$', caseSensitive: false).firstMatch(s);
+    if (mFan != null) return 'Quạt ${mFan.group(2)}';
+    final mPump = RegExp(r'^pump[_\s]+(\d+)$', caseSensitive: false).firstMatch(s);
+    if (mPump != null) return 'Máy bơm ${mPump.group(2)}';
+    return s;
+  }
+  final devType = '${data['device_type'] ?? info}'.toLowerCase();
+  return switch (devType) {
+    'light' || 'lamp' => 'Đèn',
+    'fan' => 'Quạt',
+    'pump' => 'Máy bơm',
+    'ac' || 'air_conditioner' => 'Điều hòa',
+    'switch' => 'Công tắc',
+    _ => const {'ch1': 'Kênh 1', 'ch2': 'Kênh 2'}[channel] ?? channel.toUpperCase(),
+  };
 }
+
 
 void showMessage(BuildContext context, String text) {
   ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -96,11 +134,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _loadFavorites() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted)
+    if (mounted) {
       setState(() => _favorites = (prefs.getStringList(
                   'sic_favorites_${client.serverUrl}_${client.user['id']}') ??
               [])
           .toSet());
+    }
   }
 
   Future<void> _favorite(String id) async {
@@ -256,6 +295,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }).toList();
 
   Widget _rooms() {
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final rooms = client.nodes.values
         .map((n) => '${asMap(n)['room'] ?? ''}')
         .toSet()
@@ -264,22 +305,118 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_room != null && !rooms.contains(_room)) _room = null;
     return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
         child: Row(children: [
-          Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                  label: const Text('Tất cả'),
-                  selected: _room == null,
-                  onSelected: (_) => setState(() => _room = null))),
+          _roomFilterChip(
+            label: 'Tất cả',
+            count: client.nodes.length,
+            selected: _room == null,
+            onSelected: () => setState(() => _room = null),
+            colors: colors,
+            isDark: isDark,
+          ),
           for (final room in rooms)
-            Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                    label: Text(roomName(room)),
-                    selected: _room == room,
-                    onSelected: (_) => setState(() => _room = room))),
+            _roomFilterChip(
+              label: roomName(room),
+              count: client.nodes.values
+                  .where((n) => '${asMap(n)['room'] ?? ''}' == room)
+                  .length,
+              selected: _room == room,
+              onSelected: () => setState(() => _room = room),
+              colors: colors,
+              isDark: isDark,
+            ),
         ]));
   }
+
+  Widget _roomFilterChip({
+    required String label,
+    required int count,
+    required bool selected,
+    required VoidCallback onSelected,
+    required ColorScheme colors,
+    required bool isDark,
+  }) {
+    final activeBg = isDark ? Colors.white : const Color(0xFF1E2430);
+    final activeFg = isDark ? const Color(0xFF07090C) : Colors.white;
+    final unselectedBg =
+        isDark ? const Color(0xFF131720) : const Color(0xFFF1F3F7);
+    final unselectedBorder =
+        isDark ? const Color(0xFF222836) : const Color(0xFFE2E6EC);
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onSelected,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: selected ? activeBg : unselectedBg,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? activeBg : unselectedBorder,
+              width: 1,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.12)
+                          : const Color(0xFF1E2430).withValues(alpha: 0.15),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    )
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected
+                      ? activeFg
+                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF334155)),
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  fontSize: 13,
+                  letterSpacing: 0.1,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? (isDark
+                          ? Colors.black.withValues(alpha: 0.15)
+                          : Colors.white.withValues(alpha: 0.2))
+                      : (isDark
+                          ? const Color(0xFF1E2430)
+                          : const Color(0xFFE2E6EC)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: selected
+                        ? activeFg
+                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF334155)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
 
   Widget _home(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -294,7 +431,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       for (final ch in asMap(node['channels']).keys) {
         if (client.connected &&
             node['status'] == 'online' &&
-            relayState(node, ch) == true) active++;
+            relayState(node, ch) == true) {
+          active++;
+        }
       }
     }
     for (final entry in _entries) {
@@ -314,66 +453,246 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _heading(
-          'Nhà của bạn',
-          client.user['fullname']?.toString().isNotEmpty == true
-              ? 'Xin chào, ${client.user['fullname']}'
-              : 'Chào mừng bạn về nhà',
-          trailing: Container(
-              padding: const EdgeInsets.all(12),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'HỆ THỐNG NHÀ THÔNG MINH',
+                  style: TextStyle(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Builder(builder: (context) {
+                  final isDark = Theme.of(context).brightness == Brightness.dark;
+                  final rawFullname = client.user['fullname']?.toString().trim();
+                  String name = 'Không gian sống';
+                  if (rawFullname != null && rawFullname.isNotEmpty) {
+                    name = rawFullname
+                        .replaceAll(RegExp(r'\s*\((Admin|Thành viên|User)\)', caseSensitive: false), '')
+                        .trim();
+                    if (name.isEmpty) name = rawFullname;
+                    name = 'Xin chào, $name';
+                  }
+                  return Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
+                            color: colors.onSurface,
+                          ),
+                        ),
+                      ),
+                      if (client.isAdmin) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E2430) : const Color(0xFFE2E6EC),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'ADMIN',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.8,
+                              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                }),
+              ],
+            ),
+          ),
+          Builder(builder: (context) {
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final statusColor =
+                client.connected ? const Color(0xFF10B981) : colors.error;
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
-                  color: colors.primaryContainer, shape: BoxShape.circle),
-              child:
-                  Icon(Icons.spa_outlined, color: colors.primary, size: 24))),
-      Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
+                color: statusColor.withValues(alpha: isDark ? 0.12 : 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: statusColor.withValues(alpha: 0.35),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: statusColor,
+                      boxShadow: [
+                        BoxShadow(
+                          color: statusColor.withValues(alpha: 0.75),
+                          blurRadius: 5,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    client.connected ? 'Trực tuyến' : 'Ngoại tuyến',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                      color: statusColor,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: colors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: client.connected
+                ? colors.outlineVariant.withValues(alpha: 0.9)
+                : colors.error.withValues(alpha: 0.4),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Colors.black.withValues(alpha: 0.3)
+                  : Colors.black.withValues(alpha: 0.03),
+              blurRadius: 16,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-                client.connected
-                    ? Icons.cloud_done_outlined
-                    : Icons.cloud_off_outlined,
-                color: client.connected ? colors.primary : colors.error,
-                size: 17),
-            Text(
-                client.connected ? 'Gateway đã kết nối' : 'Gateway ngoại tuyến',
-                style: TextStyle(
-                    color: client.connected ? colors.primary : colors.error,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13)),
-            if (client.updatedAt != null)
-              Text(
-                  '· ${TimeOfDay.fromDateTime(client.updatedAt!).format(context)}',
-                  style:
-                      TextStyle(color: colors.onSurfaceVariant, fontSize: 12)),
-          ]),
-      const SizedBox(height: 22),
-      Wrap(spacing: 28, runSpacing: 16, children: [
-        _stat('$online/${client.nodes.length}', 'Trực tuyến', colors.primary),
-        _stat('$active', 'Đang bật', const Color(0xFFB37A18)),
-        _stat('$rooms', 'Phòng', colors.onSurface),
-      ]),
-      const Padding(
-          padding: EdgeInsets.symmetric(vertical: 18), child: Divider()),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    client.connected
+                        ? 'GATEWAY TRỰC TUYẾN'
+                        : 'MẤT KẾT NỐI GATEWAY',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: client.connected
+                          ? (Theme.of(context).brightness == Brightness.dark
+                              ? const Color(0xFFE2E8F0)
+                              : const Color(0xFF0F1318))
+                          : colors.error,
+                    ),
+                  ),
+                ),
+                if (client.updatedAt != null)
+                  Text(
+                    TimeOfDay.fromDateTime(client.updatedAt!).format(context),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurfaceVariant,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                _bentoStat(
+                  label: 'Trực tuyến',
+                  value: '$online/${client.nodes.length}',
+                  icon: Icons.wifi_tethering_rounded,
+                  color: const Color(0xFF10B981),
+                  isDark: Theme.of(context).brightness == Brightness.dark,
+                ),
+                const SizedBox(width: 8),
+                _bentoStat(
+                  label: 'Đang bật',
+                  value: '$active',
+                  icon: Icons.bolt_rounded,
+                  color: const Color(0xFFF59E0B),
+                  isDark: Theme.of(context).brightness == Brightness.dark,
+                ),
+                const SizedBox(width: 8),
+                _bentoStat(
+                  label: 'Khu vực',
+                  value: '$rooms',
+                  icon: Icons.meeting_room_outlined,
+                  color: const Color(0xFF8B5CF6),
+                  isDark: Theme.of(context).brightness == Brightness.dark,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+
+      const SizedBox(height: 20),
       _rooms(),
       Padding(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          child: Row(children: [
-            const Expanded(
-                child: Text('Điều khiển nhanh',
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.w700))),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Điều khiển nhanh',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  color: colors.onSurface,
+                ),
+              ),
+            ),
             IconButton(
-                tooltip: _favoritesOnly ? 'Hiện tất cả' : 'Chỉ yêu thích',
-                onPressed: () =>
-                    setState(() => _favoritesOnly = !_favoritesOnly),
-                icon: Icon(
-                    _favoritesOnly
-                        ? Icons.star_rounded
-                        : Icons.star_outline_rounded,
-                    color: _favoritesOnly ? const Color(0xFFB37A18) : null)),
-          ])),
+              tooltip: _favoritesOnly ? 'Hiện tất cả' : 'Chỉ yêu thích',
+              onPressed: () => setState(() => _favoritesOnly = !_favoritesOnly),
+              icon: Icon(
+                _favoritesOnly
+                    ? Icons.star_rounded
+                    : Icons.star_outline_rounded,
+                color: _favoritesOnly
+                    ? const Color(0xFFF59E0B)
+                    : colors.onSurfaceVariant.withValues(alpha: 0.5),
+              ),
+            ),
+          ],
+        ),
+      ),
       if (relays.isEmpty)
         EmptyState(
             icon: Icons.touch_app_outlined,
@@ -398,16 +717,68 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ]);
   }
 
-  Widget _stat(String value, String label, Color color) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(value,
-            style: TextStyle(
-                fontSize: 30, fontWeight: FontWeight.w700, color: color)),
-        Text(label,
-            style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurfaceVariant)),
-      ]);
+
+  Widget _bentoStat({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+    required bool isDark,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF141822) : const Color(0xFFF4F6F9),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark ? const Color(0xFF222836) : const Color(0xFFE2E6EC),
+            width: 0.8,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(3.5),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: isDark ? 0.20 : 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 12, color: color),
+                ),
+                const Spacer(),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                    color: isDark ? Colors.white : const Color(0xFF0F1318),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 
   Widget _devices(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -427,22 +798,110 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               subtitle: 'Thử chọn phòng khác hoặc làm mới danh sách.'),
         for (final entry in _entries)
           Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Card(
-                  child: ListTile(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  width: 1,
+                ),
+              ),
+              child: ListTile(
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                leading: Icon(Icons.developer_board_rounded,
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                leading: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
                     color: asMap(entry.value)['status'] == 'online'
-                        ? Theme.of(context).colorScheme.primary
-                        : Theme.of(context).colorScheme.outline),
-                title: Text(nodeName(entry.key, asMap(entry.value)),
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                        ? const Color(0xFF0EA5E9).withValues(
+                            alpha:
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? 0.16
+                                    : 0.10)
+                        : (Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF161A22)
+                            : const Color(0xFFEFF1F5)),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: asMap(entry.value)['status'] == 'online'
+                          ? const Color(0xFF0EA5E9).withValues(alpha: 0.35)
+                          : Theme.of(context).colorScheme.outlineVariant,
+                      width: 1,
+                    ),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(
+                        Icons.developer_board_rounded,
+                        size: 22,
+                        color: asMap(entry.value)['status'] == 'online'
+                            ? const Color(0xFF0EA5E9)
+                            : Theme.of(context).colorScheme.outline,
+                      ),
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: Container(
+                          width: 7,
+                          height: 7,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: asMap(entry.value)['status'] == 'online'
+                                ? const Color(0xFF10B981)
+                                : const Color(0xFF94A3B8),
+                            boxShadow: asMap(entry.value)['status'] == 'online'
+                                ? [
+                                    const BoxShadow(
+                                      color: Color(0xFF10B981),
+                                      blurRadius: 5,
+                                      spreadRadius: 1,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                title: Text(
+                  nodeName(entry.key, asMap(entry.value)),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    letterSpacing: -0.2,
+                  ),
+                ),
                 subtitle: Text(
-                    '${roomName('${asMap(entry.value)['room'] ?? ''}')} · ${asMap(entry.value)['status'] == 'online' ? 'Trực tuyến' : 'Ngoại tuyến'}'),
-                trailing: const Icon(Icons.chevron_right),
+                  '${roomName('${asMap(entry.value)['room'] ?? ''}')} · ${asMap(entry.value)['status'] == 'online' ? 'Trực tuyến' : 'Ngoại tuyến'}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: asMap(entry.value)['status'] == 'online'
+                        ? (Theme.of(context).brightness == Brightness.dark
+                            ? const Color(0xFF34D399)
+                            : const Color(0xFF059669))
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                trailing: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? const Color(0xFF161A22)
+                        : const Color(0xFFEFF1F5),
+                  ),
+                  child: const Icon(Icons.chevron_right, size: 18),
+                ),
                 onTap: () => _openDevice(entry.key),
-              ))),
+              ),
+            ),
+          ),
       ]);
 
   Widget _energy(BuildContext context) {
@@ -459,11 +918,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final total = values.isEmpty ? null : values.reduce((a, b) => a + b);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       _heading('Điện năng', 'Số đo từ các thiết bị của bạn'),
-      Text('CÔNG SUẤT THIẾT BỊ',
-          style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF59E0B).withValues(
+                  alpha: Theme.of(context).brightness == Brightness.dark
+                      ? 0.16
+                      : 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.bolt_rounded,
+                size: 14, color: Color(0xFFF59E0B)),
+          ),
+          const SizedBox(width: 6),
+          Text('CÔNG SUẤT THIẾT BỊ',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+        ],
+      ),
       const SizedBox(height: 8),
       Text(metric(total, 'W'),
           style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w700)),
@@ -532,9 +1008,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             subtitle: Text(client.serverUrl),
             trailing: Icon(
                 client.connected
-                    ? Icons.check_circle_outline
-                    : Icons.error_outline,
-                color: Theme.of(context).colorScheme.primary)),
+                    ? Icons.check_circle_rounded
+                    : Icons.error_outline_rounded,
+                color: client.connected
+                    ? const Color(0xFF10B981)
+                    : Theme.of(context).colorScheme.error)),
         const SizedBox(height: 16),
         const Text('Giao diện', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 12),
@@ -557,7 +1035,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       icon: Icon(Icons.dark_mode_outlined),
                       label: Text('Tối'))
                 ])),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
+        ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Container(
+              width: 38,
+              height: 38,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [
+                    Color(0xFF00E5FF),
+                    Color(0xFFFBBF24),
+                    Color(0xFFA855F7),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: const Icon(Icons.motion_photos_on_rounded,
+                  size: 18, color: Colors.white),
+            ),
+            title: const Text('Hiệu ứng ánh sáng khởi động'),
+            subtitle: const Text('Xem lại hiệu ứng vòng sáng quang học'),
+            trailing: const Icon(Icons.play_circle_outline_rounded),
+            onTap: () => Navigator.of(context).push(PageRouteBuilder(
+                opaque: false,
+                pageBuilder: (context, _, __) => HuaweiBootScreen(
+                    onComplete: () => Navigator.of(context).pop(),
+                    allowSkip: true)))),
+        const SizedBox(height: 16),
         const Divider(),
         if (client.isAdmin) ...[
           ListTile(
@@ -681,87 +1188,234 @@ class _RelayTileState extends State<RelayTile> {
     final online = widget.client.connected && node['status'] == 'online';
     final colors = Theme.of(context).colorScheme;
     final name = channelName(widget.channel, ch);
-    final type = '${asMap(ch)['device_type'] ?? ch}';
-    return Card(
-      color: on == true && online
-          ? colors.primaryContainer.withValues(alpha: .45)
-          : null,
-      child: Padding(
-          padding: const EdgeInsets.all(14),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                      color: on == true
-                          ? colors.primary
-                          : colors.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8)),
-                  child: Icon(deviceIcon(type),
-                      color: on == true
-                          ? colors.onPrimary
-                          : colors.onSurfaceVariant,
-                      size: 24)),
-              const Spacer(),
-              if (widget.onFavorite != null)
-                IconButton(
-                    tooltip: widget.favorite ? 'Bỏ yêu thích' : 'Yêu thích',
-                    onPressed: widget.onFavorite,
-                    icon: Icon(
-                        widget.favorite
-                            ? Icons.star_rounded
-                            : Icons.star_outline_rounded,
-                        size: 21),
-                    color: widget.favorite
-                        ? const Color(0xFFB37A18)
-                        : colors.onSurfaceVariant),
-            ]),
-            const SizedBox(height: 14),
-            Text(name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(roomName('${node['room'] ?? ''}'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: colors.onSurfaceVariant, fontSize: 12)),
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(
-                  child: Text(
-                      _busy
-                          ? 'Đang gửi...'
-                          : !online
-                              ? 'Ngoại tuyến'
-                              : on == null
-                                  ? 'Chưa rõ'
-                                  : on
-                                      ? 'Đang bật'
-                                      : 'Đã tắt',
-                      style: TextStyle(
-                          color: online && on == true
-                              ? colors.primary
-                              : colors.onSurfaceVariant,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12))),
-              Semantics(
-                  label: '$name ${roomName('${node['room'] ?? ''}')}',
-                  child: Switch(
-                      value: on ?? false,
-                      onChanged:
-                          online && !_busy && on != null ? _toggle : null)),
-            ]),
-            if (widget.onDetails != null)
-              SizedBox(
-                  width: double.infinity,
-                  child: TextButton(
-                      onPressed: widget.onDetails,
-                      child: const Text('Chi tiết'))),
-          ])),
+    final type = '${asMap(ch)['device_type'] ?? ch}'.toLowerCase();
+
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool isActive = on == true && online;
+    final bool isSwitchActive = online && (on == true);
+    final Color devColor = deviceColor(type, isDark: isDark);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isActive
+            ? (isDark ? const Color(0xFF141923) : Colors.white)
+            : (isDark ? const Color(0xFF12151D) : Colors.white),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isActive
+              ? devColor.withValues(alpha: isDark ? 0.38 : 0.48)
+              : (isDark
+                  ? const Color(0xFF1E2532)
+                  : const Color(0xFFE2E8F0)),
+          width: isActive ? 1.2 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isActive
+                ? devColor.withValues(alpha: isDark ? 0.14 : 0.08)
+                : (isDark
+                    ? Colors.black.withValues(alpha: 0.25)
+                    : Colors.black.withValues(alpha: 0.03)),
+            blurRadius: isActive ? 16 : 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onDetails,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? devColor.withValues(alpha: isDark ? 0.22 : 0.14)
+                              : (isDark
+                                  ? const Color(0xFF1C2230)
+                                  : const Color(0xFFF1F5F9)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isActive
+                                ? devColor.withValues(alpha: 0.5)
+                                : colors.outlineVariant.withValues(alpha: 0.35),
+                            width: 1,
+                          ),
+                        ),
+                        child: Icon(
+                          deviceIcon(type),
+                          color: isActive
+                              ? devColor
+                              : (isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF64748B)),
+                          size: 20,
+                        ),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.onFavorite != null)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 30,
+                                minHeight: 30,
+                              ),
+                              tooltip: widget.favorite
+                                  ? 'Bỏ yêu thích'
+                                  : 'Yêu thích',
+                              onPressed: widget.onFavorite,
+                              icon: Icon(
+                                widget.favorite
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                size: 19,
+                                color: widget.favorite
+                                    ? const Color(0xFFF59E0B)
+                                    : (isDark
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFF94A3B8)),
+                              ),
+                            ),
+                          if (widget.onDetails != null) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              size: 18,
+                              color: isDark
+                                  ? const Color(0xFF475569)
+                                  : const Color(0xFF94A3B8),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
+                      color: colors.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    roomName('${node['room'] ?? ''}'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: !online
+                                    ? (isDark
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFF94A3B8))
+                                    : (isActive
+                                        ? devColor
+                                        : (isDark
+                                            ? const Color(0xFF475569)
+                                            : const Color(0xFF94A3B8))),
+                                boxShadow: isActive
+                                    ? [
+                                        BoxShadow(
+                                          color: devColor.withValues(alpha: 0.8),
+                                          blurRadius: 5,
+                                          spreadRadius: 1,
+                                        )
+                                      ]
+                                    : null,
+                              ),
+                            ),
+                            Expanded(
+                              child: Text(
+                                _busy
+                                    ? (on == true ? 'Đang bật...' : 'Đang tắt...')
+                                    : !online
+                                        ? 'Ngoại tuyến'
+                                        : on == null
+                                            ? 'Chưa rõ'
+                                            : on
+                                                ? 'Đang bật'
+                                                : 'Đã tắt',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isActive
+                                      ? devColor
+                                      : colors.onSurfaceVariant,
+                                  fontWeight: isActive
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Semantics(
+                        label: '$name ${roomName('${node['room'] ?? ''}')}',
+                        child: Transform.scale(
+                          scale: 0.82,
+                          alignment: Alignment.centerRight,
+                          child: Switch(
+                            value: isSwitchActive,
+                            activeThumbColor: Colors.white,
+                            activeTrackColor: devColor,
+                            inactiveThumbColor: isDark
+                                ? const Color(0xFF64748B)
+                                : const Color(0xFF94A3B8),
+                            inactiveTrackColor: isDark
+                                ? const Color(0xFF1E2430)
+                                : const Color(0xFFE2E8F0),
+                            onChanged:
+                                online && !_busy && on != null ? _toggle : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -769,27 +1423,109 @@ class _RelayTileState extends State<RelayTile> {
 class MetricStrip extends StatelessWidget {
   const MetricStrip({super.key, required this.data});
   final Map<String, dynamic> data;
+
   @override
-  Widget build(BuildContext context) =>
-      Wrap(spacing: 24, runSpacing: 16, children: [
-        for (final entry in {
-          'Công suất': metric(data['power'] ?? data['p'], 'W'),
-          'Điện áp': metric(data['voltage'] ?? data['v'], 'V'),
-          'Dòng điện':
-              metric(data['current'] ?? data['i'] ?? data['c'], 'A', 2),
-          'Tích lũy': metric(data['energy'] ?? data['e'], 'kWh', 2),
-        }.entries)
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(entry.key,
-                style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
-            const SizedBox(height: 4),
-            Text(entry.value,
-                style:
-                    const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-          ]),
-      ]);
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cellBg = isDark ? const Color(0xFF13171F) : const Color(0xFFF1F3F6);
+    final border = isDark ? const Color(0xFF1F2430) : const Color(0xFFE2E6EC);
+
+    final metrics = [
+      (
+        key: 'Công suất',
+        value: metric(data['power'] ?? data['p'], 'W'),
+        icon: Icons.bolt_rounded,
+        color: isDark ? const Color(0xFFF59E0B) : const Color(0xFFD97706),
+      ),
+      (
+        key: 'Điện áp',
+        value: metric(data['voltage'] ?? data['v'], 'V'),
+        icon: Icons.speed_rounded,
+        color: isDark ? const Color(0xFF0EA5E9) : const Color(0xFF0284C7),
+      ),
+      (
+        key: 'Dòng điện',
+        value: metric(data['current'] ?? data['i'] ?? data['c'], 'A', 2),
+        icon: Icons.waves_rounded,
+        color: isDark ? const Color(0xFF8B5CF6) : const Color(0xFF7C3AED),
+      ),
+      (
+        key: 'Tích lũy',
+        value: metric(data['energy'] ?? data['e'], 'kWh', 2),
+        icon: Icons.hourglass_bottom_rounded,
+        color: isDark ? const Color(0xFF10B981) : const Color(0xFF059669),
+      ),
+    ];
+
+    return LayoutBuilder(builder: (context, constraints) {
+      final width = (constraints.maxWidth - 12) / 2;
+      return Wrap(
+        spacing: 12,
+        runSpacing: 10,
+        children: [
+          for (final item in metrics)
+            Container(
+              width: width > 130 ? width : constraints.maxWidth,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: cellBg,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: border, width: 1),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: item.color.withValues(alpha: isDark ? 0.16 : 0.12),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color:
+                            item.color.withValues(alpha: isDark ? 0.35 : 0.25),
+                        width: 1,
+                      ),
+                    ),
+                    child: Icon(item.icon, size: 17, color: item.color),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: colors.onSurfaceVariant,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          item.value,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    });
+  }
 }
 
 class EmptyState extends StatelessWidget {

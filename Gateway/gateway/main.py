@@ -785,8 +785,71 @@ class SmartHomeGateway:
         if cfg_payload and self.mqtt:
             await self.mqtt.send_cfg(device_id, cfg_payload)
             await self.mqtt.send_desired_config(device_id, cfg_payload)
+        if hasattr(self, "asr") and self.asr:
+            try:
+                self.asr.reload_hotwords(self.registry)
+            except Exception as e:
+                logger.warning(f"Failed to reload ASR hotwords after device update: {e}")
         self.broadcast_event("node_status", {"node_id": device_id, "updated": True})
         return updated
+
+    async def add_device_alias(self, device_id: str, channel: str, alias: str) -> dict:
+        """Thêm khẩu lệnh/từ vựng cho thiết bị, cập nhật STT hotwords và broadcast event."""
+        ok = self.registry.add_device_alias(device_id, channel, alias)
+        if ok and hasattr(self, "asr") and self.asr:
+            try:
+                self.asr.reload_hotwords(self.registry)
+                logger.info(f"[VOCAB][STT] vocabulary updated, active vocabulary contains '{alias}' = {self.asr.has_hotword(alias)}")
+            except Exception as e:
+                logger.warning(f"Failed to reload ASR hotwords: {e}")
+        self.broadcast_event("node_status", {"node_id": device_id.split("::")[0], "updated": True})
+        return {"success": ok, "device_id": device_id, "channel": channel, "alias": alias}
+
+    async def remove_device_alias(self, device_id: str, channel: str, alias: str) -> dict:
+        """Xóa khẩu lệnh/từ vựng cho thiết bị, cập nhật STT hotwords và broadcast event."""
+        ok = self.registry.remove_device_alias(device_id, channel, alias)
+        if ok and hasattr(self, "asr") and self.asr:
+            try:
+                self.asr.reload_hotwords(self.registry)
+                logger.info(f"[VOCAB][STT] vocabulary updated, active vocabulary contains '{alias}' = {self.asr.has_hotword(alias)}")
+            except Exception as e:
+                logger.warning(f"Failed to reload ASR hotwords: {e}")
+        self.broadcast_event("node_status", {"node_id": device_id.split("::")[0], "updated": True})
+        return {"success": ok, "device_id": device_id, "channel": channel, "alias": alias}
+
+    def get_voice_vocabulary_diagnostics(self) -> dict:
+        """Thu thập thông tin chẩn đoán từ vựng và nhận diện giọng nói."""
+        asr_diag = self.asr.dump_active_vocabulary(self.registry) if hasattr(self, "asr") and self.asr else {"initialized": False, "hotwords_count": 0, "hotwords": []}
+        stored = []
+        for nid, n in self.registry.get_all_nodes().items():
+            for cid, ch in n.get("channels", {}).items():
+                aliases = ch.get("aliases", [])
+                stored.append({
+                    "device_id": f"{nid}::{cid}",
+                    "node_id": nid,
+                    "channel": cid,
+                    "name": ch.get("name", cid),
+                    "device_type": ch.get("device_type", ""),
+                    "aliases": list(aliases),
+                })
+        return {
+            "success": True,
+            "gateway_connected": True,
+            "stt_engine": asr_diag,
+            "stored_vocabulary": stored,
+            "total_stored_items": len(stored),
+            "total_active_hotwords": asr_diag.get("hotwords_count", 0),
+        }
+
+    async def delete_device(self, device_id: str) -> bool:
+        """Xóa hoàn toàn thiết bị khỏi registry, đóng kết nối socket, broadcast event."""
+        ok = self.registry.delete_node(device_id)
+        if hasattr(self, "audio_server") and hasattr(self.audio_server, "_ws_nodes"):
+            ws = self.audio_server._ws_nodes.pop(device_id, None)
+            if ws and hasattr(self.audio_server, "_active_speakers"):
+                self.audio_server._active_speakers.discard(ws)
+        self.broadcast_event("device_deleted", {"device_id": device_id})
+        return ok
 
 
 

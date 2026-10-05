@@ -107,6 +107,15 @@ class CommandVerifier:
         
         # Basic load verification
         nodes = getattr(self.registry, "get_all_nodes", lambda: {})()
+        # Persist the acknowledged channel before HTTP/voice callers can refresh.
+        # SubBox ACKs contain one channel; preserve the other channel's report.
+        node = nodes.get(node_id)
+        if node is not None and channel_number is not None and hasattr(self.registry, "update_relay_state"):
+            relay_states = list(node.get("relay_state", [0, 0]))
+            while len(relay_states) < channel_number:
+                relay_states.append(0)
+            relay_states[channel_number - 1] = 1 if expected == "ON" else 0
+            self.registry.update_relay_state(node_id, relay_states)
         ch_info = nodes.get(node_id, {}).get("channels", {}).get(channel, {})
         thresholds = ch_info.get("load_verification", {})
         report = getattr(self.mqtt, "load_reports", {}).get((node_id, seq))

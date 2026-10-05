@@ -59,7 +59,7 @@ void main() {
           }
           expect(req.headers['Authorization'], 'Bearer session');
           expect(req.followRedirects, false);
-          if (req.url.path == '/api/auth/me')
+          if (req.url.path == '/api/auth/me') {
             return http.Response(
                 jsonEncode({
                   'authenticated': true,
@@ -67,8 +67,10 @@ void main() {
                 }),
                 200,
                 headers: {'content-type': 'application/json; charset=utf-8'});
-          if (req.url.path == '/api/relay')
+          }
+          if (req.url.path == '/api/relay') {
             return http.Response('{"success":true,"verify":"ack_only"}', 200);
+          }
           if (offline) throw http.ClientException('offline');
           return http.Response(
               '{"nodes":{"AB1":{"status":"online"}},"pending":{}}',
@@ -99,11 +101,13 @@ void main() {
     final service = GatewayClient(
         persistSession: false,
         client: MockClient((req) async {
-          if (req.headers['Authorization'] == 'Bearer bad')
+          if (req.headers['Authorization'] == 'Bearer bad') {
             return http.Response('{}', 401);
-          if (req.url.path == '/api/auth/me')
+          }
+          if (req.url.path == '/api/auth/me') {
             return http.Response(
                 '{"authenticated":true,"user":{"role":"user"}}', 200);
+          }
           return http.Response('{"nodes":{},"pending":{}}', 200);
         }));
     addTearDown(service.dispose);
@@ -114,5 +118,69 @@ void main() {
     expect(service.serverUrl, 'http://first:8000');
     expect(service.authenticated, true);
     expect(service.isAdmin, false);
+  });
+
+  test('updateDevice and deleteDevice send expected payloads and update state',
+      () async {
+    final sent = <http.Request>[];
+    final nodesMap = <String, dynamic>{
+      'AB1': {'name': 'Box 1', 'room': 'living_room', 'status': 'online'}
+    };
+    final service = GatewayClient(
+        persistSession: false,
+        client: MockClient((req) async {
+          sent.add(req);
+          if (req.url.path == '/api/auth/login') {
+            return http.Response('{"success":true,"token":"session"}', 200);
+          }
+          if (req.url.path == '/api/auth/me') {
+            return http.Response(
+                '{"authenticated":true,"user":{"id":1,"role":"admin","fullname":"Tuan"}}',
+                200,
+                headers: {'content-type': 'application/json; charset=utf-8'});
+          }
+          if (req.url.path == '/api/device/update') {
+            final body = jsonDecode(req.body);
+            expect(body['device_id'], 'AB1');
+            expect(body['name'], 'Loa Phong Khach');
+            expect(body['room'], 'phong_khach');
+            nodesMap['AB1'] = {
+              'name': 'Loa Phong Khach',
+              'room': 'phong_khach',
+              'status': 'online'
+            };
+            return http.Response(
+                '{"success":true,"device":{"name":"Loa Phong Khach"}}', 200,
+                headers: {'content-type': 'application/json; charset=utf-8'});
+          }
+          if (req.url.path == '/api/device/delete') {
+            final body = jsonDecode(req.body);
+            expect(body['device_id'], 'AB1');
+            nodesMap.remove('AB1');
+            return http.Response('{"success":true,"device_id":"AB1"}', 200,
+                headers: {'content-type': 'application/json; charset=utf-8'});
+          }
+          return http.Response(
+              jsonEncode({'nodes': nodesMap, 'pending': {}}), 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    addTearDown(service.dispose);
+    await service.login(
+        url: 'http://home:8000', username: 'tuan', password: 'secret');
+    expect(service.nodes.containsKey('AB1'), true);
+
+    // Test updateDevice
+    final updateRes = await service.updateDevice(
+        deviceId: 'AB1',
+        name: 'Loa Phong Khach',
+        room: 'phong_khach',
+        ch1Name: 'Den chum',
+        ch1Type: 'light');
+    expect(updateRes['success'], true);
+    expect(service.nodes['AB1']?['name'], 'Loa Phong Khach');
+
+    // Test deleteDevice
+    await service.deleteDevice('AB1');
+    expect(service.nodes.containsKey('AB1'), false);
   });
 }
