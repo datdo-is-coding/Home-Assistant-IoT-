@@ -38,6 +38,25 @@ class Persistence(unittest.TestCase):
 
 
 class LoadVerification(unittest.IsolatedAsyncioTestCase):
+    async def test_confirmed_ack_updates_registry_before_next_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RegistryManager(str(Path(tmp) / 'registry.json'), str(Path(tmp) / 'registry.db'))
+            registry.data['nodes']['AB1'] = {'relay_state': [0, 1], 'channels': {}}
+            mqtt = MQTTHandler()
+            async def send(node, channel, action, seq=None, **kwargs):
+                mqtt.command_acks[(node, seq)] = {'channel': 1, 'status': 'OK', 'state': 'ON'}
+                return True
+            mqtt.send_command = AsyncMock(side_effect=send)
+            verifier = CommandVerifier(mqtt, registry)
+            result, *_ = await verifier.verify_command('AB1', 'ch1', 'turn_on', seq=7)
+            self.assertEqual(result, VerifyResult.ACK_ONLY)
+            self.assertEqual(registry.get_all_nodes()['AB1']['relay_state'], [1, 1])
+            loaded = RegistryManager(str(Path(tmp) / 'registry.json'), str(Path(tmp) / 'registry.db'))
+            self.assertEqual(loaded.get_all_nodes()['AB1']['relay_state'], [1, 1])
+            result, *_ = await verifier.verify_command('AB1', 'ch1', 'turn_off', seq=8)
+            self.assertEqual(result, VerifyResult.FAILED)
+            self.assertEqual(registry.get_all_nodes()['AB1']['relay_state'], [1, 1])
+
     async def check_command(self, sample=None, thresholds=None):
         mqtt = MQTTHandler()
         async def send(node, channel, action, seq=None, **kwargs):

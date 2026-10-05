@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "AUDIO_MGR";
 
@@ -153,11 +154,13 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         m_session_active = true;
         m_stream_end_received = false;
         it->second.stream_buffer->clear();
+        it->second.last_timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
         ++m_session_generation;
         m_asr_start_pending = true;
         m_session_failed = false;
         if (m_vad) m_vad->reset();
         ESP_LOGI(TAG, "🎙️ [STREAM_START] Explicit session lock onto ActionBox: %s (ASR started)", node_id.c_str());
+        SoundPlayer::instance().play(SoundType::WAKE);
         return;
     }
 
@@ -202,6 +205,7 @@ void AudioManager::evaluateSourceSelection() {
 
         ESP_LOGI(TAG, "🎙️ Source Arbitrator selected best active ActionBox: %s (RMS=%.1f, Score=%.0f)",
                  best_candidate.c_str(), m_channels[best_candidate].latest_rms, best_score);
+        SoundPlayer::instance().play(SoundType::WAKE);
     }
 }
 
@@ -226,7 +230,9 @@ void AudioManager::process() {
     const uint32_t generation = m_session_generation;
     if (m_asr_start_pending) {
         m_asr_start_pending = false;
+        const std::string source_node_id = m_active_source_node_id;
         lock.unlock();
+        if (m_asr) m_asr->setSourceNodeId(source_node_id.c_str());
         const bool started = m_asr && m_asr->start();
         lock.lock();
         if (generation != m_session_generation) return;
@@ -266,13 +272,17 @@ void AudioManager::process() {
         taskYIELD();
     }
 
-    // 3. Check for End of Speech (Explicit ActionBox STREAM_END or VAD Silence Timeout 1.5s or ASR Final Trigger)
+    // ActionBox frames the utterance. Pi transcripts must not terminate another recording.
     bool speech_finished = false;
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    bool packet_silence = (uint32_t)(now_ms - it->second.last_timestamp_ms) > 1200;
+
     if (m_stream_end_received) {
         speech_finished = true;
     } else if (m_vad && m_vad->speechEnded()) {
         speech_finished = true;
-    } else if (m_asr && m_asr->hasFinalResult()) {
+    } else if (packet_silence) {
+        ESP_LOGI(TAG, "⏱️ Packet silence timeout (1.2s without audio chunks) from %s", m_active_source_node_id.c_str());
         speech_finished = true;
     }
 
@@ -298,47 +308,20 @@ void AudioManager::process() {
         // Stop ASR feed (tells server to finalize)
         if (m_asr) {
             lock.unlock();
-            m_asr->stop();
+            if (m_session_failed) m_asr->cancel();
+            else m_asr->stop();
             lock.lock();
             if (generation != m_session_generation) return;
         }
 
-        std::string final_text;
-        // If final result is not immediately ready, await transcription
-        if (m_asr && !m_asr->hasFinalResult()) {
-            lock.unlock();
-            for (int i = 0; i < 25; i++) { // Up to 2.5s wait
-                vTaskDelay(pdMS_TO_TICKS(100));
-                if (m_asr->hasFinalResult()) break;
-            }
-            lock.lock();
-            if (generation != m_session_generation) return;
-        }
-
-        if (!m_session_failed && m_asr && m_asr->hasFinalResult()) {
-            final_text = m_asr->getFinalResult();
-        }
-
-        std::string completed_node = m_active_source_node_id;
+        ESP_LOGI(TAG, "PCM relay %s for %s; command processing belongs to Pi4",
+                 m_session_failed ? "cancelled" : "complete", m_active_source_node_id.c_str());
 
         // Release session lock
         m_session_active = false;
         m_stream_end_received = false;
         m_active_source_node_id.clear();
         active_buffer->clear();
-
-        if (!final_text.empty()) {
-            ESP_LOGI(TAG, "✅ Utterance complete from node %s: \"%s\"", completed_node.c_str(), final_text.c_str());
-
-            auto cb = m_utterance_callback;
-            lock.unlock(); // Unlock before dispatching to NLU
-
-            if (cb) {
-                cb(completed_node, final_text);
-            }
-            return;
-        } else {
-            ESP_LOGW(TAG, "⚠️ Utterance from %s completed with empty transcript", completed_node.c_str());
-        }
+        it->second.is_speaking = false;
     }
 }

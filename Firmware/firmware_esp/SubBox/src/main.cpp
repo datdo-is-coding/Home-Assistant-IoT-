@@ -6,8 +6,8 @@
  * - Local Brain & Audio Hub of one room
  * - Does NOT directly use a microphone; receives audio streams from ActionBoxes
  * - Selects best active speech signal among up to 4 ActionBoxes in room
- * - Performs VAD, Vietnamese ASR (TinyML / Dummy), NLU intent & entity extraction
- * - Executes local commands without Pi4, routes cross-room/complex tasks to Pi4
+ * - Relays microphone PCM to Pi4, which owns ASR and voice command extraction
+ * - Executes explicit gateway commands over ESP-NOW; no local voice fallback
  * - Routes audio responses / TTS back to originating ActionBox speaker
  */
 
@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_sntp.h"
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
 
@@ -35,10 +36,9 @@
 #include "audio/audio_buffer/audio_ring_buffer.h"
 #include "audio/vad/energy_vad.h"
 #include "audio/asr/ws_asr.h"
-#include "audio/asr/fallback_asr.h"
-#include "audio/asr/dummy_asr.h"
 #include "audio/audio_manager/audio_manager.h"
 #include "audio/audio_output/audio_output_router.h"
+#include "audio/audio_output/sound_player.h"
 #include "tts/tts_manager.h"
 #include "nlu/context/context_manager.h"
 #include "actionbox/registry/actionbox_registry.h"
@@ -51,6 +51,7 @@
 static const char *TAG = "SUBBOX_MAIN";
 
 #include "system/wifi_provisioning.h"
+#include "system/subbox_led.h"
 
 static int s_wifi_retry_count = 0;
 
@@ -58,21 +59,27 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         ESP_LOGI(TAG, "Wi-Fi Station started, connecting to AP '%s'...", (const char*)arg);
-        esp_wifi_connect();
+        if (((const char*)arg)[0]) esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        subbox_led_set_wifi_connected(false);
+        subbox_led_set_mqtt_connected(false);
         s_wifi_retry_count++;
         ESP_LOGW(TAG, "Wi-Fi disconnected (attempt %d/5)...", s_wifi_retry_count);
         if (s_wifi_retry_count >= 5 && !wifi_provisioning_is_active()) {
             ESP_LOGW(TAG, "⚠️ Wi-Fi unreachable after 5 attempts -> Launching SoftAP Captive Portal!");
             wifi_provisioning_start();
-        } else if (!wifi_provisioning_is_active()) {
-            vTaskDelay(pdMS_TO_TICKS(2000));
-            esp_wifi_connect();
         }
+        esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_wifi_retry_count = 0;
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         ESP_LOGI(TAG, "✅ SubBox Wi-Fi Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        subbox_led_set_wifi_connected(true);
+        if (!esp_sntp_enabled()) {
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "pool.ntp.org");
+            esp_sntp_init();
+        }
     }
 }
 
@@ -125,7 +132,7 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
     wifi_config_t wifi_config = {};
     strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
     strncpy((char*)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    wifi_config.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -136,6 +143,9 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
 }
 
 extern "C" void app_main(void) {
+    /* 0. Initialize Status LED (LED1: GPIO 48) */
+    subbox_led_init();
+
     /* 1. Initialize NVS Storage */
     ESP_ERROR_CHECK(NVSManager::init());
 
@@ -143,14 +153,7 @@ extern "C" void app_main(void) {
     NVSManager::loadConfig(cfg);
 
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    bool psram_ok = free_psram > (1024 * 1024); // Ensure at least 1MB PSRAM
-    if (!psram_ok) {
-        ESP_LOGE(TAG, "PSRAM check failed. Cannot load offline model.");
-        // Disable voice but keep buttons and protection
-    } else {
-        ESP_LOGI(TAG, "PSRAM check passed. Ready to load model from 'model' partition.");
-        // Load model...
-    }
+    ESP_LOGI(TAG, "Audio relay PSRAM available: %u KB; local ASR/NLU disabled", (unsigned)(free_psram / 1024));
 
     /* 2. Print Startup Banner */
     print_banner(cfg);
@@ -165,6 +168,11 @@ extern "C" void app_main(void) {
     }
 
     /* 4. Instantiate Core Subsystems */
+    /* Initialize SubBox Acoustic Sound Player (MAX98357A I2S Speaker) */
+    if (SoundPlayer::instance().init() == ESP_OK) {
+        SoundPlayer::instance().play(SoundType::BOOTUP);
+    }
+
     auto room_mgr = std::make_shared<RoomManager>(cfg.subbox_id, cfg.room_type);
     room_mgr->setRoomName(cfg.room_name);
 
@@ -175,11 +183,9 @@ extern "C" void app_main(void) {
         SUBBOX_VAD_MAX_SPEECH_DURATION_MS
     );
 
-    // Primary online ASR (WebSocket to Pi 4) + Fallback offline KWS (ESP32-S3)
-    auto ws_asr = std::make_shared<WsASR>(SUBBOX_DEFAULT_WS_GATEWAY_URI, cfg.subbox_id);
-    auto offline_kws = std::make_shared<DummyASR>("Aetheria bật đèn");
-    auto asr = std::make_shared<FallbackASR>(ws_asr.get(), psram_ok ? offline_kws.get() : nullptr);
-    asr->init();
+    // Pi4 owns voice recognition and commands. A failed connection never invents a local command.
+    auto asr = std::make_shared<WsASR>(SUBBOX_DEFAULT_WS_GATEWAY_URI, cfg.subbox_id);
+    if (!asr->init()) ESP_LOGE(TAG, "Pi4 audio relay unavailable; voice control disabled until configured/restarted");
 
     auto audio_mgr = std::make_shared<AudioManager>(vad, asr);
     audio_mgr->init();
@@ -210,7 +216,7 @@ extern "C" void app_main(void) {
     });
 
     /* 5. Start Audio Transport Receiver */
-    transport->init();
+    if (!transport->init()) subbox_led_set_error(true);
 
     /* 6. Start Multi-Core FreeRTOS Pipeline */
     auto task_mgr = std::make_shared<TaskManager>(
@@ -218,7 +224,7 @@ extern "C" void app_main(void) {
         context_mgr, registry, command_router, rule_engine,
         room_mgr, mqtt
     );
-    task_mgr->init();
+    if (!task_mgr->init()) subbox_led_set_error(true);
 
     /* 7. Start MQTT Client (Asynchronous reconnect loop) */
     mqtt->init();

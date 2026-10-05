@@ -10,6 +10,7 @@
 #include <cstdio>
 #include "storage/security_config.h"
 #include "esp_timer.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "WS_ASR";
 
@@ -44,17 +45,35 @@ bool WsASR::init() {
              m_uri.c_str(), m_node_id.c_str());
 
     m_disconnected_at = esp_timer_get_time();
-    m_uri = SecurityConfig::get("ws_uri");
+    std::string sec_uri = SecurityConfig::get("ws_uri");
+    if (!sec_uri.empty()) {
+        m_uri = sec_uri;
+    }
     m_ca = SecurityConfig::get("ca_pem");
     const auto token = SecurityConfig::get("ws_token");
-    if (m_uri.rfind("wss://", 0) != 0 || m_ca.empty() || token.empty() ||
-        token.find_first_of("\r\n") != std::string::npos || m_node_id.find_first_of("\r\n") != std::string::npos) {
+
+    bool is_wss = (m_uri.rfind("wss://", 0) == 0);
+    bool is_ws = (m_uri.rfind("ws://", 0) == 0);
+    if (!is_wss && !is_ws) {
+        ESP_LOGE(TAG, "Invalid WS URI scheme: %s", m_uri.c_str());
+        return false;
+    }
+
+    if (is_wss && (m_ca.empty() || token.empty())) {
         ESP_LOGE(TAG, "WSS unavailable: provision URI, pinned CA and per-device token over USB");
         return false;
     }
-    m_headers = "Authorization: Bearer " + token + "\r\nX-Device-ID: " + m_node_id + "\r\n";
+
+    if (!token.empty()) {
+        m_headers = "Authorization: Bearer " + token + "\r\nX-Device-ID: " + m_node_id + "\r\n";
+    } else {
+        m_headers = "X-Device-ID: " + m_node_id + "\r\n";
+    }
+
     esp_websocket_client_config_t ws_cfg = {};
-    ws_cfg.cert_pem = m_ca.c_str();
+    if (is_wss) {
+        ws_cfg.cert_pem = m_ca.c_str();
+    }
     ws_cfg.headers = m_headers.c_str();
     ws_cfg.uri = m_uri.c_str();
     ws_cfg.buffer_size = 4096;
@@ -63,6 +82,7 @@ bool WsASR::init() {
     ws_cfg.ping_interval_sec = 15;
     ws_cfg.pingpong_timeout_sec = 30;
     ws_cfg.disable_auto_reconnect = false;
+    ws_cfg.enable_close_reconnect = true;
 
     m_client = esp_websocket_client_init(&ws_cfg);
     if (!m_client) {
@@ -84,6 +104,11 @@ bool WsASR::init() {
     return true;
 }
 
+void WsASR::setSourceNodeId(const char* node_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_source_node_id = node_id ? node_id : "";
+}
+
 bool WsASR::start() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_has_final = false;
@@ -102,20 +127,33 @@ bool WsASR::start() {
         return false;
     }
 
-    char start_msg[160];
+    if (m_source_node_id.empty() || m_source_node_id.size() > 31 ||
+        m_source_node_id.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) {
+        ESP_LOGE(TAG, "Cannot relay audio without a valid ActionBox source ID");
+        return false;
+    }
+    char start_msg[256];
     snprintf(start_msg, sizeof(start_msg),
-             "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"node_id\":\"%s\",\"speaker\":false,\"asr_only\":true}",
-             m_node_id.c_str());
+             "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"node_id\":\"%s\",\"speaker\":false,\"audio_relay\":true,\"asr_only\":false}",
+             m_source_node_id.c_str());
 
     int sent = esp_websocket_client_send_text(m_client, start_msg, strlen(start_msg), pdMS_TO_TICKS(1000));
-    if (sent < 0) {
+    if (sent != (int)strlen(start_msg)) {
         ESP_LOGE(TAG, "Failed to send START to Pi 4 ASR!");
         return false;
     }
 
     m_streaming = true;
-    ESP_LOGI(TAG, "🎙️ ASR streaming session started -> Streaming mic PCM to Pi 4...");
+    ESP_LOGI(TAG, "PCM relay started from %s -> Pi 4 owns ASR and command processing", m_source_node_id.c_str());
     return true;
+}
+
+void WsASR::cancel() {
+    if (m_streaming.load() && m_client && m_connected.load()) {
+        const char* message = "{\"type\":\"cancel\"}";
+        esp_websocket_client_send_text(m_client, message, strlen(message), pdMS_TO_TICKS(1000));
+    }
+    reset();
 }
 
 void WsASR::stop() {
@@ -124,12 +162,19 @@ void WsASR::stop() {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_send_buf_count > 0 && m_client && m_connected.load()) {
-            esp_websocket_client_send_bin(
+            int sent = esp_websocket_client_send_bin(
                 m_client,
                 reinterpret_cast<const char*>(m_send_buf),
                 m_send_buf_count * sizeof(int16_t),
                 pdMS_TO_TICKS(1000)
             );
+            if (sent != (int)(m_send_buf_count * sizeof(int16_t))) {
+                const char* cancel_msg = "{\"type\":\"cancel\"}";
+                esp_websocket_client_send_text(m_client, cancel_msg, strlen(cancel_msg), pdMS_TO_TICKS(1000));
+                m_streaming = false;
+                m_send_buf_count = 0;
+                return;
+            }
             m_send_buf_count = 0;
         }
     }
@@ -163,7 +208,7 @@ bool WsASR::feedAudio(const int16_t* pcm, size_t samples) {
                 pdMS_TO_TICKS(1000)
             );
             m_send_buf_count = 0;
-            if (sent < 0) return false;
+            if (sent != (int)sizeof(m_send_buf)) return false;
         }
     }
     return true;
@@ -223,14 +268,15 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
             self->m_connected = true;
             // Send compact hello
             {
-                char hello[128];
+                char hello[192];
                 snprintf(hello, sizeof(hello),
-                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":false,\"asr_only\":true,\"rl\":[0,0],\"cfg\":1}",
+                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":false,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
                          self->m_node_id.c_str());
                 esp_websocket_client_send_text(self->m_client, hello, strlen(hello), pdMS_TO_TICKS(1000));
             }
             break;
 
+        case WEBSOCKET_EVENT_CLOSED:
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "⚠️ Disconnected from Pi 4 Audio Server");
             self->m_connected = false;
@@ -263,21 +309,49 @@ void WsASR::handleTextMessage(const char* data, int len) {
             cJSON* text = cJSON_GetObjectItem(root, "text");
             cJSON* conf = cJSON_GetObjectItem(root, "confidence");
             float confidence = (conf && cJSON_IsNumber(conf)) ? (float)conf->valuedouble : 1.0f;
+            const bool accepted = cJSON_IsTrue(cJSON_GetObjectItem(root, "accepted"));
 
             if (cJSON_IsString(text) && text->valuestring) {
                 std::lock_guard<std::mutex> lock(m_mutex);
-                // Fail closed if the Gateway does not explicitly accept recognition.
-                const bool accepted = cJSON_IsTrue(cJSON_GetObjectItem(root, "accepted"));
                 m_final_result = accepted ? text->valuestring : "";
                 m_confidence = confidence;
                 m_has_final = true;
 
-                ESP_LOGI(TAG, "📢 [REAL VIETNAMESE ASR] Decoded: \"%s\" (Confidence: %.2f)",
-                         m_final_result.c_str(), m_confidence);
+                ESP_LOGI(TAG, "📢 [REAL VIETNAMESE ASR] Decoded: \"%s\" (Confidence: %.2f, Accepted: %d)",
+                         m_final_result.c_str(), m_confidence, accepted);
 
                 if (m_result_sem) {
                     xSemaphoreGive(m_result_sem);
                 }
+            }
+
+            if (!accepted) {
+                ESP_LOGW(TAG, "ASR transcript rejected -> Triggering acoustic error feedback");
+                SoundPlayer::instance().play(SoundType::ERROR);
+            }
+        } else if (strcmp(type->valuestring, "command_result") == 0) {
+            cJSON* verify = cJSON_GetObjectItem(root, "verify");
+            cJSON* reply = cJSON_GetObjectItem(root, "voice_reply");
+            const char* v_str = cJSON_IsString(verify) ? verify->valuestring : "";
+            const char* r_str = cJSON_IsString(reply) ? reply->valuestring : "";
+
+            ESP_LOGI(TAG, "🎯 [COMMAND_RESULT] Verify: \"%s\" | Reply: \"%s\"", v_str, r_str);
+
+            if (strcmp(v_str, "success") == 0 || strcmp(v_str, "alarm_played") == 0 || strcmp(v_str, "conversational") == 0) {
+                ESP_LOGI(TAG, "Acoustic feedback: Command SUCCESS -> Melodic confirmation chime");
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            } else {
+                ESP_LOGW(TAG, "Acoustic feedback: Command FAILED (%s) -> Negative error cue", v_str);
+                SoundPlayer::instance().play(SoundType::ERROR);
+            }
+
+            CommandResultCallback cb_copy = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                cb_copy = m_cmd_result_cb;
+            }
+            if (cb_copy) {
+                cb_copy(v_str, r_str);
             }
         } else if (strcmp(type->valuestring, "status") == 0) {
             cJSON* state = cJSON_GetObjectItem(root, "state");

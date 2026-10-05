@@ -16,6 +16,9 @@
 #include "nvs_storage.h"
 
 #include <string.h>
+#include <atomic>
+#include "cJSON.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -23,6 +26,7 @@
 #include "esp_timer.h"
 
 static const char *TAG = "TASK_MGR";
+static std::atomic<int> s_upstream_error(3);
 
 typedef struct {
     uint8_t            channel;
@@ -139,6 +143,32 @@ static void network_task(void *pvParameters) {
             memcpy(json_buf, rx_pkt.payload, copy_len);
             json_buf[copy_len] = '\0';
 
+            /* Check if this is a SubBox heartbeat broadcast */
+            if (strstr(json_buf, "\"heartbeat\"") != NULL || strstr(json_buf, "\"subbox_id\"") != NULL) {
+                safety_feed_network_watchdog();
+                if (!espnow_transport_is_paired()) {
+                    espnow_transport_pair_subbox(rx_pkt.mac);
+                }
+                cJSON *hb_root = cJSON_Parse(json_buf);
+                if (hb_root) {
+                    const auto* wifi = cJSON_GetObjectItemCaseSensitive(hb_root, "wifi");
+                    const auto* mqtt = cJSON_GetObjectItemCaseSensitive(hb_root, "mqtt");
+                    s_upstream_error.store(!cJSON_IsTrue(wifi) ? 2 : (!cJSON_IsTrue(mqtt) ? 3 : 0));
+                    cJSON *ch_item = cJSON_GetObjectItem(hb_root, "channel");
+                    if (cJSON_IsNumber(ch_item) && ch_item->valueint >= 1 && ch_item->valueint <= 13) {
+                        uint8_t cur_ch = 0;
+                        wifi_second_chan_t sec;
+                        esp_wifi_get_channel(&cur_ch, &sec);
+                        if (cur_ch != (uint8_t)ch_item->valueint) {
+                            ESP_LOGI(TAG, "Syncing Wi-Fi channel with SubBox: Ch%d -> Ch%d", cur_ch, ch_item->valueint);
+                            esp_wifi_set_channel((uint8_t)ch_item->valueint, WIFI_SECOND_CHAN_NONE);
+                        }
+                    }
+                    cJSON_Delete(hb_root);
+                }
+                continue;
+            }
+
             ActionBoxCommand cmd;
             esp_err_t err = protocol_parse_command(json_buf, &cmd);
             if (err == ESP_OK) {
@@ -195,6 +225,17 @@ static void telemetry_task(void *pvParameters) {
     const TickType_t xTelemetryPeriod = pdMS_TO_TICKS(TELEMETRY_REPORT_INTERVAL_MS);
 
     while (1) {
+        // LED2 remains reserved for voice capture. LED1 reports the failing hop.
+        const bool fault = relay_get_fault(1) != RELAY_FAULT_NONE || relay_get_fault(2) != RELAY_FAULT_NONE;
+        const int code = fault ? 4 : (safety_is_network_timed_out() ? 1 : s_upstream_error.load());
+        static int previous = -1;
+        if (code != previous) {
+            previous = code;
+            const char* labels[] = {"READY", "SUBBOX_MISSING", "SUBBOX_WIFI_OFFLINE", "GATEWAY_MQTT_OFFLINE", "RELAY_FAULT"};
+            ESP_LOGI(TAG, "LED1 code=%d %s", code, labels[code]);
+        }
+        led_set_pattern(1, code == 0 ? LED_PATTERN_BLINK_FAST : static_cast<LedPattern>(LED_PATTERN_ERROR_1 + code - 1));
+
         /* Run LED animation tick non-blocking */
         led_driver_tick();
 
@@ -202,10 +243,9 @@ static void telemetry_task(void *pvParameters) {
         if ((now - xLastTelemetryTime) >= xTelemetryPeriod) {
             xLastTelemetryTime = now;
 
-            /* Check if network is disconnected / timed out (>10s): scan channels 1-13 */
-            if (safety_is_network_timed_out() && espnow_transport_is_paired()) {
-                ESP_LOGW(TAG, "SubBox communication heartbeat timeout (>10s). Scanning Wi-Fi channels 1-13...");
-                espnow_transport_scan_channels();
+            /* Check if network is disconnected / timed out: hop channel to scan for SubBox */
+            if (safety_is_network_timed_out()) {
+                espnow_transport_hop_channel();
             }
 
             /* Serialize and send periodic telemetry */

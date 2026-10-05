@@ -1,5 +1,34 @@
 # SubBox / SubGateway Firmware
 
+## Current voice mode: Pi4 processing only
+
+ActionBox captures 16 kHz mono PCM and sends it over ESP-NOW. SubBox forwards
+the PCM over WebSocket with the originating ActionBox `node_id`,
+`audio_relay: true`, and `asr_only: false`. Pi4 performs speech recognition,
+intent extraction and device selection, then sends commands through
+MQTT -> SubBox -> ActionBox. Audio sockets are not relay-command transports.
+
+Local DummyASR/offline fallback and the SubBox voice NLU task are disabled.
+Gateway transcripts are diagnostic only: they never trigger a second local
+command. If the audio connection fails, no fallback command is generated.
+ActionBox keeps energy VAD and push-to-talk for recording boundaries, with
+WakeNet disabled; saying "Hi ESP" is no longer required.
+
+Deploy the updated `Gateway/gateway/audio_server.py` and restart the Gateway,
+then build/flash both ActionBox and SubBox. The WebSocket URI must point to the
+Pi audio server (port 8765); the existing security configuration overrides the
+default URI in `src/config/subbox_config.h`.
+
+Offline checks from the repository root:
+
+```sh
+python3 -m unittest discover -s Gateway/tests -p test_audio_relay.py -v
+python3 -m unittest discover -s Firmware/tests -p test_audio_relay.py -v
+```
+
+The older local-ASR/NLU architecture described below is historical and is not
+the active microphone path.
+
 Production-grade firmware for the **ESP32-S3 SubBox (SubGateway)** — the intelligent local room brain and distributed audio hub of the smart-home IoT ecosystem, built on **ESP-IDF 6.0.2** and **FreeRTOS** (PlatformIO compatible).
 
 ---

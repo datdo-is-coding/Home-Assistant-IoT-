@@ -359,8 +359,45 @@ class RegistryManager:
         ip = payload.get("ip")
         now = datetime.now(TZ_VN).isoformat()
 
+        # 1. Check if this MAC or ID already belongs to an existing provisioned node
+        existing_node_id = None
+        if node_id and node_id in self.data["nodes"]:
+            existing_node_id = node_id
+        elif mac:
+            for nid, ninfo in self.data["nodes"].items():
+                n_mac = (ninfo.get("mac") or ninfo.get("address", {}).get("mac") or "").upper()
+                if n_mac == mac:
+                    existing_node_id = nid
+                    break
+
+        # If the device was re-flashed (e.g. FACTORY_NEW or cfg is None), but its MAC is already registered:
+        # Auto-relink to the existing registered node instead of creating an annoying duplicate pending device!
+        if existing_node_id and (state == "FACTORY_NEW" or cfg is None or node_id != existing_node_id):
+            logger.info(f"🔄 [Registry] Re-flashed device detected (MAC={mac}) -> Auto-relinking to existing node '{existing_node_id}'")
+            # Clean up any stale pending entries with this MAC or ID
+            if mac:
+                for k, v in list(self.data["pending"].items()):
+                    if k.upper() == mac.upper() or (v.get("mac") and v.get("mac").upper() == mac.upper()) or k == existing_node_id:
+                        del self.data["pending"][k]
+            elif existing_node_id in self.data["pending"]:
+                del self.data["pending"][existing_node_id]
+
+            n = self.data["nodes"][existing_node_id]
+            n["last_seen"] = now
+            n["status"] = "online"
+            if rssi is not None: n["rssi"] = rssi
+            if ip: n["ip"] = ip
+            n["relay_state"] = rl
+            if "address" not in n: n["address"] = {}
+            if ip: n["address"]["ip"] = ip
+            if mac: n["address"]["mac"] = mac
+            n["address"]["last_seen"] = now
+            self._sync_node_to_sqlite(existing_node_id, n)
+            self.save()
+            return {"action": "cfg_mismatch", "node_id": existing_node_id, "mac": mac}
+
         # Check if node is unprovisioned or in FACTORY_NEW state:
-        is_factory = (state == "FACTORY_NEW" or cfg is None or (node_id and node_id not in self.data["nodes"]))
+        is_factory = (state == "FACTORY_NEW" or cfg is None or not existing_node_id)
         if is_factory:
             clean_mac = mac.replace(":", "").lower()
             pending_key = node_id or (f"node_{clean_mac[-8:]}" if clean_mac else "unknown")
@@ -391,16 +428,16 @@ class RegistryManager:
             return {"action": "pending", "node_id": pending_key, "mac": mac}
 
         # Đã provision và có trong registry → update heartbeat & address block
-        if node_id and node_id in self.data["nodes"]:
+        if existing_node_id:
             # Đảm bảo dọn sạch bất kỳ pending entry nào còn sót lại của node này
             if mac:
                 for k, v in list(self.data["pending"].items()):
-                    if k.upper() == mac.upper() or (v.get("mac") and v.get("mac").upper() == mac.upper()) or k == node_id:
+                    if k.upper() == mac.upper() or (v.get("mac") and v.get("mac").upper() == mac.upper()) or k == existing_node_id:
                         del self.data["pending"][k]
-            elif node_id in self.data["pending"]:
-                del self.data["pending"][node_id]
+            elif existing_node_id in self.data["pending"]:
+                del self.data["pending"][existing_node_id]
 
-            n = self.data["nodes"][node_id]
+            n = self.data["nodes"][existing_node_id]
             n["last_seen"] = now
             n["status"] = "online"
             if rssi is not None: n["rssi"] = rssi
@@ -430,15 +467,15 @@ class RegistryManager:
                     n["cfg_version"] = cfg
                     n["reported_config_version"] = cfg
                     n["sync_status"] = "SYNCED"
-                    logger.info(f"🔄 Auto-synced node {node_id} registry version to node's newer cfg={cfg}")
+                    logger.info(f"🔄 Auto-synced node {existing_node_id} registry version to node's newer cfg={cfg}")
                     self.save()
-                    return {"action": "known", "node_id": node_id}
+                    return {"action": "known", "node_id": existing_node_id}
                 else:
-                    logger.warning(f"cfg mismatch {node_id}: node cfg={cfg} expected={expected} → will re-provision")
+                    logger.warning(f"cfg mismatch {existing_node_id}: node cfg={cfg} expected={expected} → will re-provision")
                     self.save()
-                    return {"action": "cfg_mismatch", "node_id": node_id, "expected": expected, "got": cfg}
+                    return {"action": "cfg_mismatch", "node_id": existing_node_id, "expected": expected, "got": cfg}
             self.save()
-            return {"action": "known", "node_id": node_id}
+            return {"action": "known", "node_id": existing_node_id}
 
         # Chưa biết → lưu vào pending
         pending_key = node_id or (f"node_{mac.replace(':', '').lower()[-8:]}" if mac else "unknown_node")
@@ -486,6 +523,11 @@ class RegistryManager:
                 conn.execute("DELETE FROM devices WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM device_configs WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM device_capabilities WHERE device_id = ?", (node_id,))
+                conn.execute("DELETE FROM registry_entries WHERE entry_id = ?", (node_id,))
+                try:
+                    conn.execute("DELETE FROM user_devices WHERE node_id = ?", (node_id,))
+                except Exception:
+                    pass
                 conn.commit()
             deleted = True
         except Exception as e:
@@ -546,6 +588,13 @@ class RegistryManager:
 
         actual_id = pending.get("device_id") or mac_or_id
         mac = (pending.get("mac") or "").upper()
+
+        # Xóa node cũ trong nodes nếu đã từng đăng ký dưới ID khác nhưng cùng MAC
+        if mac:
+            for old_id, old_node in list(self.data["nodes"].items()):
+                if old_id != actual_id and old_node.get("address", {}).get("mac", "").upper() == mac:
+                    logger.info(f"Removing obsolete node '{old_id}' with duplicate MAC '{mac}' during provisioning.")
+                    self.data["nodes"].pop(old_id, None)
         hardware = pending.get("hardware", "esp32s3")
         serial = pending.get("serial", "S3-2026-000000")
         ip = pending.get("ip")
@@ -652,31 +701,43 @@ class RegistryManager:
         # Update channels if provided
         ch1_type = d.get("ch1_type") or d.get("rl1")
         ch1_name = d.get("ch1_name")
+        ch1_aliases = d.get("ch1_aliases")
         ch2_type = d.get("ch2_type") or d.get("rl2")
         ch2_name = d.get("ch2_name")
+        ch2_aliases = d.get("ch2_aliases")
 
         if "channels" not in n:
             n["channels"] = {}
 
-        if ch1_type or ch1_name:
+        if ch1_type or ch1_name or ch1_aliases is not None:
             ch1 = n["channels"].setdefault("ch1", {})
             if ch1_type:
                 dt = canon_device(ch1_type)
                 ch1["device_type"] = dt
                 ch1["fullname"] = f"{device_id}-{dt}"
-                ch1["aliases"] = [dt]
+                if "aliases" not in ch1:
+                    ch1["aliases"] = [dt]
+                elif dt not in ch1["aliases"]:
+                    ch1["aliases"].append(dt)
             if ch1_name:
                 ch1["name"] = ch1_name
+            if isinstance(ch1_aliases, list):
+                ch1["aliases"] = [str(a).strip().lower() for a in ch1_aliases if str(a).strip()]
 
-        if ch2_type or ch2_name:
+        if ch2_type or ch2_name or ch2_aliases is not None:
             ch2 = n["channels"].setdefault("ch2", {})
             if ch2_type:
                 dt = canon_device(ch2_type)
                 ch2["device_type"] = dt
                 ch2["fullname"] = f"{device_id}-{dt}"
-                ch2["aliases"] = [dt]
+                if "aliases" not in ch2:
+                    ch2["aliases"] = [dt]
+                elif dt not in ch2["aliases"]:
+                    ch2["aliases"].append(dt)
             if ch2_name:
                 ch2["name"] = ch2_name
+            if isinstance(ch2_aliases, list):
+                ch2["aliases"] = [str(a).strip().lower() for a in ch2_aliases if str(a).strip()]
 
         # Increment configuration version for Twin Sync
         cur_v = n.get("cfg_version", 1) + 1
@@ -708,6 +769,74 @@ class RegistryManager:
         self.save()
         logger.info(f"✏️ [Registry] Updated device {device_id}: name='{n.get('name')}', room='{n.get('room')}', v={cur_v}")
         return n
+
+    def add_device_alias(self, node_id: str, channel: str, alias: str) -> bool:
+        """Thêm từ vựng/khẩu lệnh cho một kênh thiết bị và lưu persistent vào SQLite."""
+        if not node_id or not alias:
+            return False
+
+        if "::" in node_id:
+            parts = node_id.split("::", 1)
+            node_id = parts[0]
+            if not channel:
+                channel = parts[1]
+
+        channel = channel or "ch1"
+        clean_alias = str(alias).strip().lower()
+        if not clean_alias:
+            return False
+
+        if node_id not in self.data["nodes"]:
+            logger.warning(f"Device {node_id} not found when adding alias '{clean_alias}'")
+            return False
+
+        n = self.data["nodes"][node_id]
+        channels = n.setdefault("channels", {})
+        ch = channels.setdefault(channel, {})
+        aliases = ch.setdefault("aliases", [])
+
+        if clean_alias not in aliases:
+            aliases.append(clean_alias)
+            cur_v = n.get("cfg_version", 1) + 1
+            n["cfg_version"] = cur_v
+            n["last_seen"] = datetime.now(TZ_VN).isoformat()
+            self.save()
+            logger.info(f"[VOCAB][STORE] saved alias '{clean_alias}' for {node_id}::{channel}")
+            return True
+        return True
+
+    def remove_device_alias(self, node_id: str, channel: str, alias: str) -> bool:
+        """Xóa từ vựng/khẩu lệnh của một kênh thiết bị và lưu persistent vào SQLite."""
+        if not node_id or not alias:
+            return False
+
+        if "::" in node_id:
+            parts = node_id.split("::", 1)
+            node_id = parts[0]
+            if not channel:
+                channel = parts[1]
+
+        channel = channel or "ch1"
+        clean_alias = str(alias).strip().lower()
+
+        if node_id not in self.data["nodes"]:
+            return False
+
+        n = self.data["nodes"][node_id]
+        channels = n.get("channels", {})
+        ch = channels.get(channel)
+        if not ch or "aliases" not in ch:
+            return False
+
+        if clean_alias in ch["aliases"]:
+            ch["aliases"].remove(clean_alias)
+            cur_v = n.get("cfg_version", 1) + 1
+            n["cfg_version"] = cur_v
+            n["last_seen"] = datetime.now(TZ_VN).isoformat()
+            self.save()
+            logger.info(f"[VOCAB][STORE] removed alias '{clean_alias}' from {node_id}::{channel}")
+            return True
+        return True
 
     def get_provision_payload(self, node_id: str) -> Optional[dict]:
         """Payload cfg gửi xuống ESP32 theo đúng User Identity"""
@@ -1099,9 +1228,21 @@ class RegistryManager:
                 if nr in [slug(x) for x in alist] and area_s == canon: return True
             return False
 
+        now_utc = datetime.now(timezone.utc)
         candidates = []
         for nid, node in self.data["nodes"].items():
             if node.get("status") != "online": continue
+            # Check last_seen freshness for mock nodes without physical MAC
+            last_seen_str = node.get("last_seen")
+            if last_seen_str and not node.get("mac"):
+                try:
+                    dt = datetime.fromisoformat(last_seen_str)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    if (now_utc - dt).total_seconds() > 300:
+                        continue
+                except Exception:
+                    pass
             if not matches_room(node): continue
             for ch_id, ch in node.get("channels", {}).items():
                 if matches_channel(ch_id, ch): candidates.append((nid, ch_id))
@@ -1109,7 +1250,32 @@ class RegistryManager:
 
     def find_node_by_device(self, device_type: str, area: str = None) -> Optional[Tuple[str, str]]:
         candidates = self.find_device_candidates(device_type, area)
-        return candidates[0] if len(candidates) == 1 else None
+        if len(candidates) == 1:
+            return candidates[0]
+        if len(candidates) > 1:
+            # 1. Prioritize nodes with physical MAC and fresh heartbeat (< 120s)
+            now_utc = datetime.now(timezone.utc)
+            fresh_candidates = []
+            for nid, ch_id in candidates:
+                n = self.data["nodes"].get(nid, {})
+                last_seen_str = n.get("last_seen")
+                if last_seen_str and n.get("mac"):
+                    try:
+                        dt = datetime.fromisoformat(last_seen_str)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if 0 <= (now_utc - dt).total_seconds() < 120:
+                            fresh_candidates.append((nid, ch_id))
+                    except Exception:
+                        pass
+            if len(fresh_candidates) == 1:
+                return fresh_candidates[0]
+            # 2. If room was unspecified and all fresh candidates belong to the same physical node
+            if not area and len(fresh_candidates) > 1:
+                unique_nodes = {nid for nid, ch in fresh_candidates}
+                if len(unique_nodes) == 1:
+                    return fresh_candidates[0]
+        return None
 
     def resolve_fullname(self, node_id: str, channel: str) -> str:
         ch = self.data["nodes"].get(node_id, {}).get("channels", {}).get(channel, {})

@@ -38,6 +38,8 @@ idf_component_register(
         esp_system
         esp_driver_gpio
         esp_driver_uart
+        esp_driver_i2s
+        driver
         espressif__mqtt
         espressif__cjson
         espressif__esp_websocket_client

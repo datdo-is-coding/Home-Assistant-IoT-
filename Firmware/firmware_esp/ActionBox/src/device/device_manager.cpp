@@ -39,6 +39,7 @@ esp_err_t device_manager_init(void) {
 
 void device_manager_update_leds(void) {
     for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ch++) {
+        if (ch == 1) continue; /* LED1 is dedicated to System Connection Status & Faults */
         RelayFault flt = relay_get_fault(ch);
         if (flt != RELAY_FAULT_NONE) {
             led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
@@ -81,7 +82,7 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
                 strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
                 strncpy(out_resp->state, "ON", sizeof(out_resp->state) - 1);
                 nvs_storage_record_relay_state(cmd->channel, RELAY_STATE_ON);
-                led_set_pattern(cmd->channel, LED_PATTERN_ON);
+                if (cmd->channel != 1) led_set_pattern(cmd->channel, LED_PATTERN_ON);
             } else {
                 out_resp->success = false;
                 strncpy(out_resp->status, "ERROR", sizeof(out_resp->status) - 1);
@@ -98,7 +99,7 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
                 strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
                 strncpy(out_resp->state, "OFF", sizeof(out_resp->state) - 1);
                 nvs_storage_record_relay_state(cmd->channel, RELAY_STATE_OFF);
-                led_set_pattern(cmd->channel, LED_PATTERN_OFF);
+                if (cmd->channel != 1) led_set_pattern(cmd->channel, LED_PATTERN_OFF);
             } else {
                 out_resp->success = false;
                 strncpy(out_resp->status, "ERROR", sizeof(out_resp->status) - 1);
@@ -171,7 +172,7 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
             out_resp->success = true;
             strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
             strncpy(out_resp->state, (st == RELAY_STATE_ON) ? "ON" : "OFF", sizeof(out_resp->state) - 1);
-            led_set_pattern(cmd->channel, (st == RELAY_STATE_ON) ? LED_PATTERN_ON : LED_PATTERN_OFF);
+            if (cmd->channel != 1) led_set_pattern(cmd->channel, (st == RELAY_STATE_ON) ? LED_PATTERN_ON : LED_PATTERN_OFF);
             ESP_LOGI(TAG, "Fault cleared on Ch%u by SubBox command", cmd->channel);
             break;
         }

@@ -13,6 +13,7 @@ import os
 import time
 import urllib.parse
 from http.cookies import SimpleCookie
+from datetime import datetime, timezone
 from typing import Set, Dict, Any, Optional
 
 import config
@@ -1939,6 +1940,24 @@ class WebServer:
         if hasattr(self.gateway, "auth") and self.gateway.auth:
             all_nodes = self.gateway.auth.filter_nodes(user, all_nodes)
 
+        # A persisted "online" flag is not a live connection. Legacy telemetry
+        # reports every 30s; allow 90s before hiding controls in the app.
+        all_nodes = {key: dict(value) for key, value in all_nodes.items()}
+        now = datetime.now(timezone.utc)
+        for node in all_nodes.values():
+            if node.get("status") != "online":
+                continue
+            try:
+                seen = datetime.fromisoformat(node.get("last_seen", ""))
+                if seen.tzinfo is None:
+                    seen = seen.replace(tzinfo=timezone.utc)
+                age = (now - seen).total_seconds()
+                fresh = 0 <= age < 90
+            except (ValueError, TypeError):
+                fresh = False
+            if not fresh:
+                node["status"] = "offline"
+
         disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
         return {
             "nodes": all_nodes,
@@ -2009,10 +2028,15 @@ class WebServer:
             async def _read_body():
                 return raw_body
             if current_user and current_user.get("role") != "admin":
-                allowed = (method == "GET" and path in {"/", "/index.html", "/api/nodes", "/api/events", "/api/auth/me", "/api/health"}) or (method == "POST" and path == "/api/auth/logout")
+                allowed = (method == "GET" and path in {"/", "/index.html", "/api/nodes", "/api/events", "/api/auth/me", "/api/health", "/api/voice/vocabulary"}) or (method == "POST" and path == "/api/auth/logout")
                 target = None
                 if method == "POST" and path == "/api/relay":
                     try: target = json.loads(raw_body).get("node_id")
+                    except (ValueError, AttributeError): pass
+                elif method == "POST" and path in {"/api/device/alias", "/api/device/alias/delete"}:
+                    try:
+                        b = json.loads(raw_body)
+                        target = (b.get("device_id") or b.get("node_id") or "").split("::")[0]
                     except (ValueError, AttributeError): pass
                 elif method == "GET" and path.startswith("/api/device/") and path.rsplit("/", 1)[-1] in {"twin", "telemetry"}:
                     target = query.get("id", query.get("device_id", [None]))[0]
@@ -2075,16 +2099,32 @@ class WebServer:
                 try:
                     d = json.loads(body.decode() or "{}")
                     node_id = d.get("node_id")
-                    channel = d.get("channel") or d.get("ch", "ch1")
-                    action = d.get("action") or d.get("s", "turn_on")
+                    channel = d.get("channel", d.get("ch"))
+                    action = d.get("action", d.get("s"))
                     
                     if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", 1, 2, "1", "2"):
                         await self._respond(writer, 400, {"error": "Use an explicit relay state and valid channel"}); return
-                    action = "TURN_ON" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "TURN_OFF"
+                    action = "turn_on" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "turn_off"
                     channel = "ch1" if channel in ("ch1", 1, "1") else "ch2"
-                    result = await self.gateway.verifier.verify_command(node_id, channel, action)
+                    result, *_ = await self.gateway.verifier.verify_command(node_id, channel, action)
                     outcome = result.value
-                    resp_data = {"success": outcome.upper() == "CONFIRMED_LOAD", "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
+                    is_ok = outcome in {"ack_only", "confirmed_load"}
+
+                    # Immediate registry state update so refresh() returns current state without waiting for telemetry
+                    if is_ok and hasattr(self.gateway, "registry"):
+                        node = self.gateway.registry.data.get("nodes", {}).get(node_id)
+                        if node:
+                            ch_idx = 0 if channel == "ch1" else 1
+                            new_val = 1 if action == "turn_on" else 0
+                            cur_rl = list(node.get("relay_state", [0, 0]))
+                            while len(cur_rl) <= ch_idx:
+                                cur_rl.append(0)
+                            cur_rl[ch_idx] = new_val
+                            self.gateway.registry.update_relay_state(node_id, cur_rl)
+                            if hasattr(self.gateway, "broadcast_event"):
+                                self.gateway.broadcast_event("relay_state", {"node_id": node_id, "relay_state": cur_rl})
+
+                    resp_data = {"success": is_ok, "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
@@ -2146,8 +2186,11 @@ class WebServer:
                     if not dev_id:
                         resp_data = {"success": False, "error": "device_id is required"}
                     else:
-                        ok = self.gateway.registry.delete_node(dev_id)
-                        self.broadcast_event("device_deleted", {"device_id": dev_id})
+                        if hasattr(self.gateway, "delete_device"):
+                            ok = await self.gateway.delete_device(dev_id)
+                        else:
+                            ok = self.gateway.registry.delete_node(dev_id)
+                            self.broadcast_event("device_deleted", {"device_id": dev_id})
                         resp_data = {"success": ok, "device_id": dev_id}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
@@ -2170,6 +2213,48 @@ class WebServer:
                         resp_data = {"success": True, "device": updated}
                     else:
                         resp_data = {"success": False, "error": "Gateway update_device not available"}
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Device Voice Alias / Vocabulary ──
+            if method == "POST" and (path == "/api/device/alias" or path == "/api/device/alias/delete"):
+                body = await _read_body()
+                try:
+                    d = json.loads(body.decode() or "{}")
+                    dev_id = d.get("device_id") or d.get("node_id")
+                    channel = d.get("channel")
+                    alias = d.get("alias")
+                    action = d.get("action", "remove" if path.endswith("/delete") else "add")
+
+                    logger.info(f"[VOCAB][RX] received vocabulary: deviceId={dev_id}, channel={channel}, alias={alias}, action={action}")
+
+                    if not dev_id or not alias:
+                        resp_data = {"success": False, "error": "device_id and alias are required"}
+                    else:
+                        if action == "remove":
+                            resp_data = await self.gateway.remove_device_alias(dev_id, channel, alias)
+                        else:
+                            resp_data = await self.gateway.add_device_alias(dev_id, channel, alias)
+                except Exception as e:
+                    resp_data = {"success": False, "error": str(e)}
+                body = json.dumps(resp_data, ensure_ascii=False).encode()
+                writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
+                              f"Content-Length: {len(body)}\r\n"
+                              f"Connection: close\r\n\r\n").encode() + body)
+                await writer.drain(); writer.close(); return
+
+            # ── API: Voice Vocabulary Diagnostics ──
+            if method == "GET" and path == "/api/voice/vocabulary":
+                try:
+                    if hasattr(self.gateway, "get_voice_vocabulary_diagnostics"):
+                        resp_data = self.gateway.get_voice_vocabulary_diagnostics()
+                    else:
+                        resp_data = {"success": False, "error": "Voice vocabulary diagnostics not available"}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()

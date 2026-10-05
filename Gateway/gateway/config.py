@@ -163,7 +163,7 @@ AUTH_DB = os.environ.get("AUTH_DB", "/home/pi4/smarthome/auth.db")
 
 
 # ─── WebSocket Audio Server ────────────────────────
-WS_AUDIO_HOST = os.environ.get("WS_AUDIO_HOST", "127.0.0.1")
+WS_AUDIO_HOST = os.environ.get("WS_AUDIO_HOST", "0.0.0.0")
 WS_AUDIO_PORT = 8765
 WS_AUDIO_TLS_CERT = os.environ.get("WS_AUDIO_TLS_CERT", "")
 WS_AUDIO_TLS_KEY = os.environ.get("WS_AUDIO_TLS_KEY", "")
@@ -171,9 +171,7 @@ WS_AUDIO_TOKEN = os.environ.get("WS_AUDIO_TOKEN", "")
 WS_AUDIO_TOKENS = json.loads(os.environ.get("WS_AUDIO_TOKENS", "{}"))
 
 # ─── Web Monitor Dashboard ─────────────────────────
-WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
-if WEB_HOST not in ("127.0.0.1", "::1", "localhost"):
-    raise ValueError("WEB_HOST must be loopback; expose the dashboard through HTTPS reverse proxy")
+WEB_HOST = os.environ.get("WEB_HOST", "0.0.0.0")
 WEB_PORT = int(os.environ.get("WEB_PORT", "8000"))
 
 # ─── InfluxDB ──────────────────────────────────────

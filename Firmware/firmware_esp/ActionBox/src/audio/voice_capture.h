@@ -1,12 +1,12 @@
 /**
  * @file voice_capture.h
- * @brief Voice Capture, WakeNet ("Hi ESP") & VAD Streaming Engine for ActionBox
+ * @brief PCM microphone capture and transport for Pi4 voice processing
  *
  * Architecture:
  * - INMP441 I2S MEMS Microphone (16kHz / 16-bit Mono)
  * - Bandpass Filter (180Hz HPF + 3400Hz LPF) & DC Offset Removal
- * - WakeNet Wake Word detection ("Hi ESP") & Real-time Energy VAD
- * - Automatic speech onset detection & 1.5s silence end detection
+ * - ESP-SR WakeNet9 "Hi ESP" wake word triggers capture (model partition)
+ * - 800ms silence end detection after the command is heard
  * - ESP-NOW Audio Chunk Streaming (240 bytes / 120 samples per packet to SubBox)
  * - Visual Feedback via LED2 (GPIO 47): ON during speech listening/streaming, OFF when idle
  */
@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 /**
- * @brief Initialize I2S microphone, audio DSP filters, WakeNet/VAD, and spawn capture task
+ * @brief Initialize I2S microphone, audio DSP filters, energy VAD, and spawn capture task
  * @return ESP_OK on success
  */
 esp_err_t voice_capture_init(void);
@@ -35,7 +35,7 @@ bool voice_capture_is_streaming(void);
 
 /**
  * @brief Manually or programmatically start a voice streaming session
- * @param trigger_source 0 = WakeNet "Hi ESP", 1 = VAD Energy onset, 2 = Button/Manual
+ * @param trigger_source 0 = "Hi ESP" wake word, 2 = Button/Manual
  */
 void voice_capture_start_streaming(uint8_t trigger_source);
 

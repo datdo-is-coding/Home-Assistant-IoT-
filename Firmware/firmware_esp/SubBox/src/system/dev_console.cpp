@@ -6,6 +6,11 @@
 #include "dev_console.h"
 #include <cstdio>
 #include <cstring>
+#include "cJSON.h"
+#include "storage/security_config.h"
+#include "storage/nvs_manager.h"
+#include "driver/gpio.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "nlu/normalizer/vietnamese_normalizer.h"
 #include "nlu/intent/intent_parser.h"
@@ -39,6 +44,9 @@ DevConsole::~DevConsole() {
 }
 
 bool DevConsole::init() {
+    // BOOT must be held for any USB configuration write.
+    gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
     m_running = true;
     BaseType_t res = xTaskCreatePinnedToCore(
         consoleTask,
@@ -60,30 +68,22 @@ void DevConsole::consoleTask(void* pvParameters) {
 
 void DevConsole::runConsoleLoop() {
     ESP_LOGI(TAG, "SubBox Dev Console ready. Type 'HELP' for commands.");
-    char line_buf[256];
-    size_t idx = 0;
-
+    std::string line;
+    bool overflow = false;
     while (m_running) {
         int c = getchar();
-        if (c != EOF && c != 0xFF) {
-            if (c == '\r' || c == '\n') {
-                if (idx > 0) {
-                    line_buf[idx] = '\0';
-                    processLine(line_buf);
-                    idx = 0;
-                }
-            } else if (c == '\b' || c == 127) {
-                if (idx > 0) {
-                    idx--;
-                    printf("\b \b");
-                }
-            } else if (idx < sizeof(line_buf) - 1) {
-                line_buf[idx++] = static_cast<char>(c);
-                putchar(c);
-            }
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
+        if (c == EOF || c == 0xFF) { clearerr(stdin); vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        if (c == '\r' || c == '\n') {
+            if (overflow) printf("PROVISION_ERROR line_too_long\n");
+            else if (!line.empty()) processLine(line);
+            line.clear();
+            overflow = false;
+        } else if (c == '\b' || c == 127) {
+            if (!line.empty()) line.pop_back();
+        } else if (line.size() < 12000 && !overflow) {
+            line.push_back(static_cast<char>(c));
+        } else { overflow = true; }
+        // Never echo USB input: it may contain passwords, tokens or trust keys.
     }
 }
 
@@ -91,7 +91,46 @@ void DevConsole::processLine(const std::string& line) {
     if (line.empty()) return;
     printf("\n");
 
-    if (line.rfind("CMD ", 0) == 0) {
+    if (line == "PROVISION_STATUS") {
+        SubBoxPersistentConfig cfg;
+        NVSManager::loadConfig(cfg);
+        printf("PROVISION_STATUS {\"boot_pressed\":%s,\"wifi_configured\":%s,\"mqtt_configured\":%s}\n",
+            SecurityConfig::physicalPresence() ? "true" : "false", cfg.wifi_ssid[0] ? "true" : "false",
+            (!SecurityConfig::get("mqtt_uri").empty() && !SecurityConfig::get("ca_pem").empty() &&
+             !SecurityConfig::get("mqtt_user").empty() && !SecurityConfig::get("mqtt_pass").empty()) ? "true" : "false");
+    }
+    else if (line.rfind("SEC ", 0) == 0 || line.rfind("WIFI ", 0) == 0) {
+        if (!SecurityConfig::physicalPresence()) { printf("PROVISION_ERROR hold_boot\n"); return; }
+        const bool wifi = line.rfind("WIFI ", 0) == 0;
+        cJSON* root = cJSON_ParseWithOpts(line.c_str() + (wifi ? 5 : 4), nullptr, true);
+        if (!cJSON_IsObject(root)) { cJSON_Delete(root); printf("PROVISION_ERROR invalid_json\n"); return; }
+        esp_err_t err = ESP_ERR_INVALID_ARG;
+        if (wifi) {
+            const char* ssid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "ssid"));
+            const char* pass = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "password"));
+            SubBoxPersistentConfig cfg;
+            NVSManager::loadConfig(cfg);
+            if (ssid && *ssid && strlen(ssid) < sizeof(cfg.wifi_ssid) && pass &&
+                strlen(pass) < sizeof(cfg.wifi_pass) && (strlen(pass) == 0 || strlen(pass) >= 8)) {
+                strcpy(cfg.wifi_ssid, ssid);
+                strcpy(cfg.wifi_pass, pass);
+                err = NVSManager::saveConfig(cfg);
+            }
+        } else {
+            const char* key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "key"));
+            const char* value = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "value"));
+            if (key && value) err = SecurityConfig::set(key, value);
+        }
+        cJSON_Delete(root);
+        printf(err == ESP_OK ? "PROVISION_OK\n" : "PROVISION_ERROR invalid_or_write_failed\n");
+    }
+    else if (line == "REBOOT") {
+        if (!SecurityConfig::physicalPresence()) { printf("PROVISION_ERROR hold_boot\n"); return; }
+        printf("PROVISION_OK rebooting\n");
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+    }
+    else if (line.rfind("CMD ", 0) == 0) {
         std::string raw_phrase = line.substr(4);
         std::string norm = VietnameseNormalizer::normalize(raw_phrase);
         IntentType intent = IntentParser::parse(norm);
@@ -141,6 +180,8 @@ void DevConsole::processLine(const std::string& line) {
         printf("  SAY <text>  - Inject speech transcript into ASR engine\n");
         printf("  STATUS      - Display room, audio, and ActionBox registry snapshot\n");
         printf("  TEST_NLU    - Execute comprehensive Vietnamese NLU unit test suite\n");
+        printf("  PROVISION_STATUS - Read setup status (no secrets)\n");
+        printf("  WIFI {ssid,password} / SEC {key,value} / REBOOT - USB setup; hold BOOT\n");
         printf("  HELP        - Display this menu\n");
     } else {
         printf("Unknown command. Type 'HELP' for available options.\n");

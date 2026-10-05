@@ -6,6 +6,7 @@
 #include "tts_manager.h"
 #include <cmath>
 #include "esp_log.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "TTS_MGR";
 
@@ -55,23 +56,15 @@ bool TTSManager::synthesize(const char* text, std::vector<int16_t>& pcm_out) {
 }
 
 bool TTSManager::speakResponse(const char* target_node_id, const std::string& text) {
-    std::vector<int16_t> pcm;
-    if (!synthesize(text.c_str(), pcm) || pcm.empty()) {
-        return false;
-    }
-
-    if (m_router) {
-        return m_router->sendAudioResponse(
-            target_node_id,
-            reinterpret_cast<const uint8_t*>(pcm.data()),
-            pcm.size() * sizeof(int16_t)
-        );
-    }
-    return false;
+    (void)target_node_id;
+    (void)text;
+    // Acoustic sound feedback only (no robotic TTS)
+    return SoundPlayer::instance().play(SoundType::SUCCESS);
 }
 
 bool TTSManager::playConfirmationChime(const char* target_node_id) {
-    return speakResponse(target_node_id, "ACK_CHIME");
+    (void)target_node_id;
+    return SoundPlayer::instance().play(SoundType::SUCCESS);
 }
 
 bool TTSManager::forwardPi4Audio(const char* target_node_id, const uint8_t* pcm_bytes, size_t len) {

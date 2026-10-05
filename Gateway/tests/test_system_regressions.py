@@ -156,5 +156,22 @@ class CacheBudget(unittest.TestCase):
         self.assertEqual(engine._mem_cache_bytes, 256)
 
 
+class ActionBoxDiscovery(unittest.IsolatedAsyncioTestCase):
+    async def test_real_hardware_identity_is_preserved_for_claiming(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            gateway = SmartHomeGateway.__new__(SmartHomeGateway)
+            gateway.registry = RegistryManager(str(Path(tmp) / 'registry.json'), str(Path(tmp) / 'registry.db'))
+            gateway.mqtt = MQTTHandler()
+            payload = {'node_id': 'AB001', 'hardware_uid': '28848533DDF8',
+                       'protocol_version': 3, 'config_version': 2868908033,
+                       'channels': [{'channel': 1, 'state': 'OFF'}, {'channel': 2, 'state': 'OFF'}]}
+            topic = 'home/subbox/SB288485350B54/event/actionbox'
+            await gateway.mqtt._on_actionbox(topic, payload)
+            await gateway._on_subbox_actionbox(topic, payload)
+            pending = gateway.registry.get_pending()['AB001']
+            self.assertEqual(pending['serial'], '28848533DDF8')
+            self.assertEqual(pending['mac'], '28:84:85:33:DD:F8')
+
+
 if __name__ == '__main__':
     unittest.main()

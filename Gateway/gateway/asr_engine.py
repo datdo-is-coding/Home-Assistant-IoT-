@@ -137,9 +137,10 @@ class ASREngine:
         self._initialized = False
         self._hotwords_path = None
         self._using_beam_search = False
+        self._active_hotwords = list(SMARTHOME_HOTWORDS)
 
     def _extract_registry_hotwords(self, registry=None) -> list:
-        """Extract room and device names dynamically from Device Registry."""
+        """Extract room, device names, and custom aliases dynamically from Device Registry."""
         words = set()
         if registry and hasattr(registry, "get_all_nodes"):
             try:
@@ -149,14 +150,40 @@ class ASREngine:
                         continue
                     room = ninfo.get("room") or ""
                     if room and room != "unknown":
-                        words.add(room.replace("_", " ").upper())
+                        clean_room = room.replace("_", " ").upper()
+                        words.add(clean_room)
 
+                    # Top level node properties
                     for ch_key in ("ch1_name", "ch2_name", "rl1", "rl2", "name", "description"):
                         val = ninfo.get(ch_key)
                         if isinstance(val, str) and val.strip():
                             clean = re.sub(r"[^\w\sÀ-ỹ]", " ", val).strip().upper()
                             if len(clean) >= 2:
                                 words.add(clean)
+
+                    # Node level room/device aliases
+                    for a in ninfo.get("aliases", []):
+                        if isinstance(a, str) and a.strip():
+                            clean = re.sub(r"[^\w\sÀ-ỹ]", " ", a.replace("_", " ")).strip().upper()
+                            if len(clean) >= 2:
+                                words.add(clean)
+
+                    # Channel level names, types, and voice aliases
+                    channels = ninfo.get("channels", {})
+                    if isinstance(channels, dict):
+                        for ch_id, ch in channels.items():
+                            if isinstance(ch, dict):
+                                for field in ("name", "fullname", "device_type"):
+                                    fval = ch.get(field)
+                                    if isinstance(fval, str) and fval.strip():
+                                        clean = re.sub(r"[^\w\sÀ-ỹ]", " ", fval.replace("_", " ")).strip().upper()
+                                        if len(clean) >= 2:
+                                            words.add(clean)
+                                for a in ch.get("aliases", []):
+                                    if isinstance(a, str) and a.strip():
+                                        clean = re.sub(r"[^\w\sÀ-ỹ]", " ", a.replace("_", " ")).strip().upper()
+                                        if len(clean) >= 2:
+                                            words.add(clean)
             except Exception as e:
                 logger.warning(f"Error extracting registry hotwords: {e}")
         return sorted(list(words))
@@ -172,6 +199,7 @@ class ASREngine:
                 if dw not in words:
                     words.append(dw)
 
+            self._active_hotwords = list(words)
             with open(hotwords_path, "w", encoding="utf-8") as f:
                 for word in words:
                     if word.strip():
@@ -254,9 +282,34 @@ class ASREngine:
             return False
 
     def reload_hotwords(self, registry=None) -> bool:
-        """Dynamically reload hotwords when new devices/rooms are registered."""
+        """Dynamically reload hotwords when new devices/rooms are registered or aliases updated."""
         logger.info("🔄 Reloading ASR hotwords from registry...")
-        return self.initialize(registry)
+        ok = self.initialize(registry)
+        logger.info(f"[VOCAB][STT] vocabulary updated (total active hotwords={len(self._active_hotwords)})")
+        return ok
+
+    def has_hotword(self, word: str) -> bool:
+        """Check if a word/alias is present in active STT hotwords list."""
+        if not word:
+            return False
+        clean = re.sub(r"[^\w\sÀ-ỹ]", " ", word.replace("_", " ")).strip().upper()
+        return clean in self._active_hotwords or clean.lower() in [w.lower() for w in self._active_hotwords]
+
+    def dump_active_vocabulary(self, registry=None) -> dict:
+        """Diagnostic dump of active STT recognition vocabulary and hotwords."""
+        if not self._active_hotwords:
+            dyn = self._extract_registry_hotwords(registry)
+            all_w = list(SMARTHOME_HOTWORDS)
+            for w in dyn:
+                if w not in all_w:
+                    all_w.append(w)
+            self._active_hotwords = all_w
+        return {
+            "initialized": self._initialized,
+            "using_beam_search": self._using_beam_search,
+            "hotwords_count": len(self._active_hotwords),
+            "hotwords": list(self._active_hotwords),
+        }
 
     def transcribe(self, pcm_samples, sample_rate: int = None) -> str:
         """Transcribe audio and return corrected text."""

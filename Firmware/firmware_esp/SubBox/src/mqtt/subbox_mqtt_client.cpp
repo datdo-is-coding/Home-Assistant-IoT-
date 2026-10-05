@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "esp_random.h"
 #include "storage/security_config.h"
+#include "system/subbox_led.h"
 
 static const char* TAG = "SUBBOX_MQTT";
 
@@ -41,9 +42,11 @@ bool MqttClient::init() {
     m_user = SecurityConfig::get("mqtt_user");
     m_password = SecurityConfig::get("mqtt_pass");
     if (m_broker_uri.rfind("mqtts://", 0) != 0 || m_ca.empty() || m_user.empty() || m_password.empty()) {
+        subbox_led_set_mqtt_configured(false);
         ESP_LOGE(TAG, "TLS MQTT unavailable: provision URI, CA and per-device credentials over USB");
         return false;
     }
+    subbox_led_set_mqtt_configured(true);
     esp_mqtt_client_config_t mqtt_cfg = {};
     mqtt_cfg.broker.verification.certificate = m_ca.c_str();
     mqtt_cfg.credentials.client_id = m_subbox_id.c_str();
@@ -128,6 +131,7 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT Connected to Pi4 Broker! Subscribing to command topics...");
             self->m_connected = true;
+            subbox_led_set_mqtt_connected(true);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_command.c_str(), 1);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_voice_resp.c_str(), 1);
             break;
@@ -135,6 +139,7 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
         case MQTT_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "MQTT Disconnected from Pi4 Broker! Operating in standalone local mode.");
             self->m_connected = false;
+            subbox_led_set_mqtt_connected(false);
             break;
 
         case MQTT_EVENT_DATA:

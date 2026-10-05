@@ -10,6 +10,8 @@
 #include "nlu/intent/intent_parser.h"
 #include "nlu/entity/entity_extractor.h"
 #include "cJSON.h"
+#include "subbox_led.h"
+#include "audio_output/sound_player.h"
 
 static const char* TAG = "TASK_MGR";
 
@@ -74,9 +76,18 @@ bool TaskManager::init() {
         m_mqtt->registerVoiceResponseCallback([this](const std::string&, const std::string& payload, const uint8_t*, size_t) {
             cJSON* root = cJSON_Parse(payload.c_str());
             if (!root) return;
-            const cJSON* id = cJSON_GetObjectItem(root, "origin_node");
-            const cJSON* text = cJSON_GetObjectItem(root, "voice_reply");
-            if (cJSON_IsString(id) && cJSON_IsString(text)) queueResponse(id->valuestring, text->valuestring);
+            const cJSON* verify = cJSON_GetObjectItem(root, "verify");
+            if (cJSON_IsString(verify)) {
+                if (strcmp(verify->valuestring, "success") == 0 ||
+                    strcmp(verify->valuestring, "alarm_played") == 0 ||
+                    strcmp(verify->valuestring, "conversational") == 0) {
+                    SoundPlayer::instance().play(SoundType::SUCCESS);
+                } else {
+                    SoundPlayer::instance().play(SoundType::ERROR);
+                }
+            } else {
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            }
             cJSON_Delete(root);
         });
     }
@@ -90,6 +101,7 @@ bool TaskManager::init() {
         const cJSON* uid = cJSON_GetObjectItem(root, "hardware_uid");
         const cJSON* revision = cJSON_GetObjectItem(root, "config_version");
         if (cJSON_IsString(id) && cJSON_IsString(uid) && cJSON_IsNumber(revision) && cJSON_IsArray(channels)) {
+            subbox_led_peer_seen();
             const cJSON* ch;
             cJSON_ArrayForEach(ch, channels) {
                 const cJSON* number = cJSON_GetObjectItem(ch, "channel");
@@ -107,7 +119,7 @@ bool TaskManager::init() {
                     node.has_relay = node.has_current_sensor = node.has_microphone = true;
                 }
                 node.hardware_uid = uid->valuestring;
-                node.config_version = revision->valueint;
+                node.config_version = static_cast<uint32_t>(revision->valuedouble);
                 const cJSON* label = cJSON_GetObjectItem(ch, "label");
                 node.label = cJSON_IsString(label) ? label->valuestring : key;
                 m_registry->registerNode(node);
@@ -122,16 +134,13 @@ bool TaskManager::init() {
         if (m_mqtt) m_mqtt->publishEvent("actionbox", json);
         cJSON_Delete(root);
     });
-    m_audio_mgr->registerUtteranceCallback([this](const std::string& node_id, const std::string& text) {
-        this->queueUtterance(node_id, text);
-    });
+    // Voice PCM is processed and dispatched by Pi4; never route transcripts locally.
 
     // Spawn tasks across Dual-Core ESP32-S3:
     // Core 1 (DSP / AI / Audio): audio_manager, nlu, audio_tx
     // Core 0 (Network / System): command, device_manager, telemetry, system
 
     xTaskCreatePinnedToCore(audioManagerTask, "audio_mgr_task", TASK_STACK_AUDIO_MANAGER, this, TASK_PRIO_AUDIO_MANAGER, &m_h_audio_mgr, 1);
-    xTaskCreatePinnedToCore(nluTask,          "nlu_task",       TASK_STACK_NLU,           this, TASK_PRIO_NLU,           &m_h_nlu,       1);
     xTaskCreatePinnedToCore(audioTxTask,      "audio_tx_task",  TASK_STACK_AUDIO_TX,      this, TASK_PRIO_AUDIO_TX,      &m_h_tx,        1);
 
     xTaskCreatePinnedToCore(commandTask,      "cmd_task",       TASK_STACK_COMMAND,       this, TASK_PRIO_COMMAND,       &m_h_cmd,       0);
@@ -249,11 +258,11 @@ void TaskManager::commandTask(void* pvParameters) {
                     exec.response_text = "Không kết nối được máy chủ xử lý.";
             }
 
-            // Queue response audio / chime to ActionBox speaker only if speaker hardware exists
-            ActionBoxNode target_node;
-            bool has_spk = (self->m_registry->findNodeById(res.origin_node_id, target_node) && target_node.has_speaker);
-            if (!exec.response_text.empty() && has_spk) {
-                self->queueResponse(res.origin_node_id, exec.response_text);
+            // Acoustic feedback on SubBox
+            if (exec.success) {
+                SoundPlayer::instance().play(SoundType::SUCCESS);
+            } else if (!exec.forwarded_to_pi4 && !exec.success) {
+                SoundPlayer::instance().play(SoundType::ERROR);
             }
         }
     }
