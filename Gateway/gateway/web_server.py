@@ -278,6 +278,9 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
     <div class="nav-item" onclick="switchView('voice')">
       <span class="nav-icon">🌸</span><span class="nav-text">Trợ Lý Giọng Nói</span>
     </div>
+    <div class="nav-item" onclick="switchView('wifi')">
+      <span class="nav-icon">📶</span><span class="nav-text">Cấu Hình Mạng</span>
+    </div>
     <div class="nav-item" onclick="switchView('auth')">
       <span class="nav-icon">🔐</span><span class="nav-text">Tài Khoản</span>
     </div>
@@ -637,7 +640,65 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
       </div>
     </section>
 
-    <!-- ── TAB 6: TÀI KHOẢN & BẢO MẬT ── -->
+    <!-- ── TAB 6: CẤU HÌNH MẠNG WI-FI ── -->
+    <section id="view-wifi" class="view-panel">
+      <div class="grid-2">
+        <!-- WiFi Scanner -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📶 Quét Mạng Wi-Fi Xung Quanh</span>
+            <button class="btn btn-primary" onclick="scanWifi()" id="btn-scan-wifi">🔄 Quét Lại</button>
+          </div>
+          <div id="wifi-scan-status" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:12px">Bấm "Quét Lại" để tìm mạng Wi-Fi xung quanh.</div>
+          <div id="wifi-networks-list" style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto">
+            <div style="color:var(--text-dim);font-size:0.85rem;text-align:center;padding:24px">Chưa quét. Bấm nút "Quét Lại" ở trên.</div>
+          </div>
+        </div>
+
+        <!-- WiFi Connect Form -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">🔗 Kết Nối Mạng Wi-Fi Mới</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div>
+              <label style="font-size:0.78rem;color:var(--text-dim)">Tên mạng Wi-Fi (SSID):</label>
+              <input type="text" class="inp" id="wifi-ssid" placeholder="Nhập tên Wi-Fi hoặc chọn từ danh sách bên trái" style="margin-top:4px">
+            </div>
+            <div>
+              <label style="font-size:0.78rem;color:var(--text-dim)">Mật khẩu Wi-Fi:</label>
+              <div style="position:relative">
+                <input type="password" class="inp" id="wifi-password" placeholder="Nhập mật khẩu Wi-Fi (để trống nếu mạng mở)" style="margin-top:4px;padding-right:40px">
+                <button onclick="toggleWifiPassVisibility()" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:1.1rem;padding:4px" title="Hiện/Ẩn mật khẩu">👁️</button>
+              </div>
+            </div>
+            <button class="btn btn-primary" style="padding:14px;font-size:0.95rem;box-shadow:0 0 20px rgba(0,242,254,0.2)" onclick="connectWifi()" id="btn-connect-wifi">
+              📶 Kết Nối Wi-Fi
+            </button>
+            <div id="wifi-connect-status" style="font-size:0.85rem;color:var(--text-muted)">—</div>
+
+            <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:4px">
+              <div class="card-title" style="margin-bottom:10px">📡 Trạng Thái Kết Nối Hiện Tại</div>
+              <div id="wifi-current-status" style="font-size:0.85rem;color:var(--text-dim)">Đang kiểm tra...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-header">
+          <span class="card-title">⚠️ Lưu Ý Quan Trọng</span>
+        </div>
+        <div style="font-size:0.85rem;color:var(--text-muted);line-height:1.7">
+          <p>• Mạng Wi-Fi <b style="color:var(--orange)">bắt buộc phải hỗ trợ băng tần 2.4 GHz</b> (ESP32 không hỗ trợ 5 GHz).</p>
+          <p>• Sau khi kết nối thành công, Pi 4 sẽ <b>tắt Hotspot</b> và chuyển sang mạng Wi-Fi mới. Bạn sẽ mất kết nối trang này.</p>
+          <p>• Truy cập lại hệ thống tại: <code style="color:var(--accent)">http://&lt;IP mới của Pi&gt;:8000</code></p>
+          <p>• Kiểm tra IP mới bằng cách mở Terminal trên Pi gõ: <code style="color:var(--accent)">hostname -I</code>, hoặc xem danh sách thiết bị trên Router.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── TAB 7: TÀI KHOẢN & BẢO MẬT ── -->
     <section id="view-auth" class="view-panel">
       <div class="grid-2">
         <!-- Current Profile -->
@@ -853,7 +914,7 @@ function switchView(viewId) {
   document.querySelectorAll('.view-panel').forEach(el => el.classList.remove('active'));
 
   const navMap = {
-    'dashboard': 0, 'devices': 1, 'provision': 2, 'ota': 3, 'voice': 4, 'auth': 5
+    'dashboard': 0, 'devices': 1, 'provision': 2, 'ota': 3, 'voice': 4, 'wifi': 5, 'auth': 6
   };
   const navItems = document.querySelectorAll('.nav-item');
   if (navItems[navMap[viewId]]) navItems[navMap[viewId]].classList.add('active');
@@ -867,11 +928,13 @@ function switchView(viewId) {
     'provision': '➕ Gán & Tích Hợp Thiết Bị Mới',
     'ota': '🚀 Trung Tâm Cập Nhật Firmware OTA',
     'voice': '🌸 Trợ Lý Giọng Nói & Ngữ Điệu Nữ',
+    'wifi': '📶 Cấu Hình Mạng Wi-Fi',
     'auth': '🔐 Tài Khoản & Phân Quyền Thiết Bị'
   };
   $('page-title').innerHTML = `<span>${titles[viewId] || 'Aetheria OS'}</span>`;
 
   if (viewId === 'ota') loadFirmwares();
+  if (viewId === 'wifi') { scanWifi(); loadWifiStatus(); }
   if (viewId === 'dashboard') requestAnimationFrame(animateThree);
 }
 
@@ -1430,6 +1493,128 @@ async function deleteDevice(deviceId) {
     }
   } catch(e) {
     showToast('Lỗi kết nối tới Gateway', false);
+  }
+}
+
+/* ── Wi-Fi Configuration ── */
+function toggleWifiPassVisibility() {
+  const inp = $('wifi-password');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function scanWifi() {
+  const btn = $('btn-scan-wifi');
+  const status = $('wifi-scan-status');
+  const list = $('wifi-networks-list');
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang quét...';
+  status.textContent = 'Đang quét mạng Wi-Fi xung quanh, vui lòng đợi...';
+  status.style.color = 'var(--accent)';
+  try {
+    const r = await fetch('/api/wifi/scan');
+    const d = await r.json();
+    if (d.success && d.networks && d.networks.length > 0) {
+      status.textContent = `Tìm thấy ${d.networks.length} mạng Wi-Fi.`;
+      status.style.color = 'var(--green)';
+      list.innerHTML = d.networks.map(n => {
+        const sigIcon = n.signal >= 70 ? '📶' : n.signal >= 40 ? '📶' : '📡';
+        const lockIcon = n.security && n.security !== '--' && n.security !== '' ? '🔒' : '🔓';
+        const sigColor = n.signal >= 70 ? 'var(--green)' : n.signal >= 40 ? 'var(--orange)' : 'var(--red)';
+        return `<div onclick="selectWifi('${n.ssid.replace(/'/g, "\\\\'")}')" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.background='rgba(0,242,254,0.05)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='rgba(255,255,255,0.03)'">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:1.2rem">${sigIcon}</span>
+            <div>
+              <div style="font-weight:600;font-size:0.9rem">${n.ssid}</div>
+              <div style="font-size:0.72rem;color:var(--text-dim)">${lockIcon} ${n.security || 'Mở'} · Kênh ${n.channel || '?'}</div>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700;font-size:0.85rem;color:${sigColor}">${n.signal}%</div>
+            <div style="font-size:0.7rem;color:var(--text-dim)">Tín hiệu</div>
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      status.textContent = 'Không tìm thấy mạng Wi-Fi nào. Thử lại sau.';
+      status.style.color = 'var(--orange)';
+      list.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;text-align:center;padding:24px">Không có mạng Wi-Fi nào được phát hiện.</div>';
+    }
+  } catch (e) {
+    status.textContent = 'Lỗi khi quét mạng: ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+  btn.disabled = false;
+  btn.textContent = '🔄 Quét Lại';
+}
+
+function selectWifi(ssid) {
+  $('wifi-ssid').value = ssid;
+  $('wifi-password').focus();
+  showToast(`Đã chọn mạng: ${ssid}. Nhập mật khẩu và bấm Kết Nối.`);
+}
+
+async function connectWifi() {
+  const ssid = $('wifi-ssid').value.trim();
+  const password = $('wifi-password').value;
+  const btn = $('btn-connect-wifi');
+  const status = $('wifi-connect-status');
+
+  if (!ssid) {
+    showToast('Vui lòng nhập tên mạng Wi-Fi (SSID)!', false);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Đang kết nối...';
+  status.textContent = `Đang kết nối tới "${ssid}"... Vui lòng đợi 10-15 giây.`;
+  status.style.color = 'var(--accent)';
+
+  try {
+    const r = await fetch('/api/wifi/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ssid, password })
+    });
+    const d = await r.json();
+    if (d.success) {
+      status.innerHTML = `<span style="color:var(--green);font-weight:700">✅ ${d.message || 'Kết nối thành công!'}</span><br><span style="color:var(--orange);font-size:0.8rem">⚠️ Pi 4 đang tắt Hotspot và chuyển sang mạng mới. Trang web này sẽ mất kết nối.<br>Truy cập lại tại: <b>http://&lt;IP mới&gt;:8000</b></span>`;
+      showToast('Kết nối Wi-Fi thành công! Hotspot sẽ tắt.', true);
+    } else {
+      status.innerHTML = `<span style="color:var(--red)">❌ Thất bại: ${d.error || 'Không rõ lỗi'}</span>`;
+      showToast('Kết nối Wi-Fi thất bại: ' + (d.error || ''), false);
+    }
+  } catch (e) {
+    status.innerHTML = `<span style="color:var(--orange)">⚠️ Mất kết nối tới Pi (có thể đã chuyển sang mạng mới thành công)</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '📶 Kết Nối Wi-Fi';
+}
+
+async function loadWifiStatus() {
+  const box = $('wifi-current-status');
+  try {
+    const r = await fetch('/api/wifi/status');
+    const d = await r.json();
+    if (d.success && d.devices) {
+      box.innerHTML = d.devices.map(dev => {
+        const stateColor = dev.state === 'connected' ? 'var(--green)' : 'var(--text-dim)';
+        const stateText = dev.state === 'connected' ? 'Đã kết nối' : dev.state;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+          <div>
+            <span style="font-weight:600">${dev.device}</span>
+            <span style="font-size:0.75rem;color:var(--text-dim);margin-left:6px">(${dev.type})</span>
+          </div>
+          <div style="text-align:right">
+            <span style="color:${stateColor};font-weight:600;font-size:0.85rem">${stateText}</span>
+            ${dev.connection ? `<div style="font-size:0.72rem;color:var(--accent)">${dev.connection}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+    } else {
+      box.textContent = 'Không thể lấy trạng thái mạng.';
+    }
+  } catch (e) {
+    box.textContent = 'Lỗi kết nối: ' + e.message;
   }
 }
 
