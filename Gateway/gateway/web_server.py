@@ -736,11 +736,18 @@ input:disabled + .slider { opacity: 0.3; cursor: not-allowed; }
             <input type="text" class="inp" id="auth-user" placeholder="Tên đăng nhập (username)">
             <input type="password" class="inp" id="auth-pass" placeholder="Mật khẩu">
             <input type="text" class="inp" id="auth-fullname" placeholder="Họ và tên (chỉ cần khi đăng ký)">
+            <div style="font-size:0.75rem;color:var(--text-dim)">Mặc định: tài khoản <b>admin</b>, mật khẩu <b>1</b></div>
             <div style="display:flex;gap:8px;margin-top:6px">
               <button class="btn btn-primary" style="flex:1" onclick="login()">Đăng Nhập</button>
-              
             </div>
             <div id="auth-status" style="font-size:0.8rem;color:var(--orange)">—</div>
+            <div style="margin-top:12px;padding:10px 12px;background:rgba(0,242,254,0.06);border:1px solid rgba(0,242,254,0.25);border-radius:10px;display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-weight:600;font-size:0.8rem;color:#fff">📶 Cần kết nối Wi-Fi cho Pi?</div>
+                <div style="font-size:0.72rem;color:var(--text-dim)">Không cần đăng nhập</div>
+              </div>
+              <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.75rem;color:var(--accent);border-color:var(--accent)" onclick="switchView('wifi')">Cấu Hình Wi-Fi 👉</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1943,7 +1950,11 @@ async function register() {
 async function checkSession() {
   try {
     const r = await fetch('/api/auth/me');
-    if (!r.ok) { switchView('auth'); return false; }
+    if (!r.ok) {
+      if (location.hostname === '10.42.0.1' || location.hash === '#wifi') { switchView('wifi'); }
+      else { switchView('auth'); }
+      return false;
+    }
     const j = await r.json();
     if (j.authenticated && j.user) {
       currentUser = j.user;
@@ -1952,8 +1963,15 @@ async function checkSession() {
       $('prof-fullname').textContent = currentUser.fullname || '—';
       $('prof-role').textContent = (currentUser.role || 'member').toUpperCase();
       return true;
+    } else {
+      if (location.hostname === '10.42.0.1' || location.hash === '#wifi') { switchView('wifi'); }
+      else { switchView('auth'); }
+      return false;
     }
-  } catch(e) {}
+  } catch(e) {
+    if (location.hostname === '10.42.0.1' || location.hash === '#wifi') switchView('wifi');
+    return false;
+  }
 }
 
 async function logout() {
@@ -2193,7 +2211,12 @@ class WebServer:
             if content_length > maximum:
                 await self._respond(writer, 413, {"error": "Request too large"}); return
             origin = headers.get("origin")
-            if origin and origin != config.WEB_PUBLIC_ORIGIN:
+            host_header = headers.get("host", "").strip()
+            allowed_origins = {config.WEB_PUBLIC_ORIGIN.rstrip("/")}
+            if host_header:
+                allowed_origins.add(f"http://{host_header.rstrip('/')}")
+                allowed_origins.add(f"https://{host_header.rstrip('/')}")
+            if origin and origin.rstrip("/") not in allowed_origins:
                 await self._respond(writer, 403, {"error": "Cross-origin request denied"}); return
             cookies = SimpleCookie()
             cookies.load(headers.get("cookie", ""))
@@ -2202,11 +2225,15 @@ class WebServer:
             cookie_auth = not token and "aetheria_session" in cookies
             if cookie_auth:
                 token = cookies["aetheria_session"].value
-                if method not in ("GET", "HEAD") and origin != config.WEB_PUBLIC_ORIGIN:
+                if method not in ("GET", "HEAD") and origin and origin.rstrip("/") not in allowed_origins:
                     await self._respond(writer, 403, {"error": "Origin required for cookie authentication"}); return
             auth = getattr(self.gateway, "auth", None)
             current_user = auth.authenticate_token(token) if auth and token else None
-            public = (method == "GET" and path in {"/", "/index.html", "/api/health"}) or (method == "POST" and path == "/api/auth/login")
+            public = (
+                (method == "GET" and path in {"/", "/index.html", "/api/health", "/api/wifi/status", "/api/wifi/scan"})
+                or (method == "POST" and path in {"/api/auth/login", "/api/wifi/connect"})
+                or (method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"))
+            )
             if not current_user and not public:
                 await self._respond(writer, 401, {"error": "Authentication required"}); return
             raw_body = await asyncio.wait_for(reader.readexactly(content_length), 10) if content_length else b""
@@ -2896,7 +2923,33 @@ class WebServer:
                             asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
                             resp_data = {"success": True, "message": f"Connected to {ssid}"}
                         else:
-                            resp_data = {"success": False, "error": err.decode().strip() or out.decode().strip()}
+                            # Fallback 1: Try bringing up existing profile if already saved
+                            up_proc = await asyncio.create_subprocess_exec(
+                                "nmcli", "con", "up", ssid,
+                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                            )
+                            up_out, up_err = await up_proc.communicate()
+                            if up_proc.returncode == 0:
+                                asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
+                                resp_data = {"success": True, "message": f"Connected to {ssid}"}
+                            else:
+                                # Fallback 2: Deactivate hotspot, retry connection
+                                down_proc = await asyncio.create_subprocess_exec(
+                                    "nmcli", "con", "down", "Aetheria-Hotspot",
+                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                                )
+                                await down_proc.communicate()
+                                await asyncio.sleep(2)
+                                retry_proc = await asyncio.create_subprocess_exec(
+                                    *cmd,
+                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                                )
+                                retry_out, retry_err = await retry_proc.communicate()
+                                if retry_proc.returncode == 0:
+                                    resp_data = {"success": True, "message": f"Connected to {ssid}"}
+                                else:
+                                    err_msg = retry_err.decode().strip() or retry_out.decode().strip() or err.decode().strip() or out.decode().strip()
+                                    resp_data = {"success": False, "error": err_msg}
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
