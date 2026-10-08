@@ -1024,6 +1024,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _voiceStreamCtrl.add(_generateVocabulary());
   }
 
+  @override
   void dispose() {
     _deviceStreamCtrl.close();
     _roomStreamCtrl.close();

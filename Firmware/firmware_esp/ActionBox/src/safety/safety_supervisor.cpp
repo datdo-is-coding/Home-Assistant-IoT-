@@ -157,7 +157,7 @@ bool safety_validate_command(const ActionBoxCommand *cmd, char *out_err_msg, siz
 
     /* Check channel boundary for channel-specific commands */
     if (cmd->cmd == CMD_TYPE_TURN_ON || cmd->cmd == CMD_TYPE_TURN_OFF || 
-        cmd->cmd == CMD_TYPE_TOGGLE  || cmd->cmd == CMD_TYPE_CLEAR_FAULT ||
+        cmd->cmd == CMD_TYPE_TOGGLE || cmd->cmd == CMD_TYPE_CLEAR_FAULT ||
         cmd->cmd == CMD_TYPE_GET_STATE || cmd->cmd == CMD_TYPE_GET_CURRENT || cmd->cmd == CMD_TYPE_GET_POWER) {
         
         if (cmd->channel < 1 || cmd->channel > BOARD_RELAY_CHANNEL_COUNT) {

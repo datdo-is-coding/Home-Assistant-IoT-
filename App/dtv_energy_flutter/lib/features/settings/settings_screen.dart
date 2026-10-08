@@ -654,7 +654,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceVariant.withOpacity(0.3),
+                              color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Column(

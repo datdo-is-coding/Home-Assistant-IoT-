@@ -10,6 +10,7 @@ import time
 import logging
 import os
 from typing import Optional, Dict, Any, List
+from contextlib import contextmanager
 
 import config
 
@@ -31,13 +32,20 @@ class AuthManager:
         self.login_attempts = {}
         self._init_db()
 
-    def _get_conn(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_db(self):
         conn = sqlite3.connect(self.db_path, timeout=10.0)
         conn.row_factory = sqlite3.Row
-        return conn
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,7 +143,7 @@ class AuthManager:
             self.login_attempts[u] = attempts
             return {"success": False, "error": "Bạn đã đăng nhập sai quá nhiều lần. Vui lòng thử lại sau 15 phút.", "rate_limited": True}
 
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             cur = conn.execute("SELECT * FROM users WHERE username = ?", (u,))
             row = cur.fetchone()
             if not row:
@@ -182,7 +190,7 @@ class AuthManager:
         """Get or create permanent API key for user."""
         if conn is not None:
             return self._get_or_create_api_key_impl(conn, user_id)
-        with self._get_conn() as c:
+        with self._get_db() as c:
             return self._get_or_create_api_key_impl(c, user_id)
 
     def _get_or_create_api_key_impl(self, conn: sqlite3.Connection, user_id: int) -> str:
@@ -202,7 +210,7 @@ class AuthManager:
             return None
         t = token.strip()
         now = time.time()
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             # 1. Check temporary sessions
             cur = conn.execute("""
                 SELECT u.id, u.username, u.fullname, u.role
@@ -231,20 +239,20 @@ class AuthManager:
         """Delete session token."""
         if not token:
             return True
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             conn.execute("DELETE FROM sessions WHERE token = ?", (token.strip(),))
         return True
 
     def get_user_devices(self, user_id: int) -> List[str]:
         """Get list of node IDs assigned to a user."""
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             cur = conn.execute("SELECT node_id FROM user_devices WHERE user_id = ?", (user_id,))
             return [r["node_id"] for r in cur.fetchall()]
 
     def assign_device_to_user(self, user_id: int, node_id: str) -> bool:
         """Assign ownership of a device node to a user."""
         now = time.time()
-        with self._get_conn() as conn:
+        with self._get_db() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO user_devices (user_id, node_id, is_owner, can_control, assigned_at)
                 VALUES (?, ?, 1, 1, ?)

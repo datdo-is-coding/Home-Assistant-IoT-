@@ -10,6 +10,7 @@ import logging
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+from contextlib import contextmanager
 
 import config
 
@@ -24,108 +25,117 @@ class MemoryEngine:
         self.db_path = db_path or config.MEMORY_DB
         self.stm = {}  # Short-term memory (RAM)
         self._init_db()
+
+    @contextmanager
+    def _get_db(self):
+        conn = sqlite3.connect(self.db_path, timeout=10.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA foreign_keys = ON;")
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
     
     def _init_db(self):
         """Create SQLite tables if they don't exist."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.executescript("""
-            -- Command history log
-            CREATE TABLE IF NOT EXISTS command_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                hour INTEGER NOT NULL,
-                day_of_week INTEGER NOT NULL,
-                user_text TEXT,
-                action TEXT NOT NULL,
-                device TEXT NOT NULL,
-                area TEXT NOT NULL,
-                node_id TEXT,
-                channel TEXT,
-                verify_result TEXT,
-                power_before REAL,
-                power_after REAL
-            );
+        with self._get_db() as conn:
+            cursor = conn.cursor()
             
-            -- User corrections for prompt improvement
-            CREATE TABLE IF NOT EXISTS user_corrections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                original_text TEXT,
-                original_device TEXT,
-                original_area TEXT,
-                corrected_device TEXT,
-                corrected_area TEXT,
-                notes TEXT
-            );
-            
-            -- Learned behavioral patterns
-            CREATE TABLE IF NOT EXISTS learned_patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_type TEXT NOT NULL,
-                device TEXT NOT NULL,
-                area TEXT NOT NULL,
-                action TEXT NOT NULL,
-                trigger_hour INTEGER,
-                trigger_day_of_week INTEGER,
-                confidence REAL DEFAULT 0.0,
-                occurrence_count INTEGER DEFAULT 0,
-                rejection_count INTEGER DEFAULT 0,
-                last_occurred TEXT,
-                is_active BOOLEAN DEFAULT 1,
-                created_at TEXT NOT NULL
-            );
-            
-            -- Power consumption baselines
-            CREATE TABLE IF NOT EXISTS power_baselines (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                node_id TEXT NOT NULL,
-                channel TEXT NOT NULL,
-                device_type TEXT NOT NULL,
-                avg_watts REAL,
-                max_watts REAL,
-                min_watts REAL,
-                measurement_count INTEGER,
-                last_updated TEXT
-            );
-
-            -- Smart Journal: daily & hourly snapshot of house activity (SSD persistent)
-            CREATE TABLE IF NOT EXISTS smart_journal (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                date TEXT NOT NULL,
-                hour INTEGER NOT NULL,
-                total_power_watts REAL DEFAULT 0.0,
-                active_nodes_count INTEGER DEFAULT 0,
-                active_relays_count INTEGER DEFAULT 0,
-                notes TEXT
-            );
-
-            -- Proactive Speech Log (giao tiếp chủ động như người thật)
-            CREATE TABLE IF NOT EXISTS proactive_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                content TEXT NOT NULL,
-                node_id TEXT
-            );
-            
-            -- Optimized indexes
-            CREATE INDEX IF NOT EXISTS idx_cmd_device_area
-                ON command_log(device, area, hour);
-            CREATE INDEX IF NOT EXISTS idx_patterns_active
-                ON learned_patterns(is_active, trigger_hour);
-            CREATE INDEX IF NOT EXISTS idx_baselines_node
-                ON power_baselines(node_id, channel);
-            CREATE INDEX IF NOT EXISTS idx_journal_date
-                ON smart_journal(date, hour);
-            CREATE INDEX IF NOT EXISTS idx_proactive_type
-                ON proactive_log(event_type, timestamp);
-        """)
-        
-        conn.commit()
-        conn.close()
+            cursor.executescript("""
+                -- Command history log
+                CREATE TABLE IF NOT EXISTS command_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    hour INTEGER NOT NULL,
+                    day_of_week INTEGER NOT NULL,
+                    user_text TEXT,
+                    action TEXT NOT NULL,
+                    device TEXT NOT NULL,
+                    area TEXT NOT NULL,
+                    node_id TEXT,
+                    channel TEXT,
+                    verify_result TEXT,
+                    power_before REAL,
+                    power_after REAL
+                );
+                
+                -- User corrections for prompt improvement
+                CREATE TABLE IF NOT EXISTS user_corrections (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    original_text TEXT,
+                    original_device TEXT,
+                    original_area TEXT,
+                    corrected_device TEXT,
+                    corrected_area TEXT,
+                    notes TEXT
+                );
+                
+                -- Learned behavioral patterns
+                CREATE TABLE IF NOT EXISTS learned_patterns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pattern_type TEXT NOT NULL,
+                    device TEXT NOT NULL,
+                    area TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    trigger_hour INTEGER,
+                    trigger_day_of_week INTEGER,
+                    confidence REAL DEFAULT 0.0,
+                    occurrence_count INTEGER DEFAULT 0,
+                    rejection_count INTEGER DEFAULT 0,
+                    last_occurred TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TEXT NOT NULL
+                );
+                
+                -- Power consumption baselines
+                CREATE TABLE IF NOT EXISTS power_baselines (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_id TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    device_type TEXT NOT NULL,
+                    avg_watts REAL,
+                    max_watts REAL,
+                    min_watts REAL,
+                    measurement_count INTEGER,
+                    last_updated TEXT
+                );
+    
+                -- Smart Journal: daily & hourly snapshot of house activity (SSD persistent)
+                CREATE TABLE IF NOT EXISTS smart_journal (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    date TEXT NOT NULL,
+                    hour INTEGER NOT NULL,
+                    total_power_watts REAL DEFAULT 0.0,
+                    active_nodes_count INTEGER DEFAULT 0,
+                    active_relays_count INTEGER DEFAULT 0,
+                    notes TEXT
+                );
+    
+                -- Proactive Speech Log (giao tiếp chủ động như người thật)
+                CREATE TABLE IF NOT EXISTS proactive_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    node_id TEXT
+                );
+                
+                -- Optimized indexes
+                CREATE INDEX IF NOT EXISTS idx_cmd_device_area
+                    ON command_log(device, area, hour);
+                CREATE INDEX IF NOT EXISTS idx_patterns_active
+                    ON learned_patterns(is_active, trigger_hour);
+                CREATE INDEX IF NOT EXISTS idx_baselines_node
+                    ON power_baselines(node_id, channel);
+                CREATE INDEX IF NOT EXISTS idx_journal_date
+                    ON smart_journal(date, hour);
+                CREATE INDEX IF NOT EXISTS idx_proactive_type
+                    ON proactive_log(event_type, timestamp);
+            """)
         logger.info(f"✅ Memory database initialized: {self.db_path}")
     
     def record_command(self, user_text: str, action: str, device: str,
@@ -134,18 +144,16 @@ class MemoryEngine:
                        power_after: float = None):
         """Record a command execution to history."""
         now = datetime.now(TZ_VN)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            """INSERT INTO command_log 
-               (timestamp, hour, day_of_week, user_text, action, device,
-                area, node_id, channel, verify_result, power_before, power_after)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (now.isoformat(), now.hour, now.weekday(), user_text,
-             action, device, area, node_id, channel,
-             verify_result, power_before, power_after)
-        )
-        conn.commit()
-        conn.close()
+        with self._get_db() as conn:
+            conn.execute(
+                """INSERT INTO command_log 
+                   (timestamp, hour, day_of_week, user_text, action, device,
+                    area, node_id, channel, verify_result, power_before, power_after)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (now.isoformat(), now.hour, now.weekday(), user_text,
+                 action, device, area, node_id, channel,
+                 verify_result, power_before, power_after)
+            )
         logger.debug(f"Command logged: {action} {device}@{area}")
     
     def record_correction(self, original_text: str,
@@ -154,134 +162,117 @@ class MemoryEngine:
                           notes: str = None):
         """Record when user corrects a misunderstood command."""
         now = datetime.now(TZ_VN)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            """INSERT INTO user_corrections
-               (timestamp, original_text, original_device, original_area,
-                corrected_device, corrected_area, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (now.isoformat(), original_text, original_device,
-             original_area, corrected_device, corrected_area, notes)
-        )
-        conn.commit()
-        conn.close()
+        with self._get_db() as conn:
+            conn.execute(
+                """INSERT INTO user_corrections
+                   (timestamp, original_text, original_device, original_area,
+                    corrected_device, corrected_area, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (now.isoformat(), original_text, original_device,
+                 original_area, corrected_device, corrected_area, notes)
+            )
         logger.info(f"Correction logged: {original_device}→{corrected_device}")
     
     def get_active_patterns(self, trigger_hour: int,
                             trigger_day_of_week: int = None) -> list:
         """Get patterns that should trigger at this time."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        
-        if trigger_day_of_week is not None:
-            rows = conn.execute(
-                """SELECT * FROM learned_patterns
-                   WHERE is_active = 1
-                   AND trigger_hour = ?
-                   AND (trigger_day_of_week IS NULL 
-                        OR trigger_day_of_week = ?)
-                   ORDER BY confidence DESC""",
-                (trigger_hour, trigger_day_of_week)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT * FROM learned_patterns
-                   WHERE is_active = 1 AND trigger_hour = ?
-                   ORDER BY confidence DESC""",
-                (trigger_hour,)
-            ).fetchall()
-        
-        conn.close()
-        return [dict(r) for r in rows]
+        with self._get_db() as conn:
+            if trigger_day_of_week is not None:
+                rows = conn.execute(
+                    """SELECT * FROM learned_patterns
+                       WHERE is_active = 1
+                       AND trigger_hour = ?
+                       AND (trigger_day_of_week IS NULL 
+                            OR trigger_day_of_week = ?)
+                       ORDER BY confidence DESC""",
+                    (trigger_hour, trigger_day_of_week)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT * FROM learned_patterns
+                       WHERE is_active = 1 AND trigger_hour = ?
+                       ORDER BY confidence DESC""",
+                    (trigger_hour,)
+                ).fetchall()
+            return [dict(r) for r in rows]
     
     def get_baseline_power(self, node_id: str,
                            channel: str) -> Optional[float]:
         """Get average power baseline for a device."""
-        conn = sqlite3.connect(self.db_path)
-        row = conn.execute(
-            """SELECT avg_watts FROM power_baselines
-               WHERE node_id = ? AND channel = ?""",
-            (node_id, channel)
-        ).fetchone()
-        conn.close()
-        return row[0] if row else None
+        with self._get_db() as conn:
+            row = conn.execute(
+                """SELECT avg_watts FROM power_baselines
+                   WHERE node_id = ? AND channel = ?""",
+                (node_id, channel)
+            ).fetchone()
+            return row[0] if row else None
     
     def get_command_count_today(self) -> int:
         """Get total commands executed today."""
         today = datetime.now(TZ_VN).date().isoformat()
-        conn = sqlite3.connect(self.db_path)
-        row = conn.execute(
-            """SELECT COUNT(*) FROM command_log
-               WHERE timestamp LIKE ?""",
-            (f"{today}%",)
-        ).fetchone()
-        conn.close()
-        return row[0] if row else 0
+        with self._get_db() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) FROM command_log
+                   WHERE timestamp LIKE ?""",
+                (f"{today}%",)
+            ).fetchone()
+            return row[0] if row else 0
 
     def record_journal(self, notes: str, total_power: float = 0.0,
                        active_nodes: int = 0, active_relays: int = 0):
         """Record periodic snapshot to SSD journal."""
         now = datetime.now(TZ_VN)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            """INSERT INTO smart_journal 
-               (timestamp, date, hour, total_power_watts, active_nodes_count, active_relays_count, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (now.isoformat(), now.date().isoformat(), now.hour,
-             total_power, active_nodes, active_relays, notes)
-        )
-        conn.commit()
-        conn.close()
+        with self._get_db() as conn:
+            conn.execute(
+                """INSERT INTO smart_journal 
+                   (timestamp, date, hour, total_power_watts, active_nodes_count, active_relays_count, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (now.isoformat(), now.date().isoformat(), now.hour,
+                 total_power, active_nodes, active_relays, notes)
+            )
 
     def record_proactive_speech(self, event_type: str, content: str, node_id: str = None, success: bool = True, **kwargs):
         """Record proactive utterance to log."""
         now = datetime.now(TZ_VN)
-        conn = sqlite3.connect(self.db_path)
-        conn.execute(
-            """INSERT INTO proactive_log (timestamp, event_type, content, node_id)
-               VALUES (?, ?, ?, ?)""",
-            (now.isoformat(), event_type, content, node_id)
-        )
-        conn.commit()
-        conn.close()
+        with self._get_db() as conn:
+            conn.execute(
+                """INSERT INTO proactive_log (timestamp, event_type, content, node_id)
+                   VALUES (?, ?, ?, ?)""",
+                (now.isoformat(), event_type, content, node_id)
+            )
 
     def get_recent_journal(self, limit: int = 15) -> list:
         """Get recent journal snapshots from SSD."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM smart_journal ORDER BY id DESC LIMIT ?""", (limit,)
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        with self._get_db() as conn:
+            rows = conn.execute(
+                """SELECT * FROM smart_journal ORDER BY id DESC LIMIT ?""", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def get_recent_proactive_logs(self, limit: int = 10) -> list:
         """Get recent proactive speeches from SSD."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """SELECT * FROM proactive_log ORDER BY id DESC LIMIT ?""", (limit,)
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
+        with self._get_db() as conn:
+            rows = conn.execute(
+                """SELECT * FROM proactive_log ORDER BY id DESC LIMIT ?""", (limit,)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def get_last_proactive_time(self, event_type: str = None) -> Optional[float]:
         """Get timestamp of last proactive utterance in epoch seconds."""
-        conn = sqlite3.connect(self.db_path)
-        if event_type:
-            row = conn.execute(
-                """SELECT timestamp FROM proactive_log WHERE event_type = ? ORDER BY id DESC LIMIT 1""",
-                (event_type,)
-            ).fetchone()
-        else:
-            row = conn.execute(
-                """SELECT timestamp FROM proactive_log ORDER BY id DESC LIMIT 1"""
-            ).fetchone()
-        conn.close()
-        if row and row[0]:
-            try:
-                dt = datetime.fromisoformat(row[0])
-                return dt.timestamp()
-            except Exception:
-                pass
-        return None
+        with self._get_db() as conn:
+            if event_type:
+                row = conn.execute(
+                    """SELECT timestamp FROM proactive_log WHERE event_type = ? ORDER BY id DESC LIMIT 1""",
+                    (event_type,)
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT timestamp FROM proactive_log ORDER BY id DESC LIMIT 1"""
+                ).fetchone()
+            if row and row[0]:
+                try:
+                    dt = datetime.fromisoformat(row[0])
+                    return dt.timestamp()
+                except Exception:
+                    pass
+            return None

@@ -878,6 +878,8 @@ async def _shutdown(gateway):
         await gateway.proactive.stop()
     await gateway.audio_server.stop()
     await gateway.web_server.stop()
+    if hasattr(gateway, "mqtt") and gateway.mqtt:
+        await gateway.mqtt.disconnect()
     for t in [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]:
         t.cancel()
 

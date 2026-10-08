@@ -41,7 +41,6 @@ void main() {
       final client = GatewayClient(
         persistSession: false,
         client: MockClient((req) async {
-          print('MOCK REQ: ${req.method} ${req.url.path}');
           if (req.url.path == '/api/auth/me') {
             return http.Response('{"authenticated":true,"user":{"role":"admin"}}', 200);
           }

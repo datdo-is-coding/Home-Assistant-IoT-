@@ -130,7 +130,7 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     final gateway = ref.read(gatewayClientProvider);
 
     try {
-      final relayTypeStr = (DeviceType t) => switch (t) {
+      String relayTypeStr(DeviceType t) => switch (t) {
             DeviceType.light => 'light',
             DeviceType.fan => 'fan',
             DeviceType.socket => 'switch',

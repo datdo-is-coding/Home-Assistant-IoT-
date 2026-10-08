@@ -12,7 +12,9 @@ class AudioRelayTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'freertos').mkdir()
+            (root / 'audio_output').mkdir()
             stubs = {
+                'audio_output/sound_player.h': '#pragma once\nenum class SoundType { WAKE, SUCCESS, ERROR, BOOTUP };\nclass SoundPlayer { public: static SoundPlayer& instance() { static SoundPlayer s; return s; } bool play(SoundType) { return true; } };\n',
                 'esp_heap_caps.h': '#pragma once\n#include <cstdlib>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\ninline void* heap_caps_malloc(size_t n, int) { return malloc(n); }\n',
                 'esp_log.h': '#pragma once\n#define ESP_LOGI(...)\n#define ESP_LOGW(...)\n#define ESP_LOGE(...)\n',
                 'esp_timer.h': '#pragma once\n#include <cstdint>\ninline int64_t esp_timer_get_time() { return 1000000; }\n',
