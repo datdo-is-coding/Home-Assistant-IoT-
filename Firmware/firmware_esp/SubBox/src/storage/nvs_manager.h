@@ -16,6 +16,7 @@ struct SubBoxPersistentConfig {
     char wifi_ssid[32];
     char wifi_pass[64];
     char mqtt_broker_uri[128];
+    char ws_gateway_uri[128];
     uint32_t current_overload_limit_ma;
     float temp_fan_trigger_c;
 };

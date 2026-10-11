@@ -37,6 +37,7 @@ esp_err_t NVSManager::loadConfig(SubBoxPersistentConfig& config) {
     strncpy(config.wifi_ssid, SUBBOX_DEFAULT_WIFI_SSID, sizeof(config.wifi_ssid) - 1);
     strncpy(config.wifi_pass, SUBBOX_DEFAULT_WIFI_PASS, sizeof(config.wifi_pass) - 1);
     strncpy(config.mqtt_broker_uri, SUBBOX_DEFAULT_MQTT_BROKER_URI, sizeof(config.mqtt_broker_uri) - 1);
+    strncpy(config.ws_gateway_uri, SUBBOX_DEFAULT_WS_GATEWAY_URI, sizeof(config.ws_gateway_uri) - 1);
     config.current_overload_limit_ma = 10000;
     config.temp_fan_trigger_c = 32.0f;
 
@@ -66,6 +67,9 @@ esp_err_t NVSManager::loadConfig(SubBoxPersistentConfig& config) {
     len = sizeof(config.mqtt_broker_uri);
     nvs_get_str(handle, "broker", config.mqtt_broker_uri, &len);
 
+    len = sizeof(config.ws_gateway_uri);
+    nvs_get_str(handle, "wsuri", config.ws_gateway_uri, &len);
+
     nvs_get_u32(handle, "cur_lim", &config.current_overload_limit_ma);
 
     nvs_close(handle);
@@ -86,6 +90,7 @@ esp_err_t NVSManager::saveConfig(const SubBoxPersistentConfig& config) {
     nvs_set_str(handle, "ssid", config.wifi_ssid);
     nvs_set_str(handle, "pass", config.wifi_pass);
     nvs_set_str(handle, "broker", config.mqtt_broker_uri);
+    nvs_set_str(handle, "wsuri", config.ws_gateway_uri);
     nvs_set_u32(handle, "cur_lim", config.current_overload_limit_ma);
 
     err = nvs_commit(handle);

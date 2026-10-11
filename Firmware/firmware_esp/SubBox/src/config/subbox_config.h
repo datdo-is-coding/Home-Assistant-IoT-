@@ -97,8 +97,8 @@
 /*                            NETWORK DEFAULTS                               */
 /* ========================================================================= */
 
-#define SUBBOX_DEFAULT_WIFI_SSID        ""
-#define SUBBOX_DEFAULT_WIFI_PASS        ""
-#define SUBBOX_DEFAULT_MQTT_BROKER_URI  ""
-#define SUBBOX_DEFAULT_WS_GATEWAY_URI   "ws://10.42.0.1:8765/ws/audio"
+#define SUBBOX_DEFAULT_WIFI_SSID        "XIAOMI"
+#define SUBBOX_DEFAULT_WIFI_PASS        "1234567890"
+#define SUBBOX_DEFAULT_MQTT_BROKER_URI  "mqtts://192.168.11.29:8883"
+#define SUBBOX_DEFAULT_WS_GATEWAY_URI   "ws://192.168.11.29:8765/ws/audio"
 #define SUBBOX_MQTT_RECONNECT_MS        5000

@@ -69,7 +69,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "⚠️ Wi-Fi unreachable after 5 attempts -> Launching SoftAP Captive Portal!");
             wifi_provisioning_start();
         }
-        esp_wifi_connect();
+        if (!wifi_provisioning_is_active()) {
+            esp_wifi_connect();
+        }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_wifi_retry_count = 0;
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
@@ -159,6 +161,15 @@ extern "C" void app_main(void) {
     print_banner(cfg);
 
     /* 3. Initialize Wi-Fi Station or Launch Provisioning */
+    if (strlen(cfg.wifi_ssid) == 0 || strcmp(cfg.wifi_ssid, "Aetheria-Gateway-Setup") == 0) {
+        ESP_LOGW(TAG, "No valid Wi-Fi credentials in NVS (Fresh Setup or old defaults). Using defaults from config...");
+        strncpy(cfg.wifi_ssid, SUBBOX_DEFAULT_WIFI_SSID, sizeof(cfg.wifi_ssid) - 1);
+        strncpy(cfg.wifi_pass, SUBBOX_DEFAULT_WIFI_PASS, sizeof(cfg.wifi_pass) - 1);
+        strncpy(cfg.mqtt_broker_uri, SUBBOX_DEFAULT_MQTT_BROKER_URI, sizeof(cfg.mqtt_broker_uri) - 1);
+        strncpy(cfg.ws_gateway_uri, SUBBOX_DEFAULT_WS_GATEWAY_URI, sizeof(cfg.ws_gateway_uri) - 1);
+        NVSManager::saveConfig(cfg);
+    }
+
     if (strlen(cfg.wifi_ssid) == 0) {
         ESP_LOGW(TAG, "No Wi-Fi credentials in NVS (Fresh Setup). Starting SoftAP Provisioning immediately!");
         wifi_init_sta("", "");
@@ -184,7 +195,7 @@ extern "C" void app_main(void) {
     );
 
     // Pi4 owns voice recognition and commands. A failed connection never invents a local command.
-    auto asr = std::make_shared<WsASR>(SUBBOX_DEFAULT_WS_GATEWAY_URI, cfg.subbox_id);
+    auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id);
     if (!asr->init()) ESP_LOGE(TAG, "Pi4 audio relay unavailable; voice control disabled until configured/restarted");
 
     auto audio_mgr = std::make_shared<AudioManager>(vad, asr);

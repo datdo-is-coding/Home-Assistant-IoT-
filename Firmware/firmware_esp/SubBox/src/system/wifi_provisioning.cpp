@@ -241,7 +241,8 @@ static esp_err_t portal_save_handler(httpd_req_t *req) {
     }
 
     if (gateway && strlen(gateway) > 0) {
-        snprintf(cfg.mqtt_broker_uri, sizeof(cfg.mqtt_broker_uri), "mqtt://%s:1883", gateway);
+        snprintf(cfg.mqtt_broker_uri, sizeof(cfg.mqtt_broker_uri), "mqtts://%s:8883", gateway);
+        snprintf(cfg.ws_gateway_uri, sizeof(cfg.ws_gateway_uri), "ws://%s:8765/ws/audio", gateway);
     }
 
     esp_err_t save_err = NVSManager::saveConfig(cfg);
