@@ -1,9 +1,13 @@
 #include "kws_config.h"
 #include "mfcc.h"
-#include "model_data.h"
-#include "kws_model.h"
 #include "audio_input.h"
 #include <Arduino.h>
+
+#if USE_QUANTIZED_MODEL
+#include "kws_model_quantized.h"
+#else
+#include "kws_model.h"
+#endif
 
 // ==========================================
 // ĐỐI TƯỢNG TOÀN CỤC & BỘ ĐỆM ÂM THANH
@@ -167,8 +171,11 @@ void setup() {
   Serial.println("\n=======================================================");
   Serial.println("  ESP32-S3 KEYWORD SPOTTING (KWS) - VOICE RELAY CONTROL");
   Serial.println("=======================================================");
-  Serial.printf("Mô hình lượng tử hóa INT8: %u bytes (%0.2f KB)\n",
-                kws_model_len, (float)kws_model_len / 1024.0f);
+#if USE_QUANTIZED_MODEL
+  Serial.printf(">> CẤU HÌNH MÔ HÌNH: [INT8 QUANTIZED] (3,776 bytes weights - Tiết kiệm 75%% Flash)\n");
+#else
+  Serial.printf(">> CẤU HÌNH MÔ HÌNH: [FLOAT32 GỐC] (15,104 bytes weights - ESP32-S3 FPU Hardware)\n");
+#endif
 
   // Cấu hình các chân Relay đầu ra
   pinMode(RELAY_1_PIN, OUTPUT);
@@ -286,10 +293,14 @@ void loop() {
         // Trích xuất MFCC từ âm tiết đã căn giữa
         mfcc_extractor.extract(audio_buffer, mfcc_features);
 
-        // Chạy suy luận đúng 1 lần duy nhất (~88ms)
+        // Chạy suy luận đúng 1 lần duy nhất
         unsigned long t_start = millis();
         float probs[NUM_CLASSES];
+#if USE_QUANTIZED_MODEL
+        kws_run_inference_quantized(mfcc_features, probs);
+#else
         kws_run_inference(mfcc_features, probs);
+#endif
         unsigned long infer_duration = millis() - t_start;
 
         // Tìm từ khóa xác suất cao nhất

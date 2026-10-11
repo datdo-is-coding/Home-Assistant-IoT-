@@ -86,4 +86,12 @@ static const char *const KWS_LABELS[NUM_CLASSES] = {
 #define CONFIDENCE_THRESHOLD 0.40f // Ngưỡng xác suất tối thiểu kích hoạt lệnh (40%)
 #define COOLDOWN_MS 500          // Thời gian chờ tránh kích hoạt lặp từ
 
+// ==========================================
+// 7. CẤU HÌNH LỰA CHỌN MÔ HÌNH (SWITCH MODEL)
+// ==========================================
+// 0: Mô hình Float32 gốc (kws_model.h - ~15.1 KB trọng số)
+// 1: Mô hình INT8 Quantized (kws_model_quantized.h - ~3.7 KB trọng số)
+#define USE_QUANTIZED_MODEL 1
+
 #endif // KWS_CONFIG_H
+
