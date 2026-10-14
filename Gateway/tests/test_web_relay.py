@@ -65,7 +65,7 @@ class RelayHTTP(unittest.IsolatedAsyncioTestCase):
 
     async def test_channel_aliases(self):
         for key in ("channel", "ch"):
-            for expected, aliases in (("ch1", ("ch1", 1, "1")), ("ch2", ("ch2", 2, "2"))):
+            for expected, aliases in (("ch1", ("ch1", 1, "1")), ("ch2", ("ch2", 2, "2")), ("ch3", ("ch3", 3, "3"))):
                 for channel in aliases:
                     with self.subTest(key=key, channel=channel):
                         status, body = await self.request({
@@ -75,6 +75,14 @@ class RelayHTTP(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(status, 200)
                         self.assertEqual(body["channel"], expected)
                         self.assertTrue(body["success"])
+
+    async def test_channel_three_preserves_other_http_relay_states(self):
+        registry = SimpleNamespace(data={'nodes': {'AB1': {'relay_state': [1, 0]}}}, update_relay_state=Mock())
+        self.server.gateway.registry = registry
+        status, body = await self.request({'node_id': 'AB1', 'channel': 3, 'action': 'turn_on'})
+        self.assertEqual(status, 200)
+        self.assertTrue(body['success'])
+        registry.update_relay_state.assert_called_once_with('AB1', [1, 0, 1])
 
     async def test_verification_outcomes_preserve_load_distinction(self):
         for result in VerifyResult:
@@ -104,7 +112,7 @@ class RelayHTTP(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_action_or_channel_never_dispatches(self):
         for key, invalid in (
             ("action", ("toggle", "TURN_TOGGLE", "", None, 2, [], {})),
-            ("channel", ("ch3", 0, 3, "", None, [], {})),
+            ("channel", ("ch4", 0, 4, "", None, [], {})),
         ):
             for value in invalid:
                 with self.subTest(key=key, value=value):

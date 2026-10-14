@@ -110,8 +110,10 @@ ExecutionResult CommandRouter::executeLocalCommand(const CommandResolution& res,
 
     // Registry distinguishes the physical board from its relay-channel entry.
     std::string board_id = node.node_id;
-    if (node.channel == 2 && board_id.size() > 4 && board_id.compare(board_id.size() - 4, 4, "_CH2") == 0)
-        board_id.resize(board_id.size() - 4);
+    const std::string channel_suffix = "_CH" + std::to_string(node.channel);
+    if (node.channel > 1 && board_id.size() > channel_suffix.size() &&
+        board_id.compare(board_id.size() - channel_suffix.size(), channel_suffix.size(), channel_suffix) == 0)
+        board_id.resize(board_id.size() - channel_suffix.size());
     std::string json_cmd = ActionBoxNetworkProtocol::buildCommandJson(req_id, cmd_str.c_str(), node.channel, board_id.c_str(), node.hardware_uid.c_str(), node.config_version);
     ESP_LOGI(TAG, "🟢 [LOCAL-ROOM COMMAND] ActionBox: %s | Room: %s | Device: %s | Action: %s -> Sending ESP-NOW to %s (Ch %u): %s",
              res.origin_node_id.c_str(), roomToString(res.speaker_room),

@@ -93,12 +93,12 @@ class CommandVerifier:
         if ack is None:
             return VerifyResult.TIMEOUT, before_power, before_power, 0.0
         expected = "ON" if action in ("turn_on", "open", "on") else "OFF"
-        channel_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel)
+        channel_number = {"ch1": 1, "ch2": 2, "ch3": 3, "1": 1, "2": 2, "3": 3, 1: 1, 2: 2, 3: 3}.get(channel)
         if "channel" in ack and ack["channel"] != channel_number:
             return VerifyResult.FAILED, before_power, before_power, 0.0
         states = ack.get("relay_states")
         if isinstance(states, list):
-            index = {"ch1": 0, "ch2": 1, "1": 0, "2": 1, 1: 0, 2: 1}.get(channel)
+            index = channel_number - 1 if channel_number is not None else None
             if index is not None and index < len(states):
                 ack["state"] = "ON" if states[index] else "OFF"
         if ack.get("status") != "OK" or ack.get("state") != expected:

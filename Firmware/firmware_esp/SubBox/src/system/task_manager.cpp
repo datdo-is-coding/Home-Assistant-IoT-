@@ -107,7 +107,7 @@ bool TaskManager::init() {
                 const cJSON* number = cJSON_GetObjectItem(ch, "channel");
                 const cJSON* state = cJSON_GetObjectItem(ch, "state");
                 if (!cJSON_IsNumber(number) || !cJSON_IsString(state) ||
-                    number->valueint < 1 || number->valueint > 2) continue;
+                    number->valueint < 1 || number->valueint > 3) continue;
                 std::string key = id->valuestring;
                 if (number->valueint != 1) key += "_CH" + std::to_string(number->valueint);
                 ActionBoxNode node{};
@@ -115,7 +115,8 @@ bool TaskManager::init() {
                     node.node_id = key;
                     node.room = m_context_mgr->getSubboxRoom();
                     node.channel = number->valueint;
-                    node.device = node.channel == 1 ? DeviceType::LIGHT : DeviceType::FAN;
+                    node.device = node.channel == 1 ? DeviceType::LIGHT :
+                                  node.channel == 2 ? DeviceType::FAN : DeviceType::OTHER;
                     node.has_relay = node.has_current_sensor = node.has_microphone = true;
                 }
                 node.hardware_uid = uid->valuestring;

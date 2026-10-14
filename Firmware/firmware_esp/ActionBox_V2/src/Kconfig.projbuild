@@ -1,0 +1,10 @@
+menu "ActionBox radio"
+    config ACTIONBOX_ESPNOW_CHANNEL
+        int "2.4 GHz channel of the SubBox access point"
+        range 1 13
+        default 11
+        help
+            Set this to the fixed Wi-Fi AP channel used by SubBox.
+            ESP-NOW peers follow this channel. Automatic channel discovery
+            is not implemented.
+endmenu

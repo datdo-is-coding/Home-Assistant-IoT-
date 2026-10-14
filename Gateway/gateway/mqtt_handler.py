@@ -136,7 +136,7 @@ class MQTTHandler:
             return False
         route = self.subbox_route(node_id)
         if route:
-            channel_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel)
+            channel_number = {"ch1": 1, "ch2": 2, "ch3": 3, "1": 1, "2": 2, "3": 3, 1: 1, 2: 2, 3: 3}.get(channel)
             command = {"turn_on": "TURN_ON", "on": "TURN_ON", "open": "TURN_ON",
                        "turn_off": "TURN_OFF", "off": "TURN_OFF", "close": "TURN_OFF"}.get(action)
             if not channel_number or not command:
@@ -197,7 +197,7 @@ class MQTTHandler:
           - home/nodes/{device_id}/relay/{channel}/set (cho T2 Zone Controller route xuống T1)
           - smarthome/cmd/{device_id} (compact backward-compat)
         """
-        if channel not in (1, 2) or state not in (0, 1):
+        if channel not in (1, 2, 3) or state not in (0, 1):
             return False
         return await self.send_command(device_id, channel, 'turn_on' if state else 'turn_off')
         # Legacy fan-out removed: one selected route owns each command.

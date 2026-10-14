@@ -38,6 +38,37 @@ class Persistence(unittest.TestCase):
 
 
 class LoadVerification(unittest.IsolatedAsyncioTestCase):
+    async def test_channel_three_ack_updates_only_third_relay(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = RegistryManager(str(Path(tmp) / 'registry.json'), str(Path(tmp) / 'registry.db'))
+            registry.data['nodes']['ABV2'] = {'relay_state': [1, 0], 'channels': {'ch3': {}}}
+            mqtt = MQTTHandler()
+            async def send(node, channel, action, seq=None, **kwargs):
+                mqtt.command_acks[(node, seq)] = {'channel': 3, 'status': 'OK', 'state': 'ON'}
+                return True
+            mqtt.send_command = AsyncMock(side_effect=send)
+            verifier = CommandVerifier(mqtt, registry)
+            result, *_ = await verifier.verify_command('ABV2', 'ch3', 'turn_on', seq=7)
+            self.assertEqual(result, VerifyResult.ACK_ONLY)
+            self.assertEqual(registry.get_all_nodes()['ABV2']['relay_state'], [1, 0, 1])
+
+    async def test_actionbox_v2_channel_three_uses_selected_subbox_route(self):
+        mqtt = MQTTHandler()
+        mqtt.node_identities['ABV2'] = {'hardware_uid': '112233445566', 'config_version': 1}
+        mqtt.subbox_route = lambda node: 'SB1'
+        mqtt.publish = AsyncMock(return_value=True)
+        for channel in ('ch3', '3', 3):
+            mqtt.publish.reset_mock()
+            self.assertTrue(await mqtt.send_command('ABV2', channel, 'turn_on', seq=17))
+            mqtt.publish.assert_awaited_once()
+            args = mqtt.publish.call_args
+            self.assertEqual(args.args[0], 'home/subbox/SB1/command')
+            self.assertEqual(args.args[1]['channel'], 3)
+            self.assertEqual(args.args[1]['cmd'], 'TURN_ON')
+            self.assertEqual(args.args[1]['node_id'], 'ABV2')
+        self.assertTrue(await mqtt.send_relay_set('ABV2', 3, 0))
+        self.assertFalse(await mqtt.send_relay_set('ABV2', 4, 1))
+
     async def test_confirmed_ack_updates_registry_before_next_snapshot(self):
         with tempfile.TemporaryDirectory() as tmp:
             registry = RegistryManager(str(Path(tmp) / 'registry.json'), str(Path(tmp) / 'registry.db'))

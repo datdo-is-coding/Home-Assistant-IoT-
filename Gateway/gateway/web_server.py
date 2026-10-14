@@ -255,10 +255,10 @@ class WebServer:
                     channel = d.get("channel", d.get("ch"))
                     action = d.get("action", d.get("s"))
                     
-                    if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", 1, 2, "1", "2"):
+                    if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", "ch3", 1, 2, 3, "1", "2", "3"):
                         await self._respond(writer, 400, {"error": "Use an explicit relay state and valid channel"}); return
                     action = "turn_on" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "turn_off"
-                    channel = "ch1" if channel in ("ch1", 1, "1") else "ch2"
+                    channel = {"ch1": "ch1", "ch2": "ch2", "ch3": "ch3", 1: "ch1", 2: "ch2", 3: "ch3", "1": "ch1", "2": "ch2", "3": "ch3"}[channel]
                     result, *_ = await self.gateway.verifier.verify_command(node_id, channel, action)
                     outcome = result.value
                     is_ok = outcome in {"ack_only", "confirmed_load"}
@@ -267,7 +267,7 @@ class WebServer:
                     if is_ok and hasattr(self.gateway, "registry"):
                         node = self.gateway.registry.data.get("nodes", {}).get(node_id)
                         if node:
-                            ch_idx = 0 if channel == "ch1" else 1
+                            ch_idx = int(channel[2:]) - 1
                             new_val = 1 if action == "turn_on" else 0
                             cur_rl = list(node.get("relay_state", [0, 0]))
                             while len(cur_rl) <= ch_idx:

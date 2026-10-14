@@ -15952,10 +15952,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "64abd729-3f87-4d6c-aba1-aefc43efa343")
 		(property "Reference" "C51"
-			(at 173.99 118.11 90)
+			(at 168.91 129.286 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -15965,7 +15964,7 @@
 			)
 		)
 		(property "Value" "100nF"
-			(at 173.99 120.65 90)
+			(at 173.99 129.286 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
