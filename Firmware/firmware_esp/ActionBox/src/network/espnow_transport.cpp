@@ -1,8 +1,3 @@
-/**
- * @file espnow_transport.cpp
- * @brief Reliable ESP-NOW Network Transport Layer Implementation
- */
-
 #include "espnow_transport.h"
 #include "app_config.h"
 #include "nvs_storage.h"
@@ -89,9 +84,8 @@ esp_err_t espnow_transport_init(void) {
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
 
-    /* Disable power saving for instant relay actuation response */
     esp_wifi_set_ps(WIFI_PS_NONE);
-    /* Must match the SubBox AP channel; peers follow the active radio channel. */
+
     ESP_ERROR_CHECK(esp_wifi_set_channel(APP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
 
     uint8_t local_mac[6];
@@ -108,7 +102,6 @@ esp_err_t espnow_transport_init(void) {
     esp_now_register_recv_cb(on_espnow_recv);
     esp_now_register_send_cb(on_espnow_send);
 
-    /* Register Broadcast Peer */
     esp_now_peer_info_t bcast_peer = {};
     memcpy(bcast_peer.peer_addr, s_broadcast_mac, 6);
     bcast_peer.channel = 0;
@@ -120,7 +113,6 @@ esp_err_t espnow_transport_init(void) {
         return err;
     }
 
-    /* Check if paired SubBox MAC is saved in NVS */
     const ActionBoxPersistentConfig *stored_cfg = nvs_storage_get_cached_config();
     if (stored_cfg->has_assigned_subbox) {
         espnow_transport_pair_subbox(stored_cfg->assigned_subbox_mac);
@@ -181,7 +173,6 @@ esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *paylo
         return ESP_ERR_TIMEOUT;
     }
 
-    /* Auto-register peer if not already in table */
     if (!esp_now_is_peer_exist(dest_mac)) {
         esp_now_peer_info_t peer = {};
         memcpy(peer.peer_addr, dest_mac, 6);

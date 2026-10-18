@@ -5,7 +5,7 @@ import serial
 
 def reset_board(ser):
     try:
-        # ESP32 auto-reset sequence via RTS/DTR
+
         ser.setDTR(False)
         ser.setRTS(True)
         time.sleep(0.1)
@@ -37,9 +37,9 @@ def read_port(port_name, prefix, color_code, should_reset=False):
             time.sleep(2)
 
 def main():
-    # Only reset on first connection if desired, or just read
-    t_subbox = threading.Thread(target=read_port, args=("COM9", "SubBox:COM9", "36", False), daemon=True) # cyan
-    t_action = threading.Thread(target=read_port, args=("COM10", "ActionBox:COM10", "33", False), daemon=True) # yellow
+
+    t_subbox = threading.Thread(target=read_port, args=("COM9", "SubBox:COM9", "36", False), daemon=True)
+    t_action = threading.Thread(target=read_port, args=("COM10", "ActionBox:COM10", "33", False), daemon=True)
 
     t_subbox.start()
     t_action.start()

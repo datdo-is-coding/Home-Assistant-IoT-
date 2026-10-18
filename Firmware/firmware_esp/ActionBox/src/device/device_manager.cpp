@@ -1,8 +1,3 @@
-/**
- * @file device_manager.cpp
- * @brief High-Level Device Coordination Implementation
- */
-
 #include "device_manager.h"
 #include "relay_driver.h"
 #include "bl0942.h"
@@ -24,13 +19,10 @@ static const char *TAG = "DEV_MGR";
 esp_err_t device_manager_init(void) {
     ESP_LOGI(TAG, "Initializing Device Manager Coordinator...");
 
-    /* Register callback from local physical buttons */
     button_register_callback(device_manager_on_button_event, NULL);
 
-    /* Register callback from safety supervisor */
     safety_register_fault_callback(device_manager_on_fault_alert);
 
-    /* Sync initial LED states with relay states */
     device_manager_update_leds();
 
     ESP_LOGI(TAG, "Device Manager initialized.");
@@ -39,7 +31,7 @@ esp_err_t device_manager_init(void) {
 
 void device_manager_update_leds(void) {
     for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ch++) {
-        if (ch == 1) continue; /* LED1 is dedicated to System Connection Status & Faults */
+        if (ch == 1) continue;
         RelayFault flt = relay_get_fault(ch);
         if (flt != RELAY_FAULT_NONE) {
             led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
@@ -61,7 +53,6 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
     out_resp->session_id = cmd->session_id;
     out_resp->channel = cmd->channel;
 
-    /* 1. Safety validation check */
     char err_buf[48] = {0};
     if (!safety_validate_command(cmd, err_buf, sizeof(err_buf))) {
         out_resp->success = false;
@@ -71,7 +62,6 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
         return ESP_FAIL;
     }
 
-    /* 2. Execute command */
     esp_err_t exec_err = ESP_OK;
 
     switch (cmd->cmd) {
@@ -231,7 +221,7 @@ void device_manager_on_button_event(uint8_t channel, ButtonEvent event, void *us
 
         case BUTTON_EVENT_LONG_PRESS: {
             ESP_LOGI(TAG, "LOCAL BUTTON Ch%u: Long press (1.2s) -> Push-To-Talk Voice Trigger", channel);
-            voice_capture_start_streaming(2); /* Trigger 2 = Manual Push-to-Talk */
+            voice_capture_start_streaming(2);
             break;
         }
 
@@ -254,7 +244,7 @@ void device_manager_on_fault_alert(uint8_t channel, RelayFault fault, uint32_t c
     char alert_json[256];
     esp_err_t err = protocol_serialize_fault_alert(channel, fault, current_ma, alert_json, sizeof(alert_json));
     if (err == ESP_OK) {
-        /* Immediately transmit urgent fault packet over ESP-NOW */
+
         espnow_transport_send((const uint8_t*)alert_json, strlen(alert_json));
         ESP_LOGI(TAG, "Urgent fault packet dispatched to network: %s", alert_json);
     }

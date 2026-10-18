@@ -1,0 +1,68 @@
+{
+  "run_id": "run-20261018-01",
+  "timestamp": "2026-10-18T00:42:00+07:00",
+  "scope": "Phase A (Baseline, Static Audit, Startup, Integration & Deduplication)",
+  "git": {
+    "commit": "8d9d5ada848d05c136054ac5070b21a8235f0573",
+    "branch": "main",
+    "dirty": true,
+    "modified_count": 24,
+    "untracked_count": 24
+  },
+  "toolchains": {
+    "python": "Python 3.12.3 (/home/tuan/.venv/bin/python)",
+    "flutter": "Flutter 3.44.8 (channel stable)",
+    "dart": "Dart 3.12.2",
+    "esp_idf": "ESP-IDF v6.0.2 (/home/tuan/.espressif/v6.0.2/esp-idf)"
+  },
+  "artifact_hashes": {
+    "Gateway/requirements-core.txt": "c59cbf68bf3dc180e2fbfb5233c0efe2c6a93e09a76aef013d378876be0a9d42",
+    "App/dtv_energy_flutter/pubspec.lock": "755020320d03691a41171ad996901b74597d64eebad13a0478d504208fc23925",
+    "Firmware/firmware_kws/models/kws_dscnn.onnx": "e93fda25932b16fcd05baa7eb808c0303b005b2074ee821a6a135f7ffe8afd79",
+    "Firmware/firmware_kws/models/kws_dscnn_int8.onnx": "a5b9188f440a452bfa3bd5d1861fee73d2a4f8697c65bf8fc19214c15ed6f902",
+    "Firmware/firmware_bin/wroom_slave_firmware.bin": "9ed51bef3cf77d05b47163b0df57acbf133b0bbf4782b7f9e592748386825b3a",
+    "Firmware/firmware_bin/esp32s3_master_firmware.bin": "dcf5a40cad159ca49d24f4599ff230f56c6d3a79a406acd97bde3cf3a3bb1cc8",
+    "Firmware/firmware_esp/ActionBox_V2/sdkconfig.defaults": "0ad8be1be4cee45b623f829bb2fd97d44dd066d3a07a209b38afff9e90763bc4",
+    "Firmware/firmware_esp/SubBox/sdkconfig.defaults": "595c395db707f6e5c73261004b8472166f33b5e83ec087bac5cc3d9f89346b2e",
+    "deployment/systemd/home-competition-core.service": "2893425dbf074077366e8303234d2b09b71666d0aaf23b5b40428312866d73fa",
+    "deployment/config_examples/core.env.example": "92ff76231e96839e374a33e7927cc41b1a36690852e02d120b2c811ccfe9ffa9"
+  },
+  "secrets_inventory": [
+    {
+      "name": "Master Key",
+      "location": "<data>/master.key",
+      "mode": "0600",
+      "description": "AES-256-GCM / HMAC database encryption key"
+    },
+    {
+      "name": "Owner Token",
+      "location": "<data>/owner-token.txt",
+      "mode": "0600",
+      "description": "Bearer token for primary home owner"
+    },
+    {
+      "name": "TLS Server Cert/Key",
+      "location": "HC_TLS_CERT / HC_TLS_KEY",
+      "mode": "0600",
+      "description": "HTTPS/WSS TLS encryption credentials"
+    },
+    {
+      "name": "OTA Signing Key",
+      "location": "HC_OTA_PUBLIC_KEY",
+      "mode": "0644",
+      "description": "Public key for OTA manifest validation; private key offline"
+    },
+    {
+      "name": "MQTT SubBox Credentials",
+      "location": "SubBox NVS",
+      "mode": "NVS encrypted",
+      "description": "Pinned TLS CA and per-device authentication token"
+    },
+    {
+      "name": "ActionBox Factory Secret",
+      "location": "ActionBox eFuse / Factory Partition",
+      "mode": "Hardware protected",
+      "description": "Per-node AES-128 LMK and 256-bit application key"
+    }
+  ]
+}

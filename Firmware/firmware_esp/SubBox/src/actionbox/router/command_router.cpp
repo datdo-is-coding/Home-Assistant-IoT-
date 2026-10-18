@@ -1,8 +1,3 @@
-/**
- * @file command_router.cpp
- * @brief Local vs Cross-Room Command Execution & Router Implementation
- */
-
 #include "command_router.h"
 #include "actionbox/protocol/actionbox_network_protocol.h"
 #include "esp_log.h"
@@ -41,21 +36,17 @@ ExecutionResult CommandRouter::route(const CommandResolution& res) {
         return result;
     }
 
-    // 1. Complex Condition / Scene Command -> Forward to Pi4
     if (res.intent == IntentType::COMPLEX) {
         return forwardToPi4(res);
     }
 
-    // 2. Cross-Room Command -> Forward to Target Room SubBox / Pi4
     if (res.target_room != res.speaker_room && res.target_room != RoomType::UNSPECIFIED) {
         return forwardCrossRoom(res);
     }
 
-    // 3. Local Command Execution in this SubBox's room
     ActionBoxNode node;
     bool found = m_registry->findNodeByDeviceAndRoom(res.device, res.target_room, node);
 
-    // Fallback: If not found in target room, search local room
     if (!found) {
         found = m_registry->findNodeByDeviceAndRoom(res.device, m_context_mgr->getSubboxRoom(), node);
     }
@@ -108,7 +99,6 @@ ExecutionResult CommandRouter::executeLocalCommand(const CommandResolution& res,
             return result;
     }
 
-    // Registry distinguishes the physical board from its relay-channel entry.
     std::string board_id = node.node_id;
     const std::string channel_suffix = "_CH" + std::to_string(node.channel);
     if (node.channel > 1 && board_id.size() > channel_suffix.size() &&
@@ -120,7 +110,6 @@ ExecutionResult CommandRouter::executeLocalCommand(const CommandResolution& res,
              deviceToString(res.device), intentToString(res.intent),
              node.node_id.c_str(), node.channel, json_cmd.c_str());
 
-    // Transmit command directly over ESP-NOW transport
     std::string response;
     result.success = m_transport && m_transport->sendCommand(board_id.c_str(), json_cmd, &response);
     if (!result.success) {
@@ -157,10 +146,8 @@ ExecutionResult CommandRouter::executeLocalCommand(const CommandResolution& res,
     }
     cJSON_Delete(ack);
 
-    // Commit to context
     m_context_mgr->commitResolution(res);
 
-    // Record last input node for directed TTS audio response
     if (m_audio_router) {
         m_audio_router->setLastInputNodeId(res.origin_node_id);
     }
@@ -176,7 +163,7 @@ ExecutionResult CommandRouter::forwardToPi4(const CommandResolution& res) {
     result.response_text = "Yêu cầu có điều kiện đang được chuyển tới máy chủ xử lý.";
 
     ESP_LOGI(TAG, "Forwarding COMPLEX command to Raspberry Pi 4 via MQTT...");
-    // Will be published on MQTT topic home/subbox/<id>/voice/request by mqtt_client
+
     return result;
 }
 

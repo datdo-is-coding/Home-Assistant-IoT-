@@ -18,7 +18,6 @@ import argparse
 import serial
 import serial.tools.list_ports
 
-# USB Protocol Definitions (matches app_config.h)
 MAGIC_0 = 0xAA
 MAGIC_1 = 0x55
 
@@ -32,8 +31,7 @@ FLAG_BUTTON_DN  = 0x02
 
 SAMPLE_RATE = 16000
 CHANNELS    = 1
-SAMPLE_WIDTH= 2 # 16-bit = 2 bytes
-
+SAMPLE_WIDTH= 2
 
 def find_esp32s3_port():
     """Auto-detect ESP32-S3 USB port by Espressif VID (0x303A)."""
@@ -41,7 +39,6 @@ def find_esp32s3_port():
         if p.vid == 0x303A:
             return p.device
     return None
-
 
 def calculate_rms(pcm_bytes):
     """Calculate RMS volume level of 16-bit PCM bytes."""
@@ -52,14 +49,12 @@ def calculate_rms(pcm_bytes):
     sum_sq = sum(s * s for s in samples)
     return int((sum_sq / count) ** 0.5)
 
-
 def render_vu_meter(rms, max_rms=2000, width=20):
     """Render a text VU-meter bar."""
     val = min(rms, max_rms)
     filled = int((val / max_rms) * width)
     bar = "█" * filled + "░" * (width - filled)
     return f"[{bar}] {rms:4d}"
-
 
 def save_wav_file(filepath, pcm_data, sample_rate=16000):
     """Save raw PCM bytes to standard RIFF WAV file."""
@@ -69,7 +64,6 @@ def save_wav_file(filepath, pcm_data, sample_rate=16000):
         wf.setsampwidth(SAMPLE_WIDTH)
         wf.setframerate(sample_rate)
         wf.writeframes(pcm_data)
-
 
 def main():
     parser = argparse.ArgumentParser(description="ESP32-S3 USB Audio Dataset Collector")
@@ -115,7 +109,7 @@ def main():
 
     current_label = args.label
     sample_index = 1
-    # Find next available index for this label
+
     label_dir = os.path.join(args.outdir, current_label)
     if os.path.exists(label_dir):
         existing = [f for f in os.listdir(label_dir) if f.endswith(".wav")]
@@ -130,7 +124,7 @@ def main():
 
     try:
         while True:
-            # Check for data from ESP32
+
             b = ser.read(1)
             if b:
                 byte_val = b[0]
@@ -138,7 +132,7 @@ def main():
                     if byte_val == MAGIC_0:
                         sync_state = 1
                     else:
-                        # Print plain text log messages from firmware
+
                         try:
                             sys.stdout.write(b.decode("utf-8", errors="ignore"))
                             sys.stdout.flush()
@@ -152,25 +146,25 @@ def main():
                         sync_state = 0
                 elif sync_state == 2:
                     hdr_buf.append(byte_val)
-                    if len(hdr_buf) == 6: # type(1), flags(1), length(2), seq(2)
+                    if len(hdr_buf) == 6:
                         pkt_type, pkt_flags, pkt_len, pkt_seq = struct.unpack("<BBHH", hdr_buf)
-                        # Read payload
+
                         payload = ser.read(pkt_len)
                         while len(payload) < pkt_len:
                             chunk = ser.read(pkt_len - len(payload))
                             if not chunk:
                                 break
                             payload += chunk
-                        # Read 1-byte checksum
+
                         chk_byte = ser.read(1)
                         if chk_byte:
-                            # Verify checksum
+
                             expected_chk = 0
                             for x in [MAGIC_0, MAGIC_1] + list(hdr_buf) + list(payload):
                                 expected_chk ^= x
-                            
+
                             if expected_chk == chk_byte[0]:
-                                # Packet verified!
+
                                 if pkt_type == PKT_TYPE_START:
                                     is_recording = True
                                     recording_buffer.clear()
@@ -205,7 +199,6 @@ def main():
     finally:
         ser.close()
         print("Đã đóng kết nối cổng COM.")
-
 
 if __name__ == "__main__":
     main()

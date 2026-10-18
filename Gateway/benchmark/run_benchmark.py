@@ -14,7 +14,6 @@ import sys
 import asyncio
 from pathlib import Path
 
-# Đảm bảo đường dẫn module
 BENCHMARK_DIR = Path(__file__).resolve().parent
 if str(BENCHMARK_DIR) not in sys.path:
     sys.path.insert(0, str(BENCHMARK_DIR))

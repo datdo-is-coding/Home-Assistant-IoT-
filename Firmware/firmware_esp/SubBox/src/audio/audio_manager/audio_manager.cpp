@@ -1,8 +1,3 @@
-/**
- * @file audio_manager.cpp
- * @brief Multi-Source Audio Stream Manager & Best-Signal Selector Implementation
- */
-
 #include "audio_manager.h"
 #include <cmath>
 #include <cstring>
@@ -71,7 +66,6 @@ std::map<std::string, ActionBoxAudioChannel> AudioManager::getChannelSnapshots()
 void AudioManager::updateChannelMetrics(ActionBoxAudioChannel& ch, const AudioPacket& packet) {
     ch.last_timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
-    // Packet loss detection
     if (ch.packets_received > 0) {
         uint16_t expected_seq = (ch.last_seq + 1) & 0xFFFF;
         if (packet.sequence_num > expected_seq) {
@@ -84,7 +78,6 @@ void AudioManager::updateChannelMetrics(ActionBoxAudioChannel& ch, const AudioPa
     ch.last_seq = packet.sequence_num;
     ch.packets_received++;
 
-    // Calculate RMS and Energy of incoming chunk
     size_t samples = packet.payload_len / sizeof(int16_t);
     if (samples > 0) {
         const auto* pcm = reinterpret_cast<const int16_t*>(packet.payload);
@@ -97,7 +90,6 @@ void AudioManager::updateChannelMetrics(ActionBoxAudioChannel& ch, const AudioPa
         ch.latest_rms = sqrtf((float)ch.latest_energy);
     }
 
-    // Calculate signal quality factor (combining packet reception ratio & SNR)
     uint32_t total_expected = ch.packets_received + ch.packets_lost;
     float packet_ratio = (total_expected > 0) ? (float)ch.packets_received / (float)total_expected : 1.0f;
     float level_score = std::min(1.0f, ch.latest_rms / 3000.0f);
@@ -112,7 +104,6 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string node_id = packet.source_node_id;
 
-    // Handle explicit STREAM_END from ActionBox
     if (packet.msg_type == AUDIO_MSG_TYPE_STREAM_END) {
         if (m_session_active && m_active_source_node_id == node_id) {
             m_stream_end_received = true;
@@ -121,7 +112,6 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         return;
     }
 
-    // Locate or register channel entry
     auto it = m_channels.find(node_id);
     if (it == m_channels.end()) {
         if (m_channels.size() >= SUBBOX_MAX_ACTIONBOXES_PER_ROOM) {
@@ -140,14 +130,13 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         new_ch.latest_energy = 0;
         new_ch.is_speaking = false;
         new_ch.signal_quality = 1.0f;
-        new_ch.stream_buffer = std::make_shared<AudioRingBuffer>(64 * 1024); // 64K samples (~4s)
+        new_ch.stream_buffer = std::make_shared<AudioRingBuffer>(64 * 1024);
         new_ch.stream_buffer->init();
 
         it = m_channels.emplace(node_id, std::move(new_ch)).first;
         ESP_LOGI(TAG, "Registered new audio stream channel for ActionBox: %s", node_id.c_str());
     }
 
-    // If packet is explicit STREAM_START, prioritize this node and begin ASR session
     if (packet.msg_type == AUDIO_MSG_TYPE_STREAM_START && !m_session_active) {
         m_active_source_node_id = node_id;
         m_last_input_node_id = node_id;
@@ -169,14 +158,13 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
     ActionBoxAudioChannel& ch = it->second;
     updateChannelMetrics(ch, packet);
 
-    // Buffer PCM samples into channel's ring buffer
     size_t samples = packet.payload_len / sizeof(int16_t);
     const auto* pcm = reinterpret_cast<const int16_t*>(packet.payload);
     ch.stream_buffer->write(pcm, samples);
 }
 
 void AudioManager::evaluateSourceSelection() {
-    if (m_session_active) return; // Stay locked until active utterance concludes
+    if (m_session_active) return;
 
     std::string best_candidate;
     float best_score = -1.0f;
@@ -184,7 +172,7 @@ void AudioManager::evaluateSourceSelection() {
     for (const auto& pair : m_channels) {
         const auto& ch = pair.second;
         if (ch.is_speaking && ch.stream_buffer->getAvailableSamples() >= SUBBOX_AUDIO_FRAME_SAMPLES) {
-            // Arbitration Score: Signal Quality * Energy
+
             float score = ch.signal_quality * (float)ch.latest_energy;
             if (score > best_score) {
                 best_score = score;
@@ -251,12 +239,10 @@ void AudioManager::process() {
         size_t read_count = active_buffer->read(frame, SUBBOX_AUDIO_FRAME_SAMPLES);
         if (read_count != SUBBOX_AUDIO_FRAME_SAMPLES) break;
 
-        // 1. Process VAD
         if (m_vad) {
             m_vad->process(frame, read_count);
         }
 
-        // 2. Feed into ASR Engine
         if (m_asr) {
             lock.unlock();
             const bool sent = m_asr->feedAudio(frame, read_count);
@@ -272,7 +258,6 @@ void AudioManager::process() {
         taskYIELD();
     }
 
-    // ActionBox frames the utterance. Pi transcripts must not terminate another recording.
     bool speech_finished = false;
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     bool packet_silence = (uint32_t)(now_ms - it->second.last_timestamp_ms) > 1200;
@@ -287,7 +272,7 @@ void AudioManager::process() {
     }
 
     if (speech_finished) {
-        // Drain any remaining fractional samples into ASR
+
         while (active_buffer->getAvailableSamples() > 0) {
             size_t rem = active_buffer->getAvailableSamples();
             if (rem > SUBBOX_AUDIO_FRAME_SAMPLES) rem = SUBBOX_AUDIO_FRAME_SAMPLES;
@@ -305,7 +290,6 @@ void AudioManager::process() {
             }
         }
 
-        // Stop ASR feed (tells server to finalize)
         if (m_asr) {
             lock.unlock();
             if (m_session_failed) m_asr->cancel();
@@ -317,7 +301,6 @@ void AudioManager::process() {
         ESP_LOGI(TAG, "PCM relay %s for %s; command processing belongs to Pi4",
                  m_session_failed ? "cancelled" : "complete", m_active_source_node_id.c_str());
 
-        // Release session lock
         m_session_active = false;
         m_stream_end_received = false;
         m_active_source_node_id.clear();

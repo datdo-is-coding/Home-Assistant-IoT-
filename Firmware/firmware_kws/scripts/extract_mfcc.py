@@ -13,16 +13,15 @@ DATASET_DIR = "d:/KWS/dataset"
 OUTPUT_DIR = "d:/KWS/data"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Cấu hình chuẩn MFCC tương thích 100% với Edge Impulse DSP Block
 SAMPLE_RATE = 16000
-FRAME_LENGTH = 0.02   # 20ms = 320 samples
-FRAME_STRIDE = 0.01   # 10ms = 160 samples
-NUM_CEPSTRAL = 13     # 13 hệ số MFCC
-NUM_FILTERS = 32      # 32 bộ lọc Mel
-N_FFT = 512           # Kích thước FFT
-LOW_FREQ = 300        # Tần số cắt dưới (Hz)
-HIGH_FREQ = 8000      # Tần số cắt trên (Nyquist)
-PRE_EMPHASIS = 0.97   # Bộ lọc tăng cường âm tần cao
+FRAME_LENGTH = 0.02
+FRAME_STRIDE = 0.01
+NUM_CEPSTRAL = 13
+NUM_FILTERS = 32
+N_FFT = 512
+LOW_FREQ = 300
+HIGH_FREQ = 8000
+PRE_EMPHASIS = 0.97
 
 def get_mel_filterbank(num_filters, n_fft, sample_rate, low_freq, high_freq):
     """Tạo ma trận bộ lọc tam giác Mel (Mel Filterbank)"""
@@ -58,38 +57,30 @@ HAMMING_WINDOW = np.hamming(int(round(FRAME_LENGTH * SAMPLE_RATE)))
 
 def compute_mfcc(signal):
     """Trích xuất ma trận MFCC kích thước (99, 13) từ tín hiệu âm thanh 1D 16,000 samples"""
-    # 1. Pre-emphasis
+
     emphasized = np.append(signal[0], signal[1:] - PRE_EMPHASIS * signal[:-1])
 
-    # 2. Phân khung (Framing)
     frame_len = int(round(FRAME_LENGTH * SAMPLE_RATE))
     frame_step = int(round(FRAME_STRIDE * SAMPLE_RATE))
     num_frames = int(np.ceil(float(np.abs(len(emphasized) - frame_len)) / frame_step)) + 1
-    
-    # Pad thêm nếu thiếu
+
     pad_len = (num_frames - 1) * frame_step + frame_len - len(emphasized)
     if pad_len > 0:
         emphasized = np.pad(emphasized, (0, pad_len), mode='constant')
 
-    # Trích các khung dạng ma trận
     frames = np.lib.stride_tricks.sliding_window_view(emphasized, frame_len)[::frame_step]
 
-    # 3. Nhân cửa sổ Hamming
     frames_win = frames * HAMMING_WINDOW
 
-    # 4. FFT & Phổ công suất (Power Spectrum)
     mag_frames = np.absolute(np.fft.rfft(frames_win, N_FFT))
     pow_frames = (1.0 / N_FFT) * (mag_frames ** 2)
 
-    # 5. Lọc qua dải Mel (Mel Filterbank)
     filter_banks = np.dot(pow_frames, MEL_FBANK.T)
     filter_banks = np.where(filter_banks == 0, np.finfo(float).eps, filter_banks)
     log_mel = np.log(filter_banks)
 
-    # 6. Biến đổi Cosine rời rạc (DCT type 2) để lấy các hệ số MFCC
     mfcc = scipy.fftpack.dct(log_mel, type=2, axis=1, norm='ortho')[:, :NUM_CEPSTRAL]
 
-    # Chuẩn hóa Cepstral liftering nhẹ (giống Edge Impulse)
     cep_lifter = 22
     n = np.arange(NUM_CEPSTRAL)
     lift = 1 + (cep_lifter / 2) * np.sin(np.pi * n / cep_lifter)
@@ -98,7 +89,7 @@ def compute_mfcc(signal):
     return mfcc.astype(np.float32)
 
 def extract_all():
-    # 1. Xác định danh sách nhãn
+
     classes = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
     label_to_idx = {cls_name: idx for idx, cls_name in enumerate(classes)}
     idx_to_label = {idx: cls_name for idx, cls_name in enumerate(classes)}
@@ -142,7 +133,6 @@ def extract_all():
     print(f"Kích thước ma trận đặc trưng X: {X.shape} (Mẫu, Frames, Coefficients)")
     print(f"Kích thước nhãn y: {y.shape}")
 
-    # 2. Xáo trộn và phân chia tập dữ liệu: 80% Train, 10% Val, 10% Test
     indices = np.arange(len(X))
     np.random.seed(42)
     np.random.shuffle(indices)
@@ -163,7 +153,6 @@ def extract_all():
     print(f"  + Tập Validation: {X_val.shape[0]} mẫu")
     print(f"  + Tập Test: {X_test.shape[0]} mẫu")
 
-    # 3. Lưu thành các file .npy nén
     np.save(os.path.join(OUTPUT_DIR, "X_train.npy"), X_train)
     np.save(os.path.join(OUTPUT_DIR, "y_train.npy"), y_train)
     np.save(os.path.join(OUTPUT_DIR, "X_val.npy"), X_val)

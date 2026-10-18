@@ -1,8 +1,3 @@
-/**
- * @file espnow_audio_transport.h
- * @brief Reliable ESP-NOW Audio & Command Transport for SubBox <-> ActionBox
- */
-
 #pragma once
 
 #include "audio_transport.h"
@@ -32,9 +27,13 @@ public:
     void stop() override;
     bool isRunning() const override { return m_running; }
 
+    bool isPairingDiscoveryActive() const { return m_pairing_discovery || SecurityConfig::physicalPresence(); }
+    void setPairingDiscovery(bool enable) { m_pairing_discovery = enable; }
+
     static EspNowAudioTransport* getInstance() { return s_instance; }
 
 private:
+    bool m_pairing_discovery = false;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     static void onEspNowSend(const wifi_tx_info_t *tx_info, esp_now_send_status_t status);
 #else
@@ -55,7 +54,6 @@ private:
     std::function<void(const AudioPacket&)> m_rx_callback;
     std::mutex m_callback_mutex;
 
-    // Track paired ActionBox MACs
     std::map<std::string, std::vector<uint8_t>> m_node_macs;
     std::set<std::string> m_conflicting_nodes;
     std::mutex m_macs_mutex;

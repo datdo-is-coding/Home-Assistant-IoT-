@@ -24,7 +24,7 @@ class FeatureDevicesScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // App Bar Title
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -52,7 +52,6 @@ class FeatureDevicesScreen extends ConsumerWidget {
               ),
             ),
 
-            // Search Bar
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverToBoxAdapter(
@@ -81,7 +80,6 @@ class FeatureDevicesScreen extends ConsumerWidget {
               ),
             ),
 
-            // Filter Chips: All, Lights, Fans, Sockets, Sensors
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
               sliver: SliverToBoxAdapter(
@@ -121,7 +119,6 @@ class FeatureDevicesScreen extends ConsumerWidget {
               ),
             ),
 
-            // Devices grouped by room (Optimized via memoized provider)
             if (grouped.isEmpty)
               const SliverToBoxAdapter(
                 child: Padding(

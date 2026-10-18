@@ -1,3 +1,4 @@
+import 'features/core_v1/core_app.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/smart_home_app.dart';
@@ -11,6 +12,10 @@ final appTheme = ValueNotifier<ThemeMode>(ThemeMode.system);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (const bool.fromEnvironment('HC_CORE')) {
+    runApp(const CoreApp());
+    return;
+  }
   runApp(
     const ProviderScope(
       child: SmartHomeApp(),
@@ -21,36 +26,33 @@ void main() async {
 ThemeData homeTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
 
-  // Premium Monochrome Black & White Palette
-  // Dark: Deep Obsidian & Titanium Silver with subtle luminous accents
-  // Light: Pristine Alabaster & Graphite with sharp hairline contrasts
   final scheme = dark
       ? const ColorScheme.dark(
-          primary: Color(0xFFFFFFFF), // Crisp Pure White
-          onPrimary: Color(0xFF07090C), // Pure Obsidian
+          primary: Color(0xFFFFFFFF),
+          onPrimary: Color(0xFF07090C),
           primaryContainer: Color(0xFF181D26),
           onPrimaryContainer: Color(0xFFF1F5F9),
-          secondary: Color(0xFFC7CBD3), // Platinum Silver
+          secondary: Color(0xFFC7CBD3),
           onSecondary: Color(0xFF0F1318),
           secondaryContainer: Color(0xFF222834),
           onSecondaryContainer: Color(0xFFE2E8F0),
-          tertiary: Color(0xFFA0A8B8), // Cool Titanium Muted
-          surface: Color(0xFF0F1217), // Dark Graphite Slate Card
+          tertiary: Color(0xFFA0A8B8),
+          surface: Color(0xFF0F1217),
           surfaceContainerHighest: Color(0xFF161A22),
-          onSurface: Color(0xFFF8FAFC), // Brilliant Off-White
-          onSurfaceVariant: Color(0xFF88909D), // Soft Metallic Gray
+          onSurface: Color(0xFFF8FAFC),
+          onSurfaceVariant: Color(0xFF88909D),
           outline: Color(0xFF2A313E),
-          outlineVariant: Color(0xFF1F2430), // Hairline Border
+          outlineVariant: Color(0xFF1F2430),
           error: Color(0xFFF87171),
           errorContainer: Color(0xFF451A1A),
           onErrorContainer: Color(0xFFFECACA),
         )
       : const ColorScheme.light(
-          primary: Color(0xFF0F1318), // Deepest Graphite / Obsidian
+          primary: Color(0xFF0F1318),
           onPrimary: Colors.white,
           primaryContainer: Color(0xFFE8ECF2),
           onPrimaryContainer: Color(0xFF0F1318),
-          secondary: Color(0xFF475569), // Slate
+          secondary: Color(0xFF475569),
           onSecondary: Colors.white,
           secondaryContainer: Color(0xFFF1F5F9),
           onSecondaryContainer: Color(0xFF1E293B),

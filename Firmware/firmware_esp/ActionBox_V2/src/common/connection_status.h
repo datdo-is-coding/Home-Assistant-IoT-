@@ -1,7 +1,6 @@
 #pragma once
 #include <cstdint>
 
-// 0: ready; otherwise N short pulses followed by a two-second dark gap.
 inline bool status_led_level(unsigned code, uint64_t elapsed_ms) {
     if (code == 0) return elapsed_ms % 200 < 100;
     const auto phase = elapsed_ms % (code * 400 + 2000);

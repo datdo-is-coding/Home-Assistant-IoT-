@@ -16,11 +16,9 @@ static const char *TAG = "AUDIO_OUT";
 
 static i2s_chan_handle_t s_spk_tx_handle = NULL;
 
-/* ─── Speaker Initialization ─────────────────────────────────────────── */
-
 esp_err_t audio_output_init(void)
 {
-    /* 1. Configure Amp Enable (SD) GPIO */
+
     gpio_config_t sd_cfg = {
         .pin_bit_mask = (1ULL << SPK_SD_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -29,9 +27,8 @@ esp_err_t audio_output_init(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&sd_cfg);
-    gpio_set_level(SPK_SD_GPIO, 0); /* Start Muted */
+    gpio_set_level(SPK_SD_GPIO, 0);
 
-    /* 2. Configure I2S1 Master Transmitter */
     i2s_chan_config_t chan_cfg = {
         .id = SPK_I2S_PORT,
         .role = I2S_ROLE_MASTER,
@@ -53,7 +50,7 @@ esp_err_t audio_output_init(void)
             .invert_flags = {0},
         },
     };
-    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH; /* Duplicate mono to Left & Right */
+    std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_spk_tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(s_spk_tx_handle));
 
@@ -72,7 +69,6 @@ static void play_pcm_asset(const uint8_t *pcm_bytes, size_t len, float volume)
 {
     if (!s_spk_tx_handle || !pcm_bytes || len == 0) return;
 
-    /* Unmute amplifier */
     gpio_set_level(SPK_SD_GPIO, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
 
@@ -81,7 +77,6 @@ static void play_pcm_asset(const uint8_t *pcm_bytes, size_t len, float volume)
     size_t total_samples = len / sizeof(int16_t);
     size_t samples_sent = 0;
 
-    /* Anti-pop soft fade-in on first 80 samples, fade-out on last 120 samples */
     while (samples_sent < total_samples) {
         size_t chunk = total_samples - samples_sent;
         if (chunk > AUDIO_FRAME_SAMPLES) chunk = AUDIO_FRAME_SAMPLES;
@@ -105,37 +100,30 @@ static void play_pcm_asset(const uint8_t *pcm_bytes, size_t len, float volume)
         samples_sent += chunk;
     }
 
-    /* Trailing zero padding to clear DMA buffer without pop */
     int16_t silence[160] = {0};
     size_t written = 0;
     i2s_channel_write(s_spk_tx_handle, silence, sizeof(silence), &written, pdMS_TO_TICKS(50));
     vTaskDelay(pdMS_TO_TICKS(15));
 
-    /* Mute amplifier */
     gpio_set_level(SPK_SD_GPIO, 0);
 }
 
 void audio_output_play_chime(chime_type_t type)
 {
     if (type == CHIME_WAKE) {
-        /* Only ONE gentle acoustic chime when starting to record (~0.45s) */
+
         ESP_LOGI(TAG, "🔔 [CHIME] Playing gentle 'listen_success' prompt...");
         size_t chime_len = (listen_success_pcm_len > 14400) ? 14400 : listen_success_pcm_len;
         play_pcm_asset(listen_success_pcm, chime_len, 0.45f);
     }
-    /* Ensure amplifier is muted in standby */
+
     gpio_set_level(SPK_SD_GPIO, 0);
 }
-
-
-
-/* ─── Voice Playback ─────────────────────────────────────────────────── */
 
 void audio_output_play_voice(const int16_t *samples, int sample_count)
 {
     if (!s_spk_tx_handle || sample_count <= 0) return;
 
-    /* Copy samples into a temporary local buffer for normalization & ramp */
     int16_t *play_buf = (int16_t *)malloc(sample_count * sizeof(int16_t));
     if (!play_buf) {
         ESP_LOGE(TAG, "Failed to allocate memory for playback normalization!");
@@ -143,7 +131,6 @@ void audio_output_play_voice(const int16_t *samples, int sample_count)
     }
     memcpy(play_buf, samples, sample_count * sizeof(int16_t));
 
-    /* Auto-normalize speech volume */
     int16_t max_amp = 0;
     for (int i = 0; i < sample_count; i++) {
         int16_t a = abs(play_buf[i]);
@@ -161,7 +148,6 @@ void audio_output_play_voice(const int16_t *samples, int sample_count)
         }
     }
 
-    /* Anti-pop soft ramp on edges */
     int fade_len = (sample_count < 80) ? sample_count : 80;
     for (int i = 0; i < fade_len; i++) {
         float f = (float)i / (float)fade_len;
@@ -170,15 +156,12 @@ void audio_output_play_voice(const int16_t *samples, int sample_count)
         play_buf[tail_idx] = (int16_t)((float)play_buf[tail_idx] * f);
     }
 
-    /* Play cue chime */
     audio_output_play_chime(CHIME_STOP);
     vTaskDelay(pdMS_TO_TICKS(40));
 
-    /* Unmute Amp */
     gpio_set_level(SPK_SD_GPIO, 1);
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    /* Stream to I2S speaker */
     int play_offset = 0;
     while (play_offset < sample_count) {
         int to_write = sample_count - play_offset;
@@ -190,13 +173,11 @@ void audio_output_play_voice(const int16_t *samples, int sample_count)
         play_offset += to_write;
     }
 
-    /* Drain DMA buffers with silence */
     int16_t drain_silence[AUDIO_FRAME_SAMPLES] = {0};
     size_t written = 0;
     i2s_channel_write(s_spk_tx_handle, drain_silence, sizeof(drain_silence), &written, pdMS_TO_TICKS(100));
     vTaskDelay(pdMS_TO_TICKS(40));
 
-    /* Mute amplifier immediately */
     gpio_set_level(SPK_SD_GPIO, 0);
 
     free(play_buf);

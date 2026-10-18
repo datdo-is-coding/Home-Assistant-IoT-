@@ -104,7 +104,7 @@ class ActionBoxCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 14),
-                  // Channels Grid Preview: CH1, CH2, CH3, CH4
+
                   Row(
                     children: actionBox.channels.map((ch) {
                       final hasDevice = ch.configured;

@@ -16,7 +16,7 @@ class SmartHomeScaffold extends StatelessWidget {
         final isWideScreen = constraints.maxWidth >= 720;
 
         if (isWideScreen) {
-          // Tablet / Wide Screen with NavigationRail
+
           return Scaffold(
             body: Row(
               children: [
@@ -62,7 +62,6 @@ class SmartHomeScaffold extends StatelessWidget {
           );
         }
 
-        // Phone / Standard Portrait Mobile with NavigationBar
         return Scaffold(
           body: navigationShell,
           bottomNavigationBar: NavigationBar(

@@ -8,7 +8,7 @@ class WeatherState {
   WeatherState._internal();
 
   final ValueNotifier<WeatherMode> currentMode = ValueNotifier<WeatherMode>(WeatherMode.auto);
-  final ValueNotifier<String> activeCondition = ValueNotifier<String>('sunny'); // 'sunny', 'rainy', 'stormy', 'cloudy'
+  final ValueNotifier<String> activeCondition = ValueNotifier<String>('sunny');
 
   void setMode(WeatherMode mode) {
     currentMode.value = mode;

@@ -1,12 +1,3 @@
-/**
- * @file main.cpp
- * @brief Production Entry Point for ESP32-S3 ActionBox Smart-Home Actuator Node
- * 
- * Hardware Role:
- * - Low-level actuator node (Relay control, Current sensing, Local buttons, Safety supervisor)
- * - FreeRTOS task model, ESP-NOW communication with SubBox, NVS storage
- */
-
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -29,6 +20,10 @@
 #include "device_manager.h"
 #include "task_manager.h"
 #include "voice_capture.h"
+#include "hc_runtime.h"
+#include "hc_ota.h"
+#include "hc_provisioning.h"
+#include "esp_timer.h"
 
 static const char *TAG = "ACTIONBOX_MAIN";
 
@@ -74,7 +69,6 @@ static void hardware_disable_speaker(void) {
     ESP_LOGI(TAG, "Speaker disabled by policy: Forcing MAX98357 amplifier into hardware shutdown (SP_SD: IO%d -> LOW)",
              BOARD_PIN_SPEAKER_SD);
 
-    /* 1. Drive SP_SD LOW to force MAX98357 amplifier into shutdown */
     gpio_config_t sd_conf = {};
     sd_conf.mode = GPIO_MODE_OUTPUT;
     sd_conf.pin_bit_mask = (1ULL << BOARD_PIN_SPEAKER_SD);
@@ -83,7 +77,6 @@ static void hardware_disable_speaker(void) {
     gpio_config(&sd_conf);
     gpio_set_level(BOARD_PIN_SPEAKER_SD, 0);
 
-    /* 2. Configure I2S audio lines (IO17, IO18, IO21) as floating/pull-down inputs so they consume 0 power */
     uint64_t i2s_mask = (1ULL << BOARD_PIN_SPEAKER_BCLK) |
                         (1ULL << BOARD_PIN_SPEAKER_LRC) |
                         (1ULL << BOARD_PIN_SPEAKER_DOUT);
@@ -95,48 +88,52 @@ static void hardware_disable_speaker(void) {
     gpio_config(&i2s_conf);
 }
 
+static bool hc_apply(uint8_t ch, bool on) {
+    ActionBoxCommand cmd{}; ActionBoxResponse response{};
+    cmd.channel=ch; cmd.cmd=on?CMD_TYPE_TURN_ON:CMD_TYPE_TURN_OFF;
+    return device_manager_execute_command(&cmd,&response)==ESP_OK && response.success;
+}
+static bool hc_sample(uint8_t ch,bool *on,float *amps,bool *valid,uint16_t *fault) {
+    CurrentMeasurement value{};
+    *on=relay_get_state(ch)==RELAY_STATE_ON;
+    *fault=(uint16_t)relay_get_fault(ch);
+    *valid=bl0942_get_latest_measurement(ch,&value)==ESP_OK && value.validity==SENSOR_STATUS_VALID &&
+           (uint32_t)(esp_timer_get_time()/1000)-value.timestamp_ms<SAFETY_SENSOR_TIMEOUT_MS;
+    *amps=*valid?value.current_rms_ma/1000.0f:0;
+    return true;
+}
+
 extern "C" void app_main(void) {
-    /* 0. Enforce hardware shutdown on speaker amplifier */
+
     hardware_disable_speaker();
 
-    /* Reset physical latching contacts before storage/network initialization. */
     ESP_ERROR_CHECK(relay_driver_init());
 
-    /* 1. Initialize Persistent Storage (NVS) */
     ESP_ERROR_CHECK(nvs_storage_init());
 
-    /* 2. Initialize Protocol Layer & Idempotency Cache */
     protocol_init();
 
-    /* 3. Initialize Hardware Drivers */
     ESP_ERROR_CHECK(bl0942_driver_init());
     ESP_ERROR_CHECK(button_driver_init());
     ESP_ERROR_CHECK(led_driver_init());
 
-    /* 4. Initialize Local Safety Supervisor (Configures TWDT) */
     ESP_ERROR_CHECK(safety_supervisor_init());
 
-    /* 5. Apply Startup Relay States (Restores last state or safe OFF from NVS) */
-    safety_apply_startup_state();
-
-    /* 6. Initialize Wi-Fi & ESP-NOW Network Transport */
     ESP_ERROR_CHECK(espnow_transport_init());
+    ESP_ERROR_CHECK(hc_runtime_init(false,nullptr,hc_apply,hc_sample));
+    ESP_ERROR_CHECK(hc_provisioning_button_init(false));
 
-    /* 6.1 Initialize Voice Capture & VAD Subsystem (INMP441 I2S + 1.5s Silence VAD) */
     ESP_ERROR_CHECK(voice_capture_init());
 
-    /* 7. Display System Banner */
     print_banner();
 
-    /* 8. Initialize Device Manager Coordinator */
     ESP_ERROR_CHECK(device_manager_init());
 
-    /* 9. Initialize FreeRTOS Task Architecture & Queues */
     ESP_ERROR_CHECK(task_manager_init());
+    hc_ota_health_ready();
 
     ESP_LOGI(TAG, "ActionBox system is fully operational. Awaiting commands / local button presses.");
 
-    /* Main task can yield or sleep; background tasks handle all operational logic */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
         ESP_LOGD(TAG, "System heartbeat [Heap free: %lu bytes, Min: %lu bytes]",

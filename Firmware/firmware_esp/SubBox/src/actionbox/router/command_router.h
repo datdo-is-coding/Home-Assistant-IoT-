@@ -1,8 +1,3 @@
-/**
- * @file command_router.h
- * @brief Local vs Cross-Room Command Execution & Router
- */
-
 #pragma once
 
 #include <memory>
@@ -12,7 +7,6 @@
 #include "audio/audio_transport/audio_transport.h"
 #include "audio/audio_output/audio_output_router.h"
 
-// Forward declaration of MqttClient
 class MqttClient;
 
 struct ExecutionResult {
@@ -35,11 +29,6 @@ public:
 
     void setMqttClient(std::shared_ptr<MqttClient> mqtt_client);
 
-    /**
-     * @brief Route and execute a resolved NLU command
-     * @param resolution Fully resolved CommandResolution
-     * @return ExecutionResult containing response text and dispatch status
-     */
     ExecutionResult route(const CommandResolution& resolution);
 
 private:

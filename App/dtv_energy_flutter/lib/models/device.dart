@@ -20,7 +20,7 @@ class Device {
   final String? channel;
   final bool online;
   final bool isOn;
-  final double value; // brightness % (0-100), fan speed (0-3), temp (16-30), watts
+  final double value;
   final List<String> voiceAliases;
   final bool isFavorite;
   final Map<String, dynamic> metadata;

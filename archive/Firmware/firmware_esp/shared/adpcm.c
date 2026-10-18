@@ -1,11 +1,5 @@
-/*
- * IMA-ADPCM Audio Codec — Implementation
- * DTV Smart Home — Shared Audio Compression for ESP-NOW (4:1 compression)
- */
-
 #include "adpcm.h"
 
-/* Intel/DVI/IMA ADPCM step size table (89 entries) */
 static const int16_t step_table[89] = {
     7, 8, 9, 10, 11, 12, 13, 14, 16, 17,
     19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
@@ -18,7 +12,6 @@ static const int16_t step_table[89] = {
     15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
 };
 
-/* Intel/DVI/IMA ADPCM index table (16 entries) */
 static const int8_t index_table[16] = {
     -1, -1, -1, -1, 2, 4, 6, 8,
     -1, -1, -1, -1, 2, 4, 6, 8

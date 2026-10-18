@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'gateway'))
 from audio_server import AudioServer
@@ -12,14 +12,18 @@ from intent_engine import IntentEngine
 from mqtt_handler import MQTTHandler
 from verify_engine import CommandVerifier
 
-
 class Socket:
     remote_address = ('test', 0)
     open = True
 
-    def __init__(self, messages=()):
+    def __init__(self, messages=(), headers=None, path=""):
         self.messages = iter(messages)
         self.sent = []
+        self.headers = headers or {}
+        self.path = path
+        self.closed = False
+        self.close_code = None
+        self.close_reason = None
 
     def __aiter__(self):
         return self
@@ -33,6 +37,11 @@ class Socket:
     async def send(self, message):
         self.sent.append(message if isinstance(message, bytes) else json.loads(message))
 
+    async def close(self, code=1000, reason=""):
+        self.open = False
+        self.closed = True
+        self.close_code = code
+        self.close_reason = reason
 
 class AudioRelayTests(unittest.IsolatedAsyncioTestCase):
     async def test_subbox_audio_socket_never_receives_relay_commands(self):
@@ -138,15 +147,107 @@ class AudioRelayTests(unittest.IsolatedAsyncioTestCase):
                                  ['transcript', 'command_result'])
                 self.assertFalse(any(isinstance(message, bytes) for message in ws.sent))
 
-    async def test_sound_effects_also_skip_capture_only_sockets(self):
+    async def test_subbox_registered_with_speaker_and_retained(self):
         server = AudioServer()
-        ws = Socket()
-        ws.has_speaker = False
-        ws.audio_relay = True
-        await server._broadcast_pcm_stream([ws], b'\x00\x00' * 160)
-        await server._send_audio_stream_mp3(ws, b'not-needed')
-        self.assertEqual(ws.sent, [])
+        ws = Socket([
+            json.dumps({'t': 'hello', 'id': 'subbox_livingroom', 'speaker': True, 'audio_relay': True}),
+            json.dumps({'type': 'start', 'node_id': 'subbox_livingroom'}),
+            json.dumps({'type': 'cancel'}),
+        ])
+        await server._handle_client(ws)
+        self.assertTrue(ws.has_speaker)
+        self.assertIn(ws, server._active_speakers)
 
+    async def test_audio_reply_routed_to_active_subbox_speaker_when_caller_has_no_speaker(self):
+        server = AudioServer()
+        ws_sb = Socket()
+        ws_sb.has_speaker = True
+        ws_sb.node_id = 'subbox_livingroom'
+        server._active_speakers.add(ws_sb)
+
+        ws_ab = Socket()
+        ws_ab.has_speaker = False
+        ws_ab.node_id = 'AB123'
+
+        pcm_sample = b'\x00\x00' * 160
+        await server._send_pcm_stream(ws_ab, pcm_sample)
+
+        self.assertTrue(any(isinstance(m, dict) and m.get('type') == 'audio_start' for m in ws_sb.sent))
+        self.assertTrue(any(isinstance(m, bytes) for m in ws_sb.sent))
+
+        self.assertFalse(any(isinstance(m, bytes) for m in ws_ab.sent))
+
+    async def test_ws_auth_rejected_when_token_configured_and_missing(self):
+        import config
+        orig_token = config.WS_AUDIO_TOKEN
+        config.WS_AUDIO_TOKEN = "secret_ws_token_123"
+        try:
+            server = AudioServer()
+            ws = Socket([json.dumps({'t': 'hello', 'id': 'SB1'})])
+            await server._handle_client(ws)
+            self.assertTrue(ws.closed)
+            self.assertEqual(ws.close_code, 1008)
+            self.assertTrue(any(m.get('error') == 'unauthorized' for m in ws.sent if isinstance(m, dict)))
+        finally:
+            config.WS_AUDIO_TOKEN = orig_token
+
+    async def test_ws_auth_accepted_with_token_in_hello(self):
+        import config
+        orig_token = config.WS_AUDIO_TOKEN
+        config.WS_AUDIO_TOKEN = "secret_ws_token_123"
+        try:
+            server = AudioServer()
+            ws = Socket([json.dumps({'t': 'hello', 'id': 'SB1', 'token': 'secret_ws_token_123'})])
+            await server._handle_client(ws)
+            self.assertFalse(ws.closed)
+            self.assertTrue(ws.authenticated)
+            self.assertEqual(server._ws_nodes.get('SB1'), ws)
+        finally:
+            config.WS_AUDIO_TOKEN = orig_token
+
+    async def test_ws_auth_accepted_with_bearer_header(self):
+        import config
+        orig_token = config.WS_AUDIO_TOKEN
+        config.WS_AUDIO_TOKEN = "secret_ws_token_123"
+        try:
+            server = AudioServer()
+            ws = Socket(
+                [json.dumps({'t': 'hello', 'id': 'SB1'})],
+                headers={'Authorization': 'Bearer secret_ws_token_123'}
+            )
+            await server._handle_client(ws)
+            self.assertFalse(ws.closed)
+            self.assertTrue(ws.authenticated)
+            self.assertEqual(server._ws_nodes.get('SB1'), ws)
+        finally:
+            config.WS_AUDIO_TOKEN = orig_token
+
+    async def test_spoofed_compact_ack_is_rejected(self):
+        gateway = SimpleNamespace(
+            mqtt=SimpleNamespace(record_compact_ack=Mock()),
+            registry=SimpleNamespace(update_relay_state=Mock(), update_heartbeat=Mock()),
+            broadcast_event=Mock()
+        )
+        server = AudioServer(gateway)
+        ws = Socket([
+            json.dumps({'t': 'hello', 'id': 'SB1'}),
+            json.dumps({'t': 'ack', 'id': 'AB_SPOOFED', 'rl': [1, 0, 0], 'seq': 42}),
+        ])
+        await server._handle_client(ws)
+        gateway.mqtt.record_compact_ack.assert_not_called()
+        gateway.registry.update_relay_state.assert_not_called()
+
+    async def test_duplicate_identity_closes_previous_socket(self):
+        server = AudioServer()
+        ws1 = Socket([json.dumps({'t': 'hello', 'id': 'SB1'})])
+        ws1.open = True
+        await server._handle_client(ws1)
+        self.assertEqual(server._ws_nodes.get('SB1'), ws1)
+
+        ws2 = Socket([json.dumps({'t': 'hello', 'id': 'SB1'})])
+        await server._handle_client(ws2)
+        self.assertTrue(ws1.closed)
+        self.assertEqual(server._ws_nodes.get('SB1'), ws2)
 
 if __name__ == '__main__':
     unittest.main()

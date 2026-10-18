@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 """
 SubBox NLU Automated Test Suite & Interactive Tool
 Aetheria OS / Smart Home IoT Architecture
@@ -26,17 +26,12 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-# Colors for terminal output
 GREEN = "\033[92m"
 CYAN = "\033[96m"
 YELLOW = "\033[93m"
 RED = "\033[91m"
 BOLD = "\033[1m"
 RESET = "\033[0m"
-
-# ============================================================================
-# 1. ENUMS & DATA STRUCTURES (Exact match to SubBox C++ headers)
-# ============================================================================
 
 class IntentType(Enum):
     TURN_ON = "TURN_ON"
@@ -70,25 +65,21 @@ class RoomType(Enum):
     OTHER = "OTHER"
     UNSPECIFIED = "UNSPECIFIED"
 
-# ============================================================================
-# 2. SUBBOX NLU PYTHON EMULATOR (1:1 with SubBox C++ Implementation)
-# ============================================================================
-
 class VietnameseNormalizer:
     @staticmethod
     def normalize(text: str) -> str:
         if not text:
             return ""
         s = text.lower().strip()
-        # Canonicalize common synonyms & ASR speech variations
+
         s = re.sub(r"\bđiều hoà\b", "điều hòa", s)
         s = re.sub(r"\bmở\b", "bật", s)
         s = re.sub(r"\bđóng\b", "tắt", s)
         s = re.sub(r"\bngắt\b", "tắt", s)
         s = re.sub(r"\bkhởi động\b", "bật", s)
-        # Remove punctuation
+
         s = re.sub(r"[,\.\?!;:\(\)\[\]\"']", " ", s)
-        # Collapse spaces
+
         s = re.sub(r"\s+", " ", s).strip()
         return s
 
@@ -116,11 +107,9 @@ class IntentParser:
         if not norm_text:
             return IntentType.UNKNOWN
 
-        # 1. Complex Condition Detection -> Forward to Pi4
         if cls.is_complex_command(norm_text):
             return IntentType.COMPLEX
 
-        # 2. Query Power / Current / State
         if any(w in norm_text for w in ["công suất", "tiêu thụ", "watt", "oát"]):
             return IntentType.QUERY_POWER
 
@@ -130,14 +119,12 @@ class IntentParser:
         if any(w in norm_text for w in ["trạng thái", "đang bật hay tắt", "đang chạy không", "bật không", "tắt chưa"]):
             return IntentType.QUERY_STATE
 
-        # 3. Temperature Setting
-        has_temp_word = (VietnameseNormalizer.contains_word(norm_text, "nhiệt độ") or 
+        has_temp_word = (VietnameseNormalizer.contains_word(norm_text, "nhiệt độ") or
                          VietnameseNormalizer.contains_word(norm_text, "độ"))
         has_set_word = any(VietnameseNormalizer.contains_word(norm_text, w) for w in ["đặt", "chỉnh", "cài", "set", "cho"])
         if has_temp_word and has_set_word:
             return IntentType.SET_TEMPERATURE
 
-        # 4. Increase / Decrease
         if any(w in norm_text for w in ["tăng ", "mạnh hơn", "nhanh hơn", "lên một chút"]):
             return IntentType.INCREASE
 
@@ -147,7 +134,6 @@ class IntentParser:
         if any(w in norm_text for w in ["dừng", "ngừng"]):
             return IntentType.STOP
 
-        # 5. On / Off / Toggle
         if any(w in norm_text for w in ["đổi trạng thái", "chuyển trạng thái", "đảo"]):
             return IntentType.TOGGLE
 
@@ -192,12 +178,11 @@ class EntityExtractor:
 
     @staticmethod
     def extract_numeric_value(text: str) -> Tuple[bool, float]:
-        # 1. Digits
+
         match = re.search(r"(\d+(\.\d+)?)", text)
         if match:
             return True, float(match.group(1))
 
-        # 2. Spoken numbers in Vietnamese
         spoken = [
             ("mười sáu", 16.0), ("mười bảy", 17.0), ("mười tám", 18.0), ("mười chín", 19.0),
             ("hai mươi lăm", 25.0), ("hai lăm", 25.0), ("hai mươi", 20.0), ("hai mốt", 21.0),
@@ -220,7 +205,7 @@ class ContextManager:
         self.last_value = 0.0
         self.has_history = False
 
-    def resolve(self, raw_text: str, origin_node_id: str, intent: IntentType, 
+    def resolve(self, raw_text: str, origin_node_id: str, intent: IntentType,
                 device: DeviceType, room: RoomType, has_val: bool, val: float) -> Dict[str, Any]:
         target_room = room if room != RoomType.UNSPECIFIED else self.subbox_room
         res_device = device
@@ -228,9 +213,8 @@ class ContextManager:
         is_valid = True
         error_reason = ""
 
-        # Pronoun check ("nó", "lại", "đó", "cái đó")
         has_pronoun = any(p in raw_text for p in [" nó", " lại", " đó", "cái đó"])
-        
+
         if res_device == DeviceType.NONE:
             if has_pronoun and self.has_history and self.last_device != DeviceType.NONE:
                 res_device = self.last_device
@@ -271,17 +255,13 @@ class ContextManager:
             self.last_intent = resolution["intent"]
             self.has_history = True
 
-# ============================================================================
-# 3. TEST SUITE & RUNNER
-# ============================================================================
-
 def run_offline_unit_tests():
     print(f"\n{BOLD}{CYAN}=============================================================={RESET}")
     print(f"{BOLD}{CYAN}      RUNNING SUBBOX C++ NLU TEST SUITE (OFFLINE EMULATION)   {RESET}")
     print(f"{BOLD}{CYAN}=============================================================={RESET}\n")
 
     cases = [
-        # Phrase, Expected Intent, Expected Device, Expected Room
+
         ("bật đèn phòng khách", IntentType.TURN_ON, DeviceType.LIGHT, RoomType.LIVING_ROOM),
         ("tắt quạt phòng ngủ", IntentType.TURN_OFF, DeviceType.FAN, RoomType.BEDROOM),
         ("bật điều hòa", IntentType.TURN_ON, DeviceType.AIR_CONDITIONER, RoomType.LIVING_ROOM),
@@ -322,19 +302,17 @@ def run_offline_unit_tests():
             print(f"         Expected: Intent={exp_intent.value}, Dev={exp_dev.value}, Room={exp_room.value}")
             print(f"         Actual  : Intent={res['intent'].value}, Dev={res['device'].value}, Room={res['target_room'].value}")
 
-    # Pronoun Context Resolution Test ("tắt nó")
     print(f"\n{BOLD}--- Testing Multi-Turn Pronoun Context Resolution (\"tắt nó\") ---{RESET}")
-    # Turn 1: Bật quạt phòng ngủ
+
     s1 = VietnameseNormalizer.normalize("bật quạt phòng ngủ")
-    r1 = context_mgr.resolve(s1, "TEST", IntentParser.parse(s1), 
-                             EntityExtractor.extract_device(s1), 
+    r1 = context_mgr.resolve(s1, "TEST", IntentParser.parse(s1),
+                             EntityExtractor.extract_device(s1),
                              EntityExtractor.extract_room(s1), False, 0.0)
     context_mgr.commit(r1)
 
-    # Turn 2: "tắt nó"
     s2 = VietnameseNormalizer.normalize("tắt nó")
-    r2 = context_mgr.resolve(s2, "TEST", IntentParser.parse(s2), 
-                             EntityExtractor.extract_device(s2), 
+    r2 = context_mgr.resolve(s2, "TEST", IntentParser.parse(s2),
+                             EntityExtractor.extract_device(s2),
                              EntityExtractor.extract_room(s2), False, 0.0)
 
     total += 1

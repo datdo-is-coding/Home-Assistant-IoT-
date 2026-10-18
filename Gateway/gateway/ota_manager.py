@@ -9,6 +9,7 @@ import hashlib
 import logging
 import asyncio
 import struct
+import secrets
 from typing import Dict, List, Any, Optional
 import urllib.request
 
@@ -16,7 +17,6 @@ import config
 
 logger = logging.getLogger("ota_manager")
 
-# ESP-IDF Binary Image Header constants
 ESP_IMAGE_MAGIC = 0xE9
 CHIP_NAMES = {
     0x0000: "ESP32",
@@ -39,6 +39,7 @@ class OTAManager:
         except Exception:
             pass
         self._active_tasks: Dict[str, Dict[str, Any]] = {}
+        self._download_tickets: Dict[str, Dict[str, Any]] = {}
 
     def parse_header(self, file_path: str) -> Dict[str, Any]:
         """Parse ESP-IDF image header from binary file."""
@@ -85,6 +86,7 @@ class OTAManager:
                 with open(full_path, "rb") as f:
                     file_bytes = f.read()
                 md5 = hashlib.md5(file_bytes).hexdigest()
+                sha256 = hashlib.sha256(file_bytes).hexdigest()
                 hdr = self.parse_header(full_path)
 
                 items.append({
@@ -93,6 +95,7 @@ class OTAManager:
                     "size_kb": round(st.st_size / 1024, 1),
                     "size_mb": round(st.st_size / (1024 * 1024), 2),
                     "md5": md5,
+                    "sha256": sha256,
                     "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(st.st_mtime)),
                     "timestamp": st.st_mtime,
                     "valid_esp": hdr["valid_esp_bin"],
@@ -102,13 +105,12 @@ class OTAManager:
             except Exception as e:
                 logger.error(f"Error inspecting firmware {fname}: {e}")
 
-        # Sort newest first
         items.sort(key=lambda x: x["timestamp"], reverse=True)
         return items
 
     def save_firmware(self, filename: str, content: bytes) -> Dict[str, Any]:
-        """Save an uploaded firmware binary."""
-        # Sanitize filename
+        """Save an uploaded firmware binary and enforce ESP image magic header."""
+
         safe_name = "".join([c for c in filename if c.isalnum() or c in (".", "_", "-")])
         if not safe_name.endswith(".bin"):
             safe_name += ".bin"
@@ -119,15 +121,132 @@ class OTAManager:
 
         hdr = self.parse_header(dest)
         md5 = hashlib.md5(content).hexdigest()
-        logger.info(f"✅ Saved firmware: {safe_name} ({len(content)} bytes, MD5={md5}, Chip={hdr['chip']})")
+        sha256 = hashlib.sha256(content).hexdigest()
+
+        if not hdr["valid_esp_bin"]:
+            try:
+                os.remove(dest)
+            except Exception:
+                pass
+            logger.warning(f"❌ Rejected invalid ESP firmware: {safe_name} (magic 0xE9 missing)")
+            return {
+                "filename": safe_name,
+                "size_bytes": len(content),
+                "md5": md5,
+                "sha256": sha256,
+                "valid_esp": False,
+                "error": "File không hợp lệ: Thiếu byte magic 0xE9 của ESP-IDF image",
+                "chip": hdr["chip"]
+            }
+
+        logger.info(f"✅ Saved firmware: {safe_name} ({len(content)} bytes, MD5={md5}, SHA256={sha256[:12]}..., Chip={hdr['chip']})")
 
         return {
             "filename": safe_name,
             "size_bytes": len(content),
             "md5": md5,
-            "valid_esp": hdr["valid_esp_bin"],
+            "sha256": sha256,
+            "valid_esp": True,
             "chip": hdr["chip"]
         }
+
+    def validate_firmware(self, filename: str, node_id: Optional[str] = None) -> Dict[str, Any]:
+        """Validate binary integrity, ESP magic header (0xE9), and hardware compatibility."""
+        fw_bytes = self.get_firmware_bytes(filename)
+        if not fw_bytes:
+            return {"valid": False, "valid_esp": False, "error": f"Firmware file not found: {filename}"}
+
+        # Check ESP32 image magic byte (0xE9 at offset 0)
+        if len(fw_bytes) < 8 or fw_bytes[0] != ESP_IMAGE_MAGIC:
+            logger.warning(f"❌ [OTA Validate] File '{filename}' rejected: magic header byte != 0xE9")
+            return {"valid": False, "valid_esp": False, "error": "File không hợp lệ: Thiếu byte magic 0xE9 của ESP-IDF image"}
+
+        md5 = hashlib.md5(fw_bytes).hexdigest()
+        sha256 = hashlib.sha256(fw_bytes).hexdigest()
+
+        # Check device compatibility if target node specified
+        if node_id and node_id != "all":
+            dev_str = ""
+            if self.gateway and hasattr(self.gateway, "registry"):
+                nodes = {}
+                if hasattr(self.gateway.registry, "get_all_nodes"):
+                    nodes = self.gateway.registry.get_all_nodes()
+                elif hasattr(self.gateway.registry, "data") and isinstance(self.gateway.registry.data, dict):
+                    nodes = self.gateway.registry.data.get("nodes", {})
+                node = nodes.get(node_id, {})
+                hw = str(node.get("hardware") or node.get("firmware", {}).get("hardware") or "")
+                serial = str(node.get("serial") or node.get("hardware_uid") or "")
+                model = str(node.get("model") or "")
+                dev_str = f"{node_id} {hw} {serial} {model}".lower()
+            else:
+                dev_str = str(node_id).lower()
+
+            fn_lower = filename.lower()
+            is_fn_actionbox = any(k in fn_lower for k in ("actionbox", "action_box", "action-box"))
+            is_fn_subbox = any(k in fn_lower for k in ("subbox", "sub_box", "sub-box"))
+
+            is_dev_actionbox = any(k in dev_str for k in ("actionbox", "action_box", "action-box", "ab2", "ab_")) or dev_str.startswith("ab")
+            is_dev_subbox = any(k in dev_str for k in ("subbox", "sub_box", "sub-box", "sb2", "sb_")) or dev_str.startswith("sb")
+
+            if is_fn_actionbox and is_dev_subbox and not is_dev_actionbox:
+                err = f"Binary không tương thích: Firmware '{filename}' (ActionBox) không thể nạp cho thiết bị SubBox '{node_id}'"
+                logger.warning(f"❌ [OTA Validate] {err}")
+                return {"valid": False, "valid_esp": True, "error": err, "md5": md5, "sha256": sha256}
+
+            if is_fn_subbox and is_dev_actionbox and not is_dev_subbox:
+                err = f"Binary không tương thích: Firmware '{filename}' (SubBox) không thể nạp cho thiết bị ActionBox '{node_id}'"
+                logger.warning(f"❌ [OTA Validate] {err}")
+                return {"valid": False, "valid_esp": True, "error": err, "md5": md5, "sha256": sha256}
+
+        return {
+            "valid": True,
+            "valid_esp": True,
+            "md5": md5,
+            "sha256": sha256,
+            "size": len(fw_bytes)
+        }
+
+    def create_download_ticket(self, device_id: str, filename: str, md5: str = "", sha256: str = "", ttl_seconds: int = 900) -> str:
+        """Create a temporary download ticket with TTL for a device."""
+        self._purge_expired_tickets()
+        ticket = secrets.token_urlsafe(32)
+        expires_at = time.time() + ttl_seconds
+        self._download_tickets[ticket] = {
+            "device_id": device_id,
+            "filename": filename,
+            "md5": md5,
+            "sha256": sha256,
+            "expires_at": expires_at,
+            "created_at": time.time()
+        }
+        return ticket
+
+    def validate_download_ticket(self, ticket: str, device_id: Optional[str], filename: str) -> bool:
+        """Validate an active download ticket."""
+        if not ticket:
+            return False
+        meta = self._download_tickets.get(ticket)
+        if not meta:
+            return False
+        if time.time() > meta.get("expires_at", 0):
+            self._download_tickets.pop(ticket, None)
+            return False
+        if meta.get("filename") != filename:
+            return False
+        expected_dev = meta.get("device_id")
+        if expected_dev and expected_dev != "all":
+            if device_id and device_id != expected_dev:
+                return False
+            if not device_id:
+                return False
+        return True
+
+    def _purge_expired_tickets(self):
+        """Remove expired download tickets from memory."""
+        now = time.time()
+        expired = [t for t, meta in self._download_tickets.items() if meta.get("expires_at", 0) < now]
+        for t in expired:
+            self._download_tickets.pop(t, None)
 
     def delete_firmware(self, filename: str) -> bool:
         """Delete a firmware file."""
@@ -153,6 +272,10 @@ class OTAManager:
         Push firmware directly to ESP32 Web Server /ota endpoint via HTTP POST.
         ESP32-S3 Master runs an internal HTTP server with Web OTA handler on port 80.
         """
+        val = self.validate_firmware(filename, node_id=node_id)
+        if not val.get("valid", False):
+            return {"success": False, "error": val.get("error", "Invalid firmware"), "valid_esp": val.get("valid_esp", False)}
+
         fw_bytes = self.get_firmware_bytes(filename)
         if not fw_bytes:
             return {"success": False, "error": f"Firmware file not found: {filename}"}
@@ -223,10 +346,10 @@ class OTAManager:
 
     def get_gateway_lan_ip(self) -> str:
         """Automatically detect the real LAN IP of this Gateway reachable by ESP32 devices."""
-        # 1. Check if explicitly configured in config
+
         if hasattr(config, "GATEWAY_IP") and config.GATEWAY_IP and config.GATEWAY_IP != "0.0.0.0":
             return config.GATEWAY_IP
-        # 2. Open a dummy UDP socket to query routing table for local interface IP
+
         try:
             import socket
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -260,6 +383,14 @@ class OTAManager:
         ESP32 node connects back to Gateway to stream firmware and flash.
         """
         import json
+
+        # 1. Validate firmware compatibility & integrity
+        val = self.validate_firmware(filename, node_id=node_id)
+        if not val.get("valid", False):
+            err = val.get("error", "Invalid firmware")
+            self.update_task_progress(node_id, 0, "failed", err)
+            return {"success": False, "error": err, "valid_esp": val.get("valid_esp", False)}
+
         fw_bytes = self.get_firmware_bytes(filename)
         if not fw_bytes:
             return {"success": False, "error": f"Firmware file not found: {filename}"}
@@ -267,62 +398,73 @@ class OTAManager:
         if not gateway_ip or gateway_ip in ("0.0.0.0", "127.0.0.1", "localhost"):
             gateway_ip = self.get_gateway_lan_ip()
 
-        md5 = hashlib.md5(fw_bytes).hexdigest()
-        download_url = f"http://{gateway_ip}:{config.WEB_PORT}/api/ota/download/{filename}"
-        
+        md5 = val.get("md5") or hashlib.md5(fw_bytes).hexdigest()
+        sha256 = val.get("sha256") or hashlib.sha256(fw_bytes).hexdigest()
+
+        # 2. Create download ticket with TTL
+        ticket = self.create_download_ticket(node_id, filename, md5=md5, sha256=sha256, ttl_seconds=900)
+        download_url = f"http://{gateway_ip}:{config.WEB_PORT}/api/ota/download/{filename}?ticket={ticket}&device={node_id}"
+
         payload = {
             "cmd": "ota_start",
             "url": download_url,
             "version": filename.replace(".bin", ""),
             "size": len(fw_bytes),
-            "md5": md5
+            "md5": md5,
+            "sha256": sha256,
+            "ticket": ticket
         }
 
-        # 1. Publish to MQTT topics (both compact and industrial)
         topic = f"smarthome/ota/{node_id}"
         mqtt_sent = False
         if hasattr(self.gateway, "mqtt") and self.gateway.mqtt:
             try:
-                await self.gateway.mqtt.publish(topic, payload, qos=1)
+                res1 = await self.gateway.mqtt.publish(topic, payload, qos=1)
+                res2 = True
                 if node_id != "all":
                     ind_ota_top = f"home/devices/{node_id}/ota/trigger"
-                    await self.gateway.mqtt.publish(ind_ota_top, payload, qos=1)
-                logger.info(f"📢 [OTA MQTT Trigger] Published OTA command to {topic}: {download_url}")
-                mqtt_sent = True
+                    res2 = await self.gateway.mqtt.publish(ind_ota_top, payload, qos=1)
+                if res1 or (node_id != "all" and res2):
+                    mqtt_sent = True
+                    logger.info(f"📢 [OTA MQTT Trigger] Published OTA command to {topic}: {download_url}")
+                else:
+                    logger.warning(f"MQTT publish returned False for {topic}")
             except Exception as e:
                 logger.error(f"Failed to publish OTA command via MQTT: {e}")
 
-        # 2. Also send over active WebSocket if connected
         ws_sent = False
         if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:
             ws_targets = []
             if node_id == "all":
-                ws_targets = list(self.gateway.audio_server._active_speakers)
+                ws_targets = [ws for ws in list(self.gateway.audio_server._active_speakers) if self.gateway.audio_server._is_ws_alive(ws)]
             else:
                 ws = self.gateway.audio_server._ws_nodes.get(node_id)
-                if ws:
+                if ws and self.gateway.audio_server._is_ws_alive(ws):
                     ws_targets = [ws]
-                elif len(self.gateway.audio_server._ws_nodes) == 1:
-                    ws_targets = list(self.gateway.audio_server._ws_nodes.values())
-                elif self.gateway.audio_server._active_speakers:
-                    ws_targets = list(self.gateway.audio_server._active_speakers)
+                # ABSOLUTELY NO FALLBACK to other nodes or arbitrary speakers
 
             ws_msg = json.dumps({
                 "t": "ota",
                 "url": download_url,
                 "size": len(fw_bytes),
-                "md5": md5
+                "md5": md5,
+                "sha256": sha256,
+                "ticket": ticket
             })
             for ws in ws_targets:
-                if self.gateway.audio_server._is_ws_alive(ws):
-                    try:
-                        asyncio.create_task(ws.send(ws_msg))
-                        ws_sent = True
-                        logger.info(f"📢 [OTA WS Trigger] Sent OTA command to node '{node_id}' over WebSocket")
-                    except Exception as e:
-                        logger.warning(f"Could not send OTA over WebSocket: {e}")
+                try:
+                    asyncio.create_task(ws.send(ws_msg))
+                    ws_sent = True
+                    logger.info(f"📢 [OTA WS Trigger] Sent OTA command to node '{node_id}' over WebSocket")
+                except Exception as e:
+                    logger.warning(f"Could not send OTA over WebSocket: {e}")
 
-        # 3. Broadcast initial progress event to Web UI SSE
+        if not mqtt_sent and not ws_sent:
+            err_msg = f"Node '{node_id}' is offline or unroutable (MQTT/WS delivery failed)"
+            logger.warning(f"❌ [OTA Trigger] {err_msg}")
+            self.update_task_progress(node_id, 0, "offline", err_msg)
+            return {"success": False, "error": err_msg, "offline": True}
+
         if hasattr(self.gateway, "broadcast_event"):
             self.gateway.broadcast_event("ota_progress", {
                 "node_id": node_id,
@@ -334,11 +476,8 @@ class OTAManager:
         self.update_task_progress(node_id, 0, "starting", f"Đã gửi lệnh nạp {filename} tới {node_id}")
         if hasattr(self.gateway, "registry") and hasattr(self.gateway.registry, "record_ota_history"):
             try:
-                self.gateway.registry.record_ota_history(node_id, filename, "starting", progress=0, message=f"Đã phát lệnh nạp {filename}")
+                self.gateway.registry.record_ota_history(node_id, filename, "starting", file_sha256=sha256, progress=0, message=f"Đã phát lệnh nạp {filename}")
             except Exception:
                 pass
 
-        if mqtt_sent or ws_sent:
-            return {"success": True, "topic": topic, "url": download_url, "size": len(fw_bytes), "md5": md5}
-        else:
-            return {"success": False, "error": "Neither MQTT nor WebSocket client available to send OTA command"}
+        return {"success": True, "topic": topic, "url": download_url, "ticket": ticket, "size": len(fw_bytes), "md5": md5, "sha256": sha256}

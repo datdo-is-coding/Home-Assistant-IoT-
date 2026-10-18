@@ -88,17 +88,18 @@ class LoadVerification(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result, VerifyResult.FAILED)
             self.assertEqual(registry.get_all_nodes()['AB1']['relay_state'], [1, 1])
 
-    async def check_command(self, sample=None, thresholds=None):
+    async def check_command(self, sample=None, thresholds=None, report_channel=1, action="turn_on", command_channel="ch1"):
         mqtt = MQTTHandler()
         async def send(node, channel, action, seq=None, **kwargs):
-            mqtt.command_acks[(node, seq)] = {'channel': 1, 'status': 'OK', 'state': 'ON', 'hardware_uid': 'AABBCCDDEEFF'}
+            ch_num = {"ch1": 1, "ch2": 2, "ch3": 3}.get(channel, 1)
+            mqtt.command_acks[(node, seq)] = {'channel': ch_num, 'status': 'OK', 'state': 'ON' if action == "turn_on" else 'OFF', 'hardware_uid': 'AABBCCDDEEFF'}
             if sample is not None:
-                mqtt.load_reports[(node, seq)] = {'channel': 1, 'hardware_uid': 'AABBCCDDEEFF', 'sample': sample}
+                mqtt.load_reports[(node, seq)] = {'channel': report_channel, 'hardware_uid': 'AABBCCDDEEFF', 'sample': sample}
             return True
         mqtt.send_command = AsyncMock(side_effect=send)
-        registry = SimpleNamespace(get_all_nodes=lambda: {'AB1': {'channels': {'ch1': {'load_verification': thresholds or {}}}}}, get_rated_watts=lambda *args: 0)
+        registry = SimpleNamespace(get_all_nodes=lambda: {'AB1': {'channels': {command_channel: {'load_verification': thresholds or {}}}}}, get_rated_watts=lambda *args: 0)
         verifier = CommandVerifier(mqtt, registry)
-        return (await verifier.verify_command('AB1', 'ch1', 'turn_on', seq=7))[0]
+        return (await verifier.verify_command('AB1', command_channel, action, seq=7))[0]
 
     async def test_ack_without_calibration_is_not_load_confirmation(self):
         self.assertEqual(await self.check_command(), VerifyResult.ACK_ONLY)
@@ -110,6 +111,34 @@ class LoadVerification(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_sample_does_not_claim_success(self):
         sample = {'valid': False, 'current_ma': 150, 'power_w': 30, 'sample_uptime_ms': 1700, 'command_uptime_ms': 1000, 'boot_id': 1}
         self.assertEqual(await self.check_command(sample, {'on_min_ma': 100, 'off_max_ma': 10}), VerifyResult.ACK_ONLY)
+
+    async def test_load_report_wrong_channel_does_not_confirm(self):
+        sample = {'valid': True, 'current_ma': 150, 'power_w': 30}
+        self.assertEqual(
+            await self.check_command(sample, {'on_min_ma': 100}, report_channel=2, command_channel='ch1'),
+            VerifyResult.ACK_ONLY
+        )
+
+    async def test_load_report_zero_power_does_not_confirm_load(self):
+        sample = {'valid': True, 'current_ma': 0, 'power_w': 0}
+        self.assertEqual(
+            await self.check_command(sample, {'min_on_power_w': 5.0}),
+            VerifyResult.ACK_ONLY
+        )
+
+    async def test_load_report_power_threshold_confirms_load(self):
+        sample = {'valid': True, 'current_ma': 120, 'power_w': 25.0}
+        self.assertEqual(
+            await self.check_command(sample, {'min_on_power_w': 10.0}),
+            VerifyResult.CONFIRMED_LOAD
+        )
+
+    async def test_load_report_off_exceeds_max_off_power_fails_confirmation(self):
+        sample = {'valid': True, 'current_ma': 80, 'power_w': 15.0}
+        self.assertEqual(
+            await self.check_command(sample, {'max_off_power_w': 5.0}, action='turn_off'),
+            VerifyResult.ACK_ONLY
+        )
 
     async def test_toggle_is_rejected_before_publish(self):
         mqtt = MQTTHandler()

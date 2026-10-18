@@ -1,6 +1,3 @@
-/*
- * Node Provision — Implementation (NVS "smhome")
- */
 #include "node_prov.h"
 #include <string.h>
 #include <stdio.h>
@@ -18,7 +15,7 @@ node_prov_t g_prov;
 static const int RELAY_GPIO[2] = {4, 5};
 
 static void apply_relay_gpio(int idx, bool on) {
-    // Active-LOW: ON → GPIO LOW (0), OFF → HIGH (1)
+
     gpio_set_level((gpio_num_t)RELAY_GPIO[idx], on ? 0 : 1);
 }
 
@@ -79,9 +76,9 @@ void prov_set_relay(int ch, bool on) {
 
 int prov_handle_relay_cmd(int ch, int s, int seq) {
     if (ch < 1 || ch > 2) return -1;
-    // seq==0 là bản legacy không có seq → luôn thực thi
+
     if (seq != 0) {
-        // seq 16-bit wrap-safe: coi là cũ nếu cách > 32768 vòng
+
         int16_t diff = (int16_t)(seq - g_prov.last_seq);
         if (diff <= 0) {
             ESP_LOGW(TAG, "Dropped duplicate/old seq=%d last=%u", seq, g_prov.last_seq);

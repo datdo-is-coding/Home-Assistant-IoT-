@@ -23,7 +23,7 @@ class NotificationService {
     await _notificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse details) {
-        // Handle notification click if needed
+
       },
     );
 
@@ -37,7 +37,7 @@ class NotificationService {
     bool isCritical = false,
   }) async {
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastNotificationTime < 15000) return; // Prevent spamming within 15 seconds
+    if (now - _lastNotificationTime < 15000) return;
     _lastNotificationTime = now;
 
     AndroidNotificationDetails androidDetails = AndroidNotificationDetails(

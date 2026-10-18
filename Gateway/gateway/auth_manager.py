@@ -21,7 +21,7 @@ class AuthManager:
 
     def __init__(self, db_path: Optional[str] = None):
         self.db_path = db_path or getattr(config, "AUTH_DB", "/home/pi4/smarthome/auth.db")
-        # Local fallback if path does not exist
+
         if not os.path.exists(os.path.dirname(self.db_path)):
             try:
                 os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -84,7 +84,6 @@ class AuthManager:
                 );
             """)
 
-            # Retire the previously shipped default account without deleting ownership.
             old = conn.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
             if old and self._verify_password("admin123", old["salt"], old["password_hash"]):
                 conn.execute("DELETE FROM sessions WHERE user_id = ?", (old["id"],))
@@ -102,14 +101,14 @@ class AuthManager:
     def _hash_password(self, password: str, salt: Optional[str] = None) -> tuple[str, str]:
         if not salt:
             salt = secrets.token_hex(16)
-        # ponytail: scrypt instead of pbkdf2 as requested, minimal config
+
         h = hashlib.scrypt(password.encode('utf-8'), salt=salt.encode('utf-8'), n=16384, r=8, p=1).hex()
         return "scrypt$" + h, salt
 
     def _verify_password(self, password: str, salt: str, stored: str) -> bool:
         if stored.startswith("scrypt$"):
             return secrets.compare_digest(self._hash_password(password, salt)[0], stored)
-        if len(stored) == 128:  # Unversioned scrypt from the previous local revision.
+        if len(stored) == 128:
             return secrets.compare_digest(self._hash_password(password, salt)[0][7:], stored)
         legacy = hashlib.pbkdf2_hmac("sha256", (password + salt).encode(), salt.encode(), 100000).hex()
         return secrets.compare_digest(legacy, stored)
@@ -163,7 +162,6 @@ class AuthManager:
                 digest, salt = self._hash_password(password)
                 conn.execute("UPDATE users SET password_hash = ?, salt = ? WHERE id = ?", (digest, salt, row["id"]))
 
-            # Expired sessions are removed at each successful login.
             token = secrets.token_hex(32)
             now = time.time()
             expires = now + config.SESSION_TTL_SECONDS
@@ -174,7 +172,6 @@ class AuthManager:
                 (token, row["id"], now, expires)
             )
 
-            # Generate or retrieve permanent API key for Mobile App
             api_key = self.get_or_create_api_key(row["id"], conn=conn)
 
             user_info = {
@@ -211,7 +208,7 @@ class AuthManager:
         t = token.strip()
         now = time.time()
         with self._get_db() as conn:
-            # 1. Check temporary sessions
+
             cur = conn.execute("""
                 SELECT u.id, u.username, u.fullname, u.role
                 FROM sessions s
@@ -222,7 +219,6 @@ class AuthManager:
             if row:
                 return dict(row)
 
-            # 2. Check permanent API keys
             cur_key = conn.execute("""
                 SELECT u.id, u.username, u.fullname, u.role
                 FROM api_keys k
@@ -271,9 +267,19 @@ class AuthManager:
 
         user_id = user.get("id")
         allowed_ids = set(self.get_user_devices(user_id))
-        
-        # If user has no specific devices assigned yet, leave empty (unassigned user)
+
         if not allowed_ids:
             return {}
 
         return {k: v for k, v in all_nodes.items() if k in allowed_ids}
+
+    def has_any_admin(self) -> bool:
+        """Check if at least one admin account exists."""
+        try:
+            with self._get_db() as conn:
+                row = conn.execute("SELECT 1 FROM users WHERE role = 'admin' LIMIT 1").fetchone()
+                return bool(row)
+        except Exception as e:
+            logger.warning(f"Error checking has_any_admin: {e}")
+            return False
+

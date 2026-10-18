@@ -36,7 +36,7 @@ class FeatureActionBoxDetailScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Controller Overview Card
+
                 Container(
                   padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
@@ -96,7 +96,6 @@ class FeatureActionBoxDetailScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
 
-                // Channel Cards
                 ...ab.channels.map((ch) {
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 12),

@@ -1,8 +1,3 @@
-/**
- * @file task_manager.cpp
- * @brief FreeRTOS Task Architecture and Queue Coordinator Implementation
- */
-
 #include "task_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -92,7 +87,6 @@ bool TaskManager::init() {
         });
     }
 
-    // Connect Audio Manager output to utterance queue
     m_transport->registerJsonCallback([this](const std::string& json) {
         cJSON* root = cJSON_Parse(json.c_str());
         if (!root) return;
@@ -135,11 +129,6 @@ bool TaskManager::init() {
         if (m_mqtt) m_mqtt->publishEvent("actionbox", json);
         cJSON_Delete(root);
     });
-    // Voice PCM is processed and dispatched by Pi4; never route transcripts locally.
-
-    // Spawn tasks across Dual-Core ESP32-S3:
-    // Core 1 (DSP / AI / Audio): audio_manager, nlu, audio_tx
-    // Core 0 (Network / System): command, device_manager, telemetry, system
 
     xTaskCreatePinnedToCore(audioManagerTask, "audio_mgr_task", TASK_STACK_AUDIO_MANAGER, this, TASK_PRIO_AUDIO_MANAGER, &m_h_audio_mgr, 1);
     xTaskCreatePinnedToCore(audioTxTask,      "audio_tx_task",  TASK_STACK_AUDIO_TX,      this, TASK_PRIO_AUDIO_TX,      &m_h_tx,        1);
@@ -208,23 +197,18 @@ void TaskManager::nluTask(void* pvParameters) {
         if (xQueueReceive(self->m_utterance_queue, &item, portMAX_DELAY) == pdTRUE) {
             ESP_LOGI(TAG, "🗣️ [NLU RAW INPUT] Text: \"%s\" | Origin: %s", item.text, item.origin_node_id);
 
-            // 1. Vietnamese Text Normalization
             std::string normalized = VietnameseNormalizer::normalize(item.text);
             ESP_LOGI(TAG, "📝 [NLU NORMALIZED] Text: \"%s\"", normalized.c_str());
 
-            // 2. Intent Parsing
             IntentType intent = IntentParser::parse(normalized);
 
-            // 3. Entity Extraction
             ParsedEntities entities = EntityExtractor::extract(normalized);
 
-            // 4. Context & Pronoun Resolution
             CommandResolution res = self->m_context_mgr->resolve(normalized, item.origin_node_id, intent, entities);
             ESP_LOGI(TAG, "🎯 [NLU RESOLUTION] Intent: %s | Device: %s | TargetRoom: %s | SpeakerRoom: %s (Valid=%d)",
                      intentToString(res.intent), deviceToString(res.device),
                      roomToString(res.target_room), roomToString(res.speaker_room), res.is_valid);
 
-            // 5. Forward to Command Execution Task
             self->queueCommand(res);
         }
     }
@@ -253,13 +237,11 @@ void TaskManager::commandTask(void* pvParameters) {
                 item.resolved_via_context, item.is_valid, item.error_reason, item.raw_text};
             ExecutionResult exec = self->m_router->route(res);
 
-            // If forwarded to Pi4, publish via MQTT
             if (exec.forwarded_to_pi4 && self->m_mqtt) {
                 if (!self->m_mqtt->publishVoiceRequest(res.origin_node_id, res.raw_text))
                     exec.response_text = "Không kết nối được máy chủ xử lý.";
             }
 
-            // Acoustic feedback on SubBox
             if (exec.success) {
                 SoundPlayer::instance().play(SoundType::SUCCESS);
             } else if (!exec.forwarded_to_pi4 && !exec.success) {
@@ -289,9 +271,7 @@ void TaskManager::deviceManagerTask(void* pvParameters) {
     ESP_LOGI(TAG, "device_manager_task started on Core 0.");
 
     while (1) {
-        // Evaluate temperature rules only when a real sensor measurement is available.
 
-        // Check ActionBox heartbeats
         self->m_registry->checkTimeouts(30000);
 
         vTaskDelay(pdMS_TO_TICKS(1000));

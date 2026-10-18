@@ -1,8 +1,3 @@
-/**
- * @file relay_driver.cpp
- * @brief Thread-safe Relay Driver Implementation Supporting Monostable & Latching Relays
- */
-
 #include "relay_driver.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -66,22 +61,22 @@ static esp_err_t apply_hardware_actuation(uint8_t channel, RelayState state) {
     }
 
     if (state == RELAY_STATE_ON) {
-        /* Pulse SET coil, keep RESET coil de-energized */
+
         gpio_set_level(reset_pin, 0);
         gpio_set_level(pin, 1);
         vTaskDelay(pdMS_TO_TICKS(BOARD_RELAY_LATCH_PULSE_MS));
-        /* Always de-energize coil after pulse to avoid burning the coil */
+
         gpio_set_level(pin, 0);
-        ESP_LOGD(TAG, "Latching Ch%u: SET pulse %d ms on GPIO %d completed", 
+        ESP_LOGD(TAG, "Latching Ch%u: SET pulse %d ms on GPIO %d completed",
                  channel, BOARD_RELAY_LATCH_PULSE_MS, pin);
     } else {
-        /* Pulse RESET coil, keep SET coil de-energized */
+
         gpio_set_level(pin, 0);
         gpio_set_level(reset_pin, 1);
         vTaskDelay(pdMS_TO_TICKS(BOARD_RELAY_LATCH_PULSE_MS));
-        /* Always de-energize coil after pulse */
+
         gpio_set_level(reset_pin, 0);
-        ESP_LOGD(TAG, "Latching Ch%u: RESET pulse %d ms on GPIO %d completed", 
+        ESP_LOGD(TAG, "Latching Ch%u: RESET pulse %d ms on GPIO %d completed",
                  channel, BOARD_RELAY_LATCH_PULSE_MS, reset_pin);
     }
 #endif
@@ -90,7 +85,7 @@ static esp_err_t apply_hardware_actuation(uint8_t channel, RelayState state) {
 }
 
 esp_err_t relay_driver_init(void) {
-    ESP_LOGI(TAG, "Initializing Relay Driver (Channels: %d, Type: %s)...", 
+    ESP_LOGI(TAG, "Initializing Relay Driver (Channels: %d, Type: %s)...",
              BOARD_RELAY_CHANNEL_COUNT,
              (BOARD_RELAY_DRIVE_TYPE == BOARD_RELAY_TYPE_MONOSTABLE) ? "Monostable" : "Latching");
 
@@ -122,7 +117,6 @@ esp_err_t relay_driver_init(void) {
         return err;
     }
 
-    /* Set default safe state (OFF) */
     for (uint8_t i = 0; i < BOARD_RELAY_CHANNEL_COUNT; i++) {
         uint8_t ch = i + 1;
         s_channels[i].channel_id = ch;
@@ -151,20 +145,20 @@ esp_err_t relay_on(uint8_t channel) {
 
     uint8_t idx = ch_idx(channel);
     if (s_channels[idx].fault_state != RELAY_FAULT_NONE || !safety_sensor_ready(channel)) {
-        ESP_LOGW(TAG, "relay_on rejected: Channel %u is in FAULT state (%d)", 
+        ESP_LOGW(TAG, "relay_on rejected: Channel %u is in FAULT state (%d)",
                  channel, s_channels[idx].fault_state);
         xSemaphoreGive(s_relay_mutex);
         return ESP_FAIL;
     }
 
     if (s_channels[idx].current_state == RELAY_STATE_ON) {
-        /* Already ON, idempotent no-op */
+
         xSemaphoreGive(s_relay_mutex);
         return ESP_OK;
     }
 
     s_channels[idx].target_state = RELAY_STATE_ON;
-    /* Never hold the protection mutex while waiting for the stagger interval. */
+
     while (true) {
         int64_t remaining_us = SAFETY_RELAY_STAGGER_DELAY_MS * 1000LL -
             (esp_timer_get_time() - s_last_switch_time_us);
@@ -271,7 +265,7 @@ void relay_set_fault(uint8_t channel, RelayFault fault) {
         ESP_LOGW(TAG, "Channel %u fault status set to: %d", channel, fault);
 
         if (fault != RELAY_FAULT_NONE) {
-            /* Force relay OFF immediately on fault */
+
             apply_hardware_actuation(channel, RELAY_STATE_OFF);
             s_channels[idx].current_state = RELAY_STATE_OFF;
             s_channels[idx].target_state = RELAY_STATE_OFF;

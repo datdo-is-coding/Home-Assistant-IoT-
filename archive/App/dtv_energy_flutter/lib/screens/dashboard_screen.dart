@@ -71,7 +71,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         _nodesData = (nodesRes['nodes'] as Map<String, dynamic>?) ?? {};
       });
 
-      // 🔔 Auto push notification if TinyML detects anomaly or voltage spike
       final score = EnergyService.parseInt(_tinyMlData['anomaly_score'], 0);
       if (score >= 45) {
         final pattern = _tinyMlData['pattern_name'] ?? 'Cảnh báo TinyML AI';
@@ -125,7 +124,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === HEADER ===
   Widget _header() {
     return Row(children: [
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -180,7 +178,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     ]);
   }
 
-  // === HERO METRIC (Power - Liquid Glassmorphism) ===
   Widget _heroMetric() {
     final theme = ThemeService().currentTheme;
     return LiquidGlassCard(
@@ -225,7 +222,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === METRICS GRID ===
   Widget _metricsGrid() {
     return GridView.count(
       crossAxisCount: 2, shrinkWrap: true,
@@ -264,13 +260,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === QUICK WEATHER ===
   Widget _quickWeather() {
     final temp = EnergyService.parseDouble(_weather['temp'], 32.0);
     final desc = _weather['description'] ?? 'trời nắng';
     final suggestion = _weather['suggestion'] ?? '';
 
-    // Auto-update weather effect from API
     WeatherState().updateFromApi(desc);
 
     return LiquidGlassCard(
@@ -291,7 +285,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ]),
           const SizedBox(height: 10),
 
-          // Dynamic Weather Effect Selector Chips
           ValueListenableBuilder<WeatherMode>(
             valueListenable: WeatherState().currentMode,
             builder: (context, currentMode, _) {
@@ -343,7 +336,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === QUICK ALERTS ===
   Widget _quickAlerts() {
     if (_alerts.isEmpty) {
       return Container(
@@ -387,7 +379,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     ]);
   }
 
-  // === NEW v1.0.2 FEATURE BANNER ===
   Widget _version102Banner() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -406,7 +397,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === NEW v1.0.2 EVN CALCULATOR CARD ===
   Widget _evnCalculatorCard() {
     return Container(
       padding: const EdgeInsets.all(14),
@@ -447,7 +437,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   }
 
   void _showEvnCalculatorDialog() {
-    double estKwh = _energy > 0 ? _energy : 185.5; // fallback or real kWh
+    double estKwh = _energy > 0 ? _energy : 185.5;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -491,7 +481,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === TINYML AI CARD (echo-nightly glassmorphic) ===
   Widget _tinyMlCard() {
     final pattern = _tinyMlData['pattern_name'] ?? 'Tải Điện Bình Thường & Tối Ưu';
     final rec = _tinyMlData['recommendation'] ?? 'Mô hình TinyML ESP32-S3 đánh giá hệ thống an toàn.';
@@ -574,7 +563,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  // === SMART SWITCHES / RELAYS CONTROL SECTION ===
   Widget _smartSwitchesSection() {
     final List<Widget> switchTiles = [];
 

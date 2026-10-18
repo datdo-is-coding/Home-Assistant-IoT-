@@ -9,6 +9,7 @@ Thumbs.db
 .history/
 .vscode/
 .idea/
+.cache/
 
 # Python
 __pycache__/
@@ -47,3 +48,9 @@ memory.db
 *-save.kicad_pcb
 *-save.kicad_sch
 *.kicad_prl.bak
+
+# Home Competition credentials and locally initialized state
+/hc-data/
+/Gateway/hc-data/
+*.key
+*owner-token.txt

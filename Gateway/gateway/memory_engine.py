@@ -17,13 +17,12 @@ import config
 logger = logging.getLogger("memory")
 TZ_VN = timezone(timedelta(hours=7))
 
-
 class MemoryEngine:
     """Three-tier memory: STM (RAM), MTM (SQLite), LTM (InfluxDB+SQLite)."""
-    
+
     def __init__(self, db_path: str = None):
         self.db_path = db_path or config.MEMORY_DB
-        self.stm = {}  # Short-term memory (RAM)
+        self.stm = {}
         self._init_db()
 
     @contextmanager
@@ -37,12 +36,12 @@ class MemoryEngine:
                 yield conn
         finally:
             conn.close()
-    
+
     def _init_db(self):
         """Create SQLite tables if they don't exist."""
         with self._get_db() as conn:
             cursor = conn.cursor()
-            
+
             cursor.executescript("""
                 -- Command history log
                 CREATE TABLE IF NOT EXISTS command_log (
@@ -60,7 +59,7 @@ class MemoryEngine:
                     power_before REAL,
                     power_after REAL
                 );
-                
+
                 -- User corrections for prompt improvement
                 CREATE TABLE IF NOT EXISTS user_corrections (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,7 +71,7 @@ class MemoryEngine:
                     corrected_area TEXT,
                     notes TEXT
                 );
-                
+
                 -- Learned behavioral patterns
                 CREATE TABLE IF NOT EXISTS learned_patterns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +88,7 @@ class MemoryEngine:
                     is_active BOOLEAN DEFAULT 1,
                     created_at TEXT NOT NULL
                 );
-                
+
                 -- Power consumption baselines
                 CREATE TABLE IF NOT EXISTS power_baselines (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,7 +101,7 @@ class MemoryEngine:
                     measurement_count INTEGER,
                     last_updated TEXT
                 );
-    
+
                 -- Smart Journal: daily & hourly snapshot of house activity (SSD persistent)
                 CREATE TABLE IF NOT EXISTS smart_journal (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,7 +113,7 @@ class MemoryEngine:
                     active_relays_count INTEGER DEFAULT 0,
                     notes TEXT
                 );
-    
+
                 -- Proactive Speech Log (giao tiếp chủ động như người thật)
                 CREATE TABLE IF NOT EXISTS proactive_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,7 +122,7 @@ class MemoryEngine:
                     content TEXT NOT NULL,
                     node_id TEXT
                 );
-                
+
                 -- Optimized indexes
                 CREATE INDEX IF NOT EXISTS idx_cmd_device_area
                     ON command_log(device, area, hour);
@@ -137,7 +136,7 @@ class MemoryEngine:
                     ON proactive_log(event_type, timestamp);
             """)
         logger.info(f"✅ Memory database initialized: {self.db_path}")
-    
+
     def record_command(self, user_text: str, action: str, device: str,
                        area: str, node_id: str = None, channel: str = None,
                        verify_result: str = None, power_before: float = None,
@@ -146,7 +145,7 @@ class MemoryEngine:
         now = datetime.now(TZ_VN)
         with self._get_db() as conn:
             conn.execute(
-                """INSERT INTO command_log 
+                """INSERT INTO command_log
                    (timestamp, hour, day_of_week, user_text, action, device,
                     area, node_id, channel, verify_result, power_before, power_after)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -155,7 +154,7 @@ class MemoryEngine:
                  verify_result, power_before, power_after)
             )
         logger.debug(f"Command logged: {action} {device}@{area}")
-    
+
     def record_correction(self, original_text: str,
                           original_device: str, original_area: str,
                           corrected_device: str, corrected_area: str,
@@ -172,7 +171,7 @@ class MemoryEngine:
                  original_area, corrected_device, corrected_area, notes)
             )
         logger.info(f"Correction logged: {original_device}→{corrected_device}")
-    
+
     def get_active_patterns(self, trigger_hour: int,
                             trigger_day_of_week: int = None) -> list:
         """Get patterns that should trigger at this time."""
@@ -182,7 +181,7 @@ class MemoryEngine:
                     """SELECT * FROM learned_patterns
                        WHERE is_active = 1
                        AND trigger_hour = ?
-                       AND (trigger_day_of_week IS NULL 
+                       AND (trigger_day_of_week IS NULL
                             OR trigger_day_of_week = ?)
                        ORDER BY confidence DESC""",
                     (trigger_hour, trigger_day_of_week)
@@ -195,7 +194,7 @@ class MemoryEngine:
                     (trigger_hour,)
                 ).fetchall()
             return [dict(r) for r in rows]
-    
+
     def get_baseline_power(self, node_id: str,
                            channel: str) -> Optional[float]:
         """Get average power baseline for a device."""
@@ -206,7 +205,7 @@ class MemoryEngine:
                 (node_id, channel)
             ).fetchone()
             return row[0] if row else None
-    
+
     def get_command_count_today(self) -> int:
         """Get total commands executed today."""
         today = datetime.now(TZ_VN).date().isoformat()
@@ -224,7 +223,7 @@ class MemoryEngine:
         now = datetime.now(TZ_VN)
         with self._get_db() as conn:
             conn.execute(
-                """INSERT INTO smart_journal 
+                """INSERT INTO smart_journal
                    (timestamp, date, hour, total_power_watts, active_nodes_count, active_relays_count, notes)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (now.isoformat(), now.date().isoformat(), now.hour,

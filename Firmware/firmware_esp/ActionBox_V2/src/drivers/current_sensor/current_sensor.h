@@ -1,8 +1,3 @@
-/**
- * @file current_sensor.h
- * @brief Abstract Current & Energy Measurement Interface
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -22,25 +17,22 @@ typedef enum {
 } SensorValidity;
 
 typedef struct {
-    uint32_t       current_rms_ma;  /**< RMS Current in Milliamps (mA) */
-    uint32_t       voltage_rms_v;   /**< RMS Voltage in Volts (V) */
-    int32_t        active_power_w;  /**< Active Power in Watts (W) */
-    uint32_t       energy_wh;       /**< Accumulated Energy in Watt-hours */
-    SensorValidity validity;        /**< Sensor reading health & validity */
-    bool           overcurrent;     /**< Immediate over-current flag */
-    uint32_t       sample_count;    /**< Rolling valid sample counter */
-    uint32_t       timestamp_ms;    /**< System timestamp of last sample */
+    uint32_t       current_rms_ma;
+    uint32_t       voltage_rms_v;
+    int32_t        active_power_w;
+    uint32_t       energy_wh;
+    SensorValidity validity;
+    bool           overcurrent;
+    uint32_t       sample_count;
+    uint32_t       timestamp_ms;
 } CurrentMeasurement;
 
 typedef struct {
-    float current_factor;  /**< Multiplier: raw_irms -> mA */
-    float voltage_factor;  /**< Multiplier: raw_vrms -> V */
-    float power_factor;    /**< Multiplier: raw_watt -> W */
+    float current_factor;
+    float voltage_factor;
+    float power_factor;
 } SensorCalibration;
 
-/**
- * @brief Abstract Sensor Interface Function Pointers
- */
 typedef struct {
     esp_err_t (*init)(void);
     esp_err_t (*read)(uint8_t channel, CurrentMeasurement *out_meas);

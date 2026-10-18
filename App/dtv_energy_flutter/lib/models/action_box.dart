@@ -1,8 +1,8 @@
 import 'device.dart';
 
 class ActionBoxChannel {
-  final int index; // 0, 1, 2, 3
-  final String channelKey; // ch1, ch2, ch3, ch4
+  final int index;
+  final String channelKey;
   final String? deviceId;
   final String name;
   final DeviceType type;
@@ -48,7 +48,7 @@ class ActionBox {
   final List<ActionBoxChannel> channels;
   final String firmwareVersion;
   final String ipAddress;
-  final int signalStrength; // dBm, e.g. -58
+  final int signalStrength;
 
   const ActionBox({
     required this.id,

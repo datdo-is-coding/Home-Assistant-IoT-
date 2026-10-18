@@ -1,8 +1,3 @@
-/**
- * @file energy_vad.h
- * @brief Energy-Based Adaptive Voice Activity Detector
- */
-
 #pragma once
 
 #include "vad_interface.h"

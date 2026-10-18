@@ -61,7 +61,7 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             child: Column(
               children: [
-                // Hero Control Box
+
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
@@ -111,7 +111,6 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                       ),
                       const SizedBox(height: 24),
 
-                      // Capability-driven Control: Slider only shown if device supports dimming or speed/temp
                       if (device.metadata['can_dim'] == true || device.type == DeviceType.airConditioner) ...[
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
@@ -176,7 +175,6 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                 ),
                 const SizedBox(height: 20),
 
-                // Settings Cards Group
                 _SettingTile(
                   icon: Icons.meeting_room_outlined,
                   title: 'Khu vực / Phòng',
@@ -202,7 +200,6 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                 ),
                 const SizedBox(height: 16),
 
-                // Collapsible Advanced Settings (Engineering Internals)
                 Theme(
                   data: theme.copyWith(dividerColor: Colors.transparent),
                   child: ExpansionTile(

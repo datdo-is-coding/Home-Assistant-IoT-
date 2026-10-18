@@ -35,8 +35,7 @@ class GatewayClient extends ChangeNotifier {
   DateTime? updatedAt;
   int _generation = 0;
   bool _disposed = false;
-  /// Tracks in-flight relay commands so refresh() won't overwrite optimistic state.
-  /// Key: 'nodeId::channelIdx', Value: the optimistic relay value (0 or 1).
+
   final Map<String, int> _pendingRelays = {};
   bool get authenticated => _token.isNotEmpty;
   bool get isAdmin => user['role'] == 'admin';
@@ -73,7 +72,7 @@ class GatewayClient extends ChangeNotifier {
     if (!persistSession) return;
     final prefs = await SharedPreferences.getInstance();
     serverUrl = prefs.getString('gateway_server_url') ?? '';
-    // Remove credentials left in plaintext by the previous app.
+
     await prefs.remove('gateway_api_key');
     await prefs.remove('gateway_auth_token');
     if (_android) {
@@ -228,8 +227,7 @@ class GatewayClient extends ChangeNotifier {
       }
       nodes = asMap(data['nodes']);
       pending = asMap(data['pending']);
-      // Re-apply any in-flight relay commands so stale poll data
-      // doesn't snap the UI back to pre-toggle state.
+
       _applyPendingRelays();
       connected = true;
       error = null;
@@ -245,7 +243,6 @@ class GatewayClient extends ChangeNotifier {
     }
   }
 
-  /// Stamps every in-flight relay command onto the current nodes map.
   void _applyPendingRelays() {
     for (final entry in _pendingRelays.entries) {
       final parts = entry.key.split('::');
@@ -255,36 +252,35 @@ class GatewayClient extends ChangeNotifier {
       if (chIdx == null || !nodes.containsKey(nodeId)) continue;
       final node = Map<String, dynamic>.from(asMap(nodes[nodeId]));
       final rawRl = node['relay_state'];
-      if (rawRl is List && rawRl.length > chIdx) {
-        final rl = List<dynamic>.from(rawRl);
-        rl[chIdx] = entry.value;
-        node['relay_state'] = rl;
-        nodes[nodeId] = node;
+      final rl = rawRl is List ? List<dynamic>.from(rawRl) : <dynamic>[];
+      while (rl.length <= chIdx) {
+        rl.add(0);
       }
+      rl[chIdx] = entry.value;
+      node['relay_state'] = rl;
+      nodes[nodeId] = node;
     }
   }
 
   Future<Map<String, dynamic>> relay(
       String nodeId, String channel, bool on) async {
-    final channelIdx = {'ch1': 0, 'ch2': 1}[channel];
+    final channelIdx = {'ch1': 0, 'ch2': 1, 'ch3': 2}[channel];
     dynamic originalValue;
     final pendingKey = channelIdx != null ? '$nodeId::$channelIdx' : null;
 
-    // Optimistic local update + register as pending so refresh() preserves it.
     if (nodes.containsKey(nodeId) && channelIdx != null) {
       final node = Map<String, dynamic>.from(asMap(nodes[nodeId]));
       final rawRl = node['relay_state'];
-      if (rawRl is List) {
-        final rl = List<dynamic>.from(rawRl);
-        if (rl.length > channelIdx) {
-          originalValue = rl[channelIdx];
-          rl[channelIdx] = on ? 1 : 0;
-          node['relay_state'] = rl;
-          nodes[nodeId] = node;
-          _pendingRelays[pendingKey!] = on ? 1 : 0;
-          notifyListeners();
-        }
+      final rl = rawRl is List ? List<dynamic>.from(rawRl) : <dynamic>[];
+      while (rl.length <= channelIdx) {
+        rl.add(0);
       }
+      originalValue = rl[channelIdx];
+      rl[channelIdx] = on ? 1 : 0;
+      node['relay_state'] = rl;
+      nodes[nodeId] = node;
+      _pendingRelays[pendingKey!] = on ? 1 : 0;
+      notifyListeners();
     }
 
     try {
@@ -295,26 +291,45 @@ class GatewayClient extends ChangeNotifier {
             'action': on ? 'turn_on' : 'turn_off'
           },
           timeout: const Duration(seconds: 15));
-      // Command confirmed — clear pending before refresh so refresh reads
-      // the real Gateway state. Then re-stamp the confirmed value in case
-      // the Gateway hasn't persisted it yet (stale read).
+
+      final verify = result['verify']?.toString().toLowerCase();
+      const validVerifications = {'success', 'ack_only', 'confirmed_load', 'already_in_state'};
+      final isSuccess = result['success'] == true &&
+          (verify == null || validVerifications.contains(verify));
+
+      if (!isSuccess) {
+        if (pendingKey != null) _pendingRelays.remove(pendingKey);
+        if (channelIdx != null && originalValue != null && nodes.containsKey(nodeId)) {
+          final node = Map<String, dynamic>.from(asMap(nodes[nodeId]));
+          final rawRl = node['relay_state'];
+          if (rawRl is List && rawRl.length > channelIdx) {
+            final rl = List<dynamic>.from(rawRl);
+            rl[channelIdx] = originalValue;
+            node['relay_state'] = rl;
+            nodes[nodeId] = node;
+            notifyListeners();
+          }
+        }
+        throw GatewayException(result['error']?.toString() ?? 'Relay command failed on gateway');
+      }
+
       if (pendingKey != null) _pendingRelays.remove(pendingKey);
       await refresh();
-      // Re-apply confirmed value in case refresh returned stale data.
+
       if (channelIdx != null && nodes.containsKey(nodeId)) {
         final node = Map<String, dynamic>.from(asMap(nodes[nodeId]));
         final rawRl = node['relay_state'];
-        if (rawRl is List && rawRl.length > channelIdx) {
-          final rl = List<dynamic>.from(rawRl);
-          rl[channelIdx] = on ? 1 : 0;
-          node['relay_state'] = rl;
-          nodes[nodeId] = node;
-          notifyListeners();
+        final rl = rawRl is List ? List<dynamic>.from(rawRl) : <dynamic>[];
+        while (rl.length <= channelIdx) {
+          rl.add(0);
         }
+        rl[channelIdx] = on ? 1 : 0;
+        node['relay_state'] = rl;
+        nodes[nodeId] = node;
+        notifyListeners();
       }
       return result;
     } catch (e) {
-      // Rollback optimistic update on failure.
       if (pendingKey != null) _pendingRelays.remove(pendingKey);
       if (channelIdx != null && originalValue != null && nodes.containsKey(nodeId)) {
         final node = Map<String, dynamic>.from(asMap(nodes[nodeId]));
@@ -343,6 +358,9 @@ class GatewayClient extends ChangeNotifier {
     String? ch2Name,
     String? ch2Type,
     List<String>? ch2Aliases,
+    String? ch3Name,
+    String? ch3Type,
+    List<String>? ch3Aliases,
   }) async {
     final body = <String, dynamic>{
       'device_id': deviceId,
@@ -356,6 +374,9 @@ class GatewayClient extends ChangeNotifier {
       if (ch2Name != null) 'ch2_name': ch2Name,
       if (ch2Type != null) 'ch2_type': ch2Type,
       if (ch2Aliases != null) 'ch2_aliases': ch2Aliases,
+      if (ch3Name != null) 'ch3_name': ch3Name,
+      if (ch3Type != null) 'ch3_type': ch3Type,
+      if (ch3Aliases != null) 'ch3_aliases': ch3Aliases,
     };
     final result = await request('/api/device/update',
         body: body, timeout: const Duration(seconds: 15));
@@ -435,6 +456,7 @@ class GatewayClient extends ChangeNotifier {
     String? description,
     String? rl1,
     String? rl2,
+    String? rl3,
   }) async {
     final body = <String, dynamic>{
       'device_id': deviceId,
@@ -445,6 +467,7 @@ class GatewayClient extends ChangeNotifier {
       if (description != null) 'description': description,
       if (rl1 != null) 'rl1': rl1,
       if (rl2 != null) 'rl2': rl2,
+      if (rl3 != null) 'rl3': rl3,
     };
     final result = await request('/api/provision',
         body: body, timeout: const Duration(seconds: 15));
@@ -493,7 +516,7 @@ class GatewayClient extends ChangeNotifier {
     try {
       if (authenticated) await request('/api/auth/logout', body: {});
     } on GatewayException {
-      /* Local credentials are cleared even without a network. */
+
     }
     await _clearSession();
   }

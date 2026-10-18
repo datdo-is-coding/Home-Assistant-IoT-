@@ -21,34 +21,34 @@ TOTAL_TARGET = 360
 def generate_silence_and_mic_floor(count):
     samples = []
     for _ in range(count):
-        # Mức ồn nền micro phòng yên tĩnh (RMS rất nhỏ: 0.0001 - 0.002)
+
         amp = random.uniform(0.00005, 0.0015)
         noise = np.random.normal(0, amp, TARGET_SAMPLES).astype(np.float32)
         samples.append(noise)
     return samples
 
 def generate_pink_noise(count):
-    # Pink noise: 1/f noise
+
     samples = []
     for _ in range(count):
         white = np.random.normal(0, 1, TARGET_SAMPLES)
-        # Bộ lọc IIR xấp xỉ pink noise (Paul Kellet's filter)
+
         b = [0.049922035, -0.095993537, 0.050612699, -0.004408786]
         a = [1, -2.494956002, 2.017265875, -0.522189400]
         pink = scipy.signal.lfilter(b, a, white)
-        # Chuẩn hóa âm lượng ngẫu nhiên
+
         amp = random.uniform(0.01, 0.15)
         pink = pink / (np.max(np.abs(pink)) + 1e-6) * amp
         samples.append(pink.astype(np.float32))
     return samples
 
 def generate_brown_noise(count):
-    # Brown noise: tích phân của white noise (1/f^2)
+
     samples = []
     for _ in range(count):
         white = np.random.normal(0, 1, TARGET_SAMPLES)
         brown = np.cumsum(white)
-        # Detrend
+
         brown = brown - np.mean(brown)
         amp = random.uniform(0.01, 0.15)
         brown = brown / (np.max(np.abs(brown)) + 1e-6) * amp
@@ -64,7 +64,7 @@ def generate_white_noise(count):
     return samples
 
 def generate_mains_hum(count):
-    # Tiếng ù điện lưới 50Hz hoặc 60Hz + các sóng hài bậc 2, 3, 4
+
     samples = []
     t = np.linspace(0, 1.0, TARGET_SAMPLES, endpoint=False)
     for _ in range(count):
@@ -73,7 +73,7 @@ def generate_mains_hum(count):
         sig += 0.25 * np.sin(2 * np.pi * (2 * base_f) * t)
         sig += 0.12 * np.sin(2 * np.pi * (3 * base_f) * t)
         sig += 0.08 * np.sin(2 * np.pi * (4 * base_f) * t)
-        # Thêm chút noise nền
+
         sig += np.random.normal(0, 0.05, TARGET_SAMPLES)
         amp = random.uniform(0.02, 0.12)
         sig = sig / (np.max(np.abs(sig)) + 1e-6) * amp
@@ -90,8 +90,7 @@ def download_esc50_noise(target_slices=120):
 
     lines = res.text.splitlines()
     reader = csv.DictReader(lines)
-    
-    # Chọn các danh mục tiếng ồn thực tế trong nhà/môi trường
+
     target_cats = {
         'keyboard_typing', 'mouse_click', 'clock_tick', 'door_wood_knock',
         'vacuum_cleaner', 'washing_machine', 'wind', 'rain', 'water_drops',
@@ -119,13 +118,12 @@ def download_esc50_noise(target_slices=120):
                     gcd = np.gcd(sr, TARGET_SR)
                     data = scipy.signal.resample_poly(data, TARGET_SR // gcd, sr // gcd)
 
-                # Mỗi file ESC-50 dài 5 giây, cắt lấy các lát 1.0 giây
                 num_sub = len(data) // TARGET_SAMPLES
                 for s in range(num_sub):
                     if len(slices) >= target_slices:
                         break
                     sub_clip = data[s * TARGET_SAMPLES : (s + 1) * TARGET_SAMPLES]
-                    # Điều chỉnh âm lượng hợp lý
+
                     max_v = np.max(np.abs(sub_clip))
                     if max_v > 0.005:
                         sub_clip = sub_clip / max_v * random.uniform(0.05, 0.4)
@@ -140,12 +138,10 @@ def create_noise_dataset():
     print(f"Bắt đầu tổng hợp tập dữ liệu 'noise' (Mục tiêu: {TOTAL_TARGET} mẫu)...")
     all_samples = []
 
-    # 1. Tải tiếng ồn môi trường thực tế từ ESC-50 (~120 mẫu)
     esc_slices = download_esc50_noise(target_slices=120)
     all_samples.extend(esc_slices)
     print(f"-> Đã có {len(esc_slices)} mẫu tiếng ồn môi trường ESC-50.")
 
-    # 2. Sinh các loại ồn nền phần cứng & phòng
     silence = generate_silence_and_mic_floor(60)
     pink = generate_pink_noise(60)
     brown = generate_brown_noise(50)
@@ -159,14 +155,14 @@ def create_noise_dataset():
     all_samples.extend(hum)
 
     print(f"-> Đã sinh tổng cộng {len(all_samples)} mẫu noise. Bắt đầu lưu...")
-    # Cắt hoặc lấy ngẫu nhiên đúng số lượng mục tiêu
+
     random.shuffle(all_samples)
     if len(all_samples) > TOTAL_TARGET:
         all_samples = all_samples[:TOTAL_TARGET]
 
     for idx, sample in enumerate(all_samples, 1):
         out_path = os.path.join(OUTPUT_DIR, f"{idx}.wav")
-        # Đảm bảo độ dài đúng 16000
+
         if len(sample) != TARGET_SAMPLES:
             if len(sample) < TARGET_SAMPLES:
                 sample = np.pad(sample, (0, TARGET_SAMPLES - len(sample)), 'constant')

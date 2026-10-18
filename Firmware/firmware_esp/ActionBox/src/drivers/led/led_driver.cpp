@@ -1,8 +1,3 @@
-/**
- * @file led_driver.cpp
- * @brief Status LED Pattern Generator Implementation
- */
-
 #include "led_driver.h"
 #include "board_pins.h"
 #include "../../../../common/connection_status.h"
@@ -98,7 +93,7 @@ void led_driver_tick(void) {
         switch (led->pattern) {
             case LED_PATTERN_OFF:
             case LED_PATTERN_ON:
-                /* Static, nothing to tick */
+
                 break;
 
             case LED_PATTERN_BLINK_SLOW:
@@ -106,11 +101,11 @@ void led_driver_tick(void) {
             case LED_PATTERN_BLINK_2S: {
                 int64_t interval_ms = 100;
                 if (led->pattern == LED_PATTERN_BLINK_2S) {
-                    interval_ms = 1000; /* 1000ms ON / 1000ms OFF = 2s period (nháy 2s 1 lần) */
+                    interval_ms = 1000;
                 } else if (led->pattern == LED_PATTERN_BLINK_SLOW) {
                     interval_ms = 500;
                 } else {
-                    interval_ms = 100;  /* 100ms ON / 100ms OFF = nháy liên tục */
+                    interval_ms = 100;
                 }
                 int64_t elapsed_ms = (now_us - led->last_toggle_us) / 1000;
                 if (elapsed_ms >= interval_ms) {
@@ -131,7 +126,7 @@ void led_driver_tick(void) {
             case LED_PATTERN_PULSE_ONCE: {
                 int64_t elapsed_ms = (now_us - led->pulse_start_us) / 1000;
                 if (elapsed_ms >= 120) {
-                    /* Pulse complete, return to OFF or ON based on relay */
+
                     led->pattern = LED_PATTERN_OFF;
                     led->current_level = false;
                     apply_led_level(led->pin, false);

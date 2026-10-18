@@ -1,8 +1,3 @@
-/**
- * @file ws_asr.cpp
- * @brief High-Performance WebSocket Streaming ASR Client for Pi 4 (Sherpa-ONNX) Implementation
- */
-
 #include "ws_asr.h"
 #include "esp_log.h"
 #include "cJSON.h"
@@ -10,6 +5,8 @@
 #include <cstdio>
 #include "storage/security_config.h"
 #include "esp_timer.h"
+#include "hc_runtime.h"
+#include "esp_random.h"
 #include "audio_output/sound_player.h"
 
 static const char* TAG = "WS_ASR";
@@ -51,6 +48,15 @@ bool WsASR::init() {
     }
     m_ca = SecurityConfig::get("ca_pem");
     const auto token = SecurityConfig::get("ws_token");
+
+    if (hc_runtime_enabled()) {
+        m_node_id = std::to_string(hc_runtime_node_id());
+        if (m_uri.rfind("wss://", 0) != 0 ||
+            m_uri.size() < 16 || m_uri.substr(m_uri.size() - 16) != "/api/v1/voice/ws") {
+            ESP_LOGE(TAG, "Core voice requires a pinned WSS Core voice endpoint provisioned over USB");
+            return false;
+        }
+    }
 
     bool is_wss = (m_uri.rfind("wss://", 0) == 0);
     bool is_ws = (m_uri.rfind("ws://", 0) == 0);
@@ -119,7 +125,7 @@ bool WsASR::start() {
     m_send_buf_count = 0;
 
     if (m_result_sem) {
-        xSemaphoreTake(m_result_sem, 0); // Drain any stale semaphore
+        xSemaphoreTake(m_result_sem, 0);
     }
 
     if (!m_client || !m_connected.load()) {
@@ -132,8 +138,16 @@ bool WsASR::start() {
         ESP_LOGE(TAG, "Cannot relay audio without a valid ActionBox source ID");
         return false;
     }
-    char start_msg[256];
-    snprintf(start_msg, sizeof(start_msg),
+    char start_msg[320];
+    if (hc_runtime_enabled()) {
+        if (!hc_runtime_registered() || m_source_node_id.find_first_not_of("0123456789") != std::string::npos) return false;
+        uint32_t nonce[4];
+        esp_fill_random(nonce, sizeof(nonce));
+        snprintf(start_msg, sizeof(start_msg),
+                 "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"source_node_id\":%s,\"request_id\":\"%08lx%08lx%08lx%08lx\"}",
+                 m_source_node_id.c_str(), (unsigned long)nonce[0], (unsigned long)nonce[1],
+                 (unsigned long)nonce[2], (unsigned long)nonce[3]);
+    } else snprintf(start_msg, sizeof(start_msg),
              "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"node_id\":\"%s\",\"speaker\":false,\"audio_relay\":true,\"asr_only\":false}",
              m_source_node_id.c_str());
 
@@ -200,7 +214,7 @@ bool WsASR::feedAudio(const int16_t* pcm, size_t samples) {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (size_t i = 0; i < samples; i++) {
         m_send_buf[m_send_buf_count++] = pcm[i];
-        if (m_send_buf_count >= 480) { // 480 samples = 30ms = 960 bytes
+        if (m_send_buf_count >= 480) {
             int sent = esp_websocket_client_send_bin(
                 m_client,
                 reinterpret_cast<const char*>(m_send_buf),
@@ -235,6 +249,9 @@ const char* WsASR::getFinalResult() const {
 void WsASR::reset() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_streaming = false;
+    if (m_receiving_tts.exchange(false)) {
+        SoundPlayer::instance().finishPcmStream();
+    }
     m_has_final = false;
     m_has_partial = false;
     m_final_result.clear();
@@ -266,11 +283,11 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "✅ Connected to Pi 4 Audio Server (%s)!", self->m_uri.c_str());
             self->m_connected = true;
-            // Send compact hello
-            {
+
+            if (!hc_runtime_enabled()) {
                 char hello[192];
                 snprintf(hello, sizeof(hello),
-                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":false,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
+                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":true,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
                          self->m_node_id.c_str());
                 esp_websocket_client_send_text(self->m_client, hello, strlen(hello), pdMS_TO_TICKS(1000));
             }
@@ -282,16 +299,27 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
             self->m_connected = false;
             self->m_disconnected_at = esp_timer_get_time();
             self->m_streaming = false;
+            if (self->m_receiving_tts.exchange(false)) {
+                SoundPlayer::instance().finishPcmStream();
+            }
             break;
 
         case WEBSOCKET_EVENT_DATA:
-            if (data->op_code == 0x01 && data->data_ptr && data->data_len > 0) { // Text frame
+            if (data->op_code == 0x01 && data->data_ptr && data->data_len > 0) {
                 self->handleTextMessage(data->data_ptr, data->data_len);
+            } else if (data->op_code == 0x02 && data->data_ptr && data->data_len > 0) {
+                if (self->m_receiving_tts.load()) {
+                    size_t samples = data->data_len / sizeof(int16_t);
+                    SoundPlayer::instance().streamPcmChunk(reinterpret_cast<const int16_t*>(data->data_ptr), samples);
+                }
             }
             break;
 
         case WEBSOCKET_EVENT_ERROR:
             ESP_LOGE(TAG, "❌ WebSocket error occurred");
+            if (self->m_receiving_tts.exchange(false)) {
+                SoundPlayer::instance().finishPcmStream();
+            }
             break;
 
         default:
@@ -329,20 +357,48 @@ void WsASR::handleTextMessage(const char* data, int len) {
                 ESP_LOGW(TAG, "ASR transcript rejected -> Triggering acoustic error feedback");
                 SoundPlayer::instance().play(SoundType::ERROR);
             }
+        } else if (strcmp(type->valuestring, "audio_start") == 0) {
+            cJSON* fmt = cJSON_GetObjectItem(root, "format");
+            if (!fmt || !cJSON_IsString(fmt) || strcmp(fmt->valuestring, "pcm") != 0) {
+                ESP_LOGW(TAG, "Rejecting audio_start: unsupported format");
+                cJSON_Delete(root);
+                return;
+            }
+            ESP_LOGI(TAG, "🔊 Incoming TTS audio stream starting from Gateway...");
+            m_receiving_tts = true;
+            SoundPlayer::instance().startPcmStream();
+        } else if (strcmp(type->valuestring, "audio_end") == 0) {
+            ESP_LOGI(TAG, "🏁 Incoming TTS audio stream finished.");
+            if (m_receiving_tts.exchange(false)) {
+                SoundPlayer::instance().finishPcmStream();
+            }
+        } else if (strcmp(type->valuestring, "speaker_busy") == 0) {
+            cJSON* busy = cJSON_GetObjectItem(root, "busy");
+            bool is_busy = busy && cJSON_IsTrue(busy);
+            ESP_LOGI(TAG, "📢 Speaker busy status: %d", is_busy);
         } else if (strcmp(type->valuestring, "command_result") == 0) {
             cJSON* verify = cJSON_GetObjectItem(root, "verify");
             cJSON* reply = cJSON_GetObjectItem(root, "voice_reply");
+            bool has_tts = cJSON_IsTrue(cJSON_GetObjectItem(root, "has_tts"));
             const char* v_str = cJSON_IsString(verify) ? verify->valuestring : "";
             const char* r_str = cJSON_IsString(reply) ? reply->valuestring : "";
 
-            ESP_LOGI(TAG, "🎯 [COMMAND_RESULT] Verify: \"%s\" | Reply: \"%s\"", v_str, r_str);
+            ESP_LOGI(TAG, "🎯 [COMMAND_RESULT] Verify: \"%s\" | Reply: \"%s\" | has_tts: %d", v_str, r_str, has_tts);
 
-            if (strcmp(v_str, "success") == 0 || strcmp(v_str, "alarm_played") == 0 || strcmp(v_str, "conversational") == 0) {
-                ESP_LOGI(TAG, "Acoustic feedback: Command SUCCESS -> Melodic confirmation chime");
-                SoundPlayer::instance().play(SoundType::SUCCESS);
+            if (strcmp(v_str, "success") == 0 || strcmp(v_str, "alarm_played") == 0 ||
+                strcmp(v_str, "conversational") == 0 || strcmp(v_str, "ack_only") == 0 ||
+                strcmp(v_str, "confirmed_load") == 0 || strcmp(v_str, "already_in_state") == 0) {
+                if (!has_tts) {
+                    ESP_LOGI(TAG, "Acoustic feedback: Command SUCCESS -> Melodic confirmation chime");
+                    SoundPlayer::instance().play(SoundType::SUCCESS);
+                } else {
+                    ESP_LOGI(TAG, "Command SUCCESS with TTS -> Suppressing chime in favor of TTS speech");
+                }
             } else {
-                ESP_LOGW(TAG, "Acoustic feedback: Command FAILED (%s) -> Negative error cue", v_str);
-                SoundPlayer::instance().play(SoundType::ERROR);
+                ESP_LOGW(TAG, "Acoustic feedback: Command FAILED (%s)", v_str);
+                if (!has_tts) {
+                    SoundPlayer::instance().play(SoundType::ERROR);
+                }
             }
 
             CommandResultCallback cb_copy = nullptr;

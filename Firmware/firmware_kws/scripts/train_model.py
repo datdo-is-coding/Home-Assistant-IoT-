@@ -15,32 +15,28 @@ DATA_DIR = "d:/KWS/data"
 MODEL_DIR = "d:/KWS/models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# 1. Định nghĩa kiến trúc mạng Tiny KWS Depthwise Separable CNN (DSCNN) cho ESP32-S3
 class TinyKWS(nn.Module):
     def __init__(self, num_classes=10):
         super(TinyKWS, self).__init__()
-        # Khối Conv 1 (Standard Conv2D)
+
         self.conv1 = nn.Conv2d(1, 16, kernel_size=(3, 3), padding=1)
         self.bn1 = nn.BatchNorm2d(16)
         self.relu = nn.ReLU()
         self.pool1 = nn.MaxPool2d((2, 2))
         self.drop1 = nn.Dropout(0.15)
 
-        # Khối Depthwise Separable Conv 2
         self.dw2 = nn.Conv2d(16, 16, kernel_size=(3, 3), padding=1, groups=16)
         self.pw2 = nn.Conv2d(16, 32, kernel_size=(1, 1))
         self.bn2 = nn.BatchNorm2d(32)
         self.pool2 = nn.MaxPool2d((2, 2))
         self.drop2 = nn.Dropout(0.2)
 
-        # Khối Depthwise Separable Conv 3
         self.dw3 = nn.Conv2d(32, 32, kernel_size=(3, 3), padding=1, groups=32)
         self.pw3 = nn.Conv2d(32, 64, kernel_size=(1, 1))
         self.bn3 = nn.BatchNorm2d(64)
         self.pool3 = nn.MaxPool2d((2, 2))
         self.drop3 = nn.Dropout(0.25)
 
-        # Phân lớp
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(64, num_classes)
 
@@ -57,7 +53,6 @@ def train():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Thiết bị huấn luyện: {device}")
 
-    # 2. Đọc dữ liệu đặc trưng MFCC
     print("Đang nạp dữ liệu từ d:/KWS/data...")
     X_train = np.load(os.path.join(DATA_DIR, "X_train.npy"))
     y_train = np.load(os.path.join(DATA_DIR, "y_train.npy"))
@@ -71,19 +66,16 @@ def train():
     classes = labels_meta["classes"]
     num_classes = len(classes)
 
-    # 3. Chuẩn hóa ma trận MFCC (Z-score normalization)
     mean = np.mean(X_train)
     std = np.std(X_train) + 1e-6
     X_train = (X_train - mean) / std
     X_val = (X_val - mean) / std
     X_test = (X_test - mean) / std
 
-    # Lưu lại mean & std để phục vụ suy luận thực tế trên ESP32
     norm_params = {"mean": float(mean), "std": float(std)}
     with open(os.path.join(MODEL_DIR, "norm_params.json"), "w") as f:
         json.dump(norm_params, f, indent=2)
 
-    # Thêm kênh channel (Batch, Channel=1, Time=99, Coefficients=13)
     X_train = np.expand_dims(X_train, 1)
     X_val = np.expand_dims(X_val, 1)
     X_test = np.expand_dims(X_test, 1)
@@ -92,7 +84,6 @@ def train():
     val_loader = DataLoader(TensorDataset(torch.from_numpy(X_val).float(), torch.from_numpy(y_val).long()), batch_size=64, shuffle=False)
     test_loader = DataLoader(TensorDataset(torch.from_numpy(X_test).float(), torch.from_numpy(y_test).long()), batch_size=64, shuffle=False)
 
-    # 4. Khởi tạo mô hình
     model = TinyKWS(num_classes=num_classes).to(device)
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Kiến trúc mô hình: TinyKWS (DSCNN)")
@@ -133,7 +124,6 @@ def train():
         scheduler.step()
         train_acc = train_correct / train_total
 
-        # Validation
         model.eval()
         val_loss = 0.0
         val_correct = 0
@@ -160,7 +150,6 @@ def train():
     total_time = time.time() - start_time
     print(f"\nHuấn luyện hoàn tất trong {total_time:.1f} giây!")
 
-    # 5. Đánh giá trên tập Test độc lập
     print("\n" + "="*50)
     print("ĐÁNH GIÁ TRÊN TẬP TEST ĐỘC LẬP")
     print("="*50)
@@ -189,7 +178,6 @@ def train():
             cls_acc = np.mean(all_preds[cls_mask] == all_targets[cls_mask])
             print(f"  + Lớp '{cls_name:8s}': {cls_acc * 100:6.2f}% ({np.sum(cls_mask)} mẫu test)")
 
-    # 6. Xuất mô hình sang định dạng ONNX phục vụ nạp vi điều khiển / Edge Impulse
     dummy_input = torch.randn(1, 1, 99, 13, device=device)
     onnx_path = os.path.join(MODEL_DIR, "kws_dscnn.onnx")
     torch.onnx.export(

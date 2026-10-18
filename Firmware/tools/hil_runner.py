@@ -22,8 +22,8 @@ class MockActionBoxTransport:
         self.hw_uid = hw_uid
         self.config_version = 1
         self.protocol_version = 3
-        self.relays = [0, 0] # 0 = OFF, 1 = ON
-        self.idempotency_cache = {} # (session_id, request_id) -> response
+        self.relays = [0, 0]
+        self.idempotency_cache = {}
 
     def process_command(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         req_id = payload.get("request_id", 0)
@@ -31,16 +31,13 @@ class MockActionBoxTransport:
         cmd = payload.get("cmd")
         ch = payload.get("channel", 1)
 
-        # Check idempotency cache
         cache_key = (session_id, req_id)
         if cache_key in self.idempotency_cache:
             return {**self.idempotency_cache[cache_key], "cached": True}
 
-        # Check identity
         if payload.get("hardware_uid") != self.hw_uid or payload.get("protocol_version") != 3:
             return {"status": "ERROR", "error": "Identity mismatch or invalid protocol version"}
 
-        # Network TOGGLE rejection
         if cmd == "TOGGLE":
             resp = {
                 "type": "ACK", "status": "ERROR", "state": "REJECTED",
@@ -51,7 +48,6 @@ class MockActionBoxTransport:
             self.idempotency_cache[cache_key] = resp
             return resp
 
-        # TURN_ON / TURN_OFF
         if cmd == "TURN_ON":
             self.relays[ch - 1] = 1
             st = "ON"
@@ -88,7 +84,6 @@ class MockActionBoxTransport:
             }
         }
 
-
 class TestHILProtocol(unittest.TestCase):
     def setUp(self):
         self.transport = MockActionBoxTransport()
@@ -114,7 +109,6 @@ class TestHILProtocol(unittest.TestCase):
         self.assertEqual(resp1["state"], "ON")
         self.assertNotIn("cached", resp1)
 
-        # Retransmit identical command
         resp2 = self.transport.process_command(cmd)
         self.assertEqual(resp2["state"], "ON")
         self.assertTrue(resp2.get("cached"))
@@ -142,7 +136,6 @@ class TestHILProtocol(unittest.TestCase):
         }
         resp = self.transport.process_command(cmd)
         self.assertEqual(resp["status"], "ERROR")
-
 
 if __name__ == '__main__':
     unittest.main()

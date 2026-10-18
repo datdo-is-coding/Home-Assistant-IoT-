@@ -1,6 +1,3 @@
-// Tự động tạo bởi export_quantized_header.py cho ESP32-S3
-// Mô hình DSCNN KWS LƯỢNG TỬ HÓA INT8 (Per-channel Symmetric INT8 Quantization)
-// Giảm dung lượng trọng số từ 15.1 KB (FP32) xuống 3.69 KB (INT8) - Tiết kiệm ~75% bộ nhớ Flash
 #ifndef KWS_MODEL_QUANTIZED_H
 #define KWS_MODEL_QUANTIZED_H
 
@@ -10,11 +7,6 @@
 
 #define KWS_MODEL_TYPE_NAME "INT8 Quantized (Per-Channel)"
 
-// ==========================================
-// 1. TRỌNG SỐ LƯỢNG TỬ HÓA INT8 & BIAS / SCALE
-// ==========================================
-
-// Conv1: 16 filters x (1 x 3 x 3) = 144 bytes
 static const int8_t w_c1_int8[144] = {
      -31,   12,  -59, -114, -127,   66,   13,   34,   23,   55,    2,  -79,   65,   -2, -127,   77,
      -22,  -92,  127,  102,   17,   90,   89,   92,  -23,  113,  102,  -54,  109,  127,   19,   -3,
@@ -35,7 +27,6 @@ static const float b_c1_int8[16] = {
     1.72823668e-02f, -5.34994006e-01f, -6.06572270e-01f, -4.27820742e-01f, -3.02978069e-01f, -7.66935050e-02f, -7.84024596e-03f, -3.04807931e-01f,
 };
 
-// Block 2: DW2 (16 ch x 3 x 3 = 144 bytes)
 static const int8_t w_dw2_int8[144] = {
       16,   67,   79,   42,   84,  127,   21,   77,  106,  -80,   55,   95,  -29,   91,   58,  -47,
      127,   90,  -76,   21,   18, -127,   13,   -4, -127,   16,  -29,  127,   76,   13,  103,   32,
@@ -56,7 +47,6 @@ static const float b_dw2_int8[16] = {
     1.24665491e-01f, -1.73713177e-01f, 9.95033979e-03f, 2.42978573e-01f, 3.79245192e-01f, 2.82353848e-01f, 3.28044713e-01f, 1.95028618e-01f,
 };
 
-// Block 2: PW2 (32 out x 16 in x 1 x 1 = 512 bytes)
 static const int8_t w_pw2_int8[512] = {
      -94,   94,   90,  -42,  -82,   39,  -23,   60, -102,   -1,   17,    9,  127,   18,   59,    6,
     -103,   80,   42,   33,  -42,  100,   83,  127,   -2,   19,   93,   -1,   -7,   11,   98,   98,
@@ -104,7 +94,6 @@ static const float b_pw2_int8[32] = {
     -8.69276643e-01f, 1.33461773e+00f, -9.40881014e-01f, 1.33893341e-01f, 2.59010375e-01f, 1.46056390e+00f, 8.75939429e-02f, -1.44650698e-01f,
 };
 
-// Block 3: DW3 (32 ch x 3 x 3 = 288 bytes)
 static const int8_t w_dw3_int8[288] = {
      127,   74,   -4,  123,  100,  -44,   97,   77,  -43,  -25, -127,  -46,  -19,  -76,   29,  -17,
      -14,  -16,  -19,  -28,  -51,  -75,  -27, -119,  -70,   31, -127, -127,  -84,   11,  -54,  -94,
@@ -138,7 +127,6 @@ static const float b_dw3_int8[32] = {
     -1.47901364e-02f, 9.71136466e-02f, -3.69720072e-01f, -2.55421728e-01f, -1.76954448e-01f, -1.19213916e-01f, -2.35231236e-01f, -1.07170030e-01f,
 };
 
-// Block 3: PW3 (64 out x 32 in x 1 x 1 = 2048 bytes)
 static const int8_t w_pw3_int8[2048] = {
       36,   -4, -105,   30,   -7,  -30,   18, -104,  -98,    5,  -94,   16,   32, -107,   65,   54,
     -127,   52,  123,  -14,   14,   23,  -72,  119,  -58,    0,   32,   57,  127,  -17,   13,   82,
@@ -290,7 +278,6 @@ static const float b_pw3_int8[64] = {
     1.98174250e+00f, 6.60921812e-01f, -1.48774290e+00f, 1.11952794e+00f, 1.43877685e+00f, 1.05530143e+00f, 3.80478454e+00f, 4.51547742e-01f,
 };
 
-// FC: 10 classes x 64 in = 640 bytes
 static const int8_t w_fc_int8[640] = {
       26,    7,   60,   51,   35,  -10,    4,   46,   37,   -9,  -81,    0,    9,    2,   18,  -66,
        6,   23,  -18,  -16,  -21,  -36,  -41,  -62,   25,  -19,  -13,   36,  -11,   -6,  -85,    7,
@@ -342,20 +329,13 @@ static const float b_fc_int8[10] = {
     -2.99766719e-01f, -6.96330145e-02f,
 };
 
-// ==========================================
-// 2. HÀM SUY LUẬN MÔ HÌNH INT8 (INFERENCE ENGINE)
-// ==========================================
 inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) {
-    // Kích thước các lớp trung gian
-    // pool1: 16 x 49 x 6 = 4704 floats
-    // pool2: 32 x 24 x 3 = 2304 floats
-    // pool3: 64 x 12 x 1 = 768 floats
+
     static float pool1[16 * 49 * 6];
     float* pool2 = pool1;
     float* pool3 = pool1;
     static float dw_buf[32 * 49 * 6];
 
-    // 1. Conv1 (1 -> 16, 3x3 pad 1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 16; oc++) {
         const int8_t* w_k = &w_c1_int8[oc * 9];
         float scale_k = s_c1[oc];
@@ -386,7 +366,7 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
                         }
 
                         float sum = bias + dot * scale_k;
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -395,7 +375,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         }
     }
 
-    // 2. Block 2: DW2 (16 ch, 3x3 pad 1)
     for (int c = 0; c < 16; c++) {
         const int8_t* w_k = &w_dw2_int8[c * 9];
         float scale_k = s_dw2[c];
@@ -420,7 +399,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         }
     }
 
-    // PW2 (16 -> 32, 1x1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 32; oc++) {
         float bias = b_pw2_int8[oc];
         float scale_k = s_pw2[oc];
@@ -441,7 +419,7 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
                             dot += dw_buf[(ic * 49 + r) * 6 + c] * (float)pw_weights[ic];
                         }
                         float sum = bias + dot * scale_k;
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -450,7 +428,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         }
     }
 
-    // 3. Block 3: DW3 (32 ch, 3x3 pad 1)
     for (int c = 0; c < 32; c++) {
         const int8_t* w_k = &w_dw3_int8[c * 9];
         float scale_k = s_dw3[c];
@@ -475,7 +452,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         }
     }
 
-    // PW3 (32 -> 64, 1x1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 64; oc++) {
         float bias = b_pw3_int8[oc];
         float scale_k = s_pw3[oc];
@@ -497,7 +473,7 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
                             dot += dw_buf[(ic * 24 + r) * 3 + c] * (float)pw_weights[ic];
                         }
                         float sum = bias + dot * scale_k;
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -506,7 +482,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         }
     }
 
-    // 4. Global Average Pooling (64 ch x 12 -> 64)
     float gap[64];
     for (int c = 0; c < 64; c++) {
         float sum = 0.0f;
@@ -516,7 +491,6 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
         gap[c] = sum / 12.0f;
     }
 
-    // 5. Fully Connected (64 -> NUM_CLASSES) + Softmax
     float logits[NUM_CLASSES];
     float max_logit = -1e9f;
     for (int k = 0; k < NUM_CLASSES; k++) {
@@ -543,4 +517,4 @@ inline void kws_run_inference_quantized(const float* mfcc_in, float* out_probs) 
     }
 }
 
-#endif // KWS_MODEL_QUANTIZED_H
+#endif

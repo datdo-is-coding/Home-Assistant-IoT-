@@ -42,7 +42,7 @@ int main() {
     assert(cfg.startup_modes[2] == STARTUP_MODE_ALWAYS_OFF);
     assert(cfg.max_current_ma[2] == 10000);
     auto saved = blob;
-    blob.resize(4); // even a pre-filled valid destination must reject a short blob
+    blob.resize(4);
     assert(nvs_storage_load_config(&cfg) == ESP_ERR_INVALID_VERSION);
     blob = saved;
     assert(nvs_storage_load_config(&cfg) == ESP_OK);
@@ -53,7 +53,7 @@ int main() {
     assert(relay_driver_init() == ESP_OK);
     assert(led_driver_init() == ESP_OK);
     assert(safety_supervisor_init() == ESP_OK);
-    assert(relay_on(3) != ESP_OK); // no valid measurement yet
+    assert(relay_on(3) != ESP_OK);
     CurrentMeasurement sample{};
     sample.timestamp_ms = esp_timer_get_time() / 1000;
     safety_process_measurement(3, &sample);

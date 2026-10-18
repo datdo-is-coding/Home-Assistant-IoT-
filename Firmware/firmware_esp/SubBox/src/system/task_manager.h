@@ -1,8 +1,3 @@
-/**
- * @file task_manager.h
- * @brief FreeRTOS Task Architecture and Queue Coordinator for SubBox
- */
-
 #pragma once
 
 #include <memory>
@@ -33,7 +28,6 @@ struct ResponseQueueItem {
     char text[256];
 };
 
-// FreeRTOS queues copy bytes; never enqueue owning C++ objects.
 struct CommandQueueItem {
     IntentType intent;
     DeviceType device;

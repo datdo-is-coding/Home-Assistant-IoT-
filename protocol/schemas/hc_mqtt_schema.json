@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HC_WIFI_MQTT_Messages",
+  "description": "JSON payload schema for Home Competition Protocol V1 over MQTT",
+  "type": "object",
+  "properties": {
+    "topic_patterns": {
+      "subbox_state": "hc/homes/{home_id}/rooms/{room_id}/state",
+      "subbox_telemetry": "hc/homes/{home_id}/rooms/{room_id}/telemetry",
+      "subbox_events": "hc/homes/{home_id}/rooms/{room_id}/events",
+      "gateway_command": "hc/homes/{home_id}/rooms/{room_id}/subbox/{subbox_id}/cmd",
+      "gateway_config": "hc/homes/{home_id}/rooms/{room_id}/subbox/{subbox_id}/config"
+    },
+    "command_payload": {
+      "type": "object",
+      "required": [
+        "command_id",
+        "target_node",
+        "channel",
+        "action",
+        "desired_state",
+        "generation",
+        "config_rev",
+        "ttl_ms"
+      ],
+      "properties": {
+        "command_id": {
+          "type": "string"
+        },
+        "target_node": {
+          "type": "integer"
+        },
+        "channel": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "SET_STATE"
+          ]
+        },
+        "desired_state": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "config_rev": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ttl_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        }
+      }
+    },
+    "state_report_payload": {
+      "type": "object",
+      "required": [
+        "node_id",
+        "channel_id",
+        "relay_state",
+        "current_rms_a",
+        "ct_valid",
+        "fault_flags",
+        "boot_id",
+        "seq",
+        "config_rev"
+      ],
+      "properties": {
+        "node_id": {
+          "type": "integer"
+        },
+        "channel_id": {
+          "type": "string"
+        },
+        "relay_state": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "enum": [
+            0,
+            1,
+            null
+          ]
+        },
+        "current_rms_a": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "ct_valid": {
+          "type": "boolean"
+        },
+        "fault_flags": {
+          "type": "integer"
+        },
+        "boot_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "config_rev": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

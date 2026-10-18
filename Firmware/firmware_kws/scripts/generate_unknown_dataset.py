@@ -17,27 +17,26 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 TARGET_SR = 16000
 TARGET_SAMPLES = 16000
 
-# Danh sách từ vựng và câu ngắn tiếng Việt thông dụng (hoàn toàn khác 8 từ khóa mục tiêu)
 WORDS_AND_PHRASES = [
-    # Đồ dùng, thiết bị khác
+
     "tivi", "điều hòa", "cửa", "cửa sổ", "bàn", "ghế", "nhà", "nước", "máy giặt", "rèm",
     "bình nóng lạnh", "loa", "chuông", "tủ lạnh", "ấm nước", "gương", "giường", "ổ cắm",
-    # Hành động khác
+
     "mở", "đóng", "tăng", "giảm", "sáng", "tối", "lạnh", "nóng", "chờ", "hẹn giờ",
     "kéo", "đẩy", "bấm", "nhấn", "chuyển", "dừng", "bắt đầu", "kết thúc", "kiểm tra",
-    # Từ giao tiếp, xưng hô
+
     "xin chào", "alo", "ơi", "dạ", "vâng", "ừ", "không", "được", "biết rồi", "tạm biệt",
     "cảm ơn", "anh", "chị", "em", "bạn", "này", "cái gì", "ai đó", "sao thế", "làm gì",
-    # Số đếm & thời gian
+
     "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín", "mười",
     "hôm nay", "ngày mai", "bây giờ", "mấy giờ", "thời tiết", "nhiệt độ", "độ ẩm", "phút",
-    # Địa điểm khác
+
     "sân", "vườn", "ban công", "hành lang", "tầng một", "tầng hai", "toilet", "nhà kho"
 ]
 
 VOICES = [
-    "vi-VN-HoaiMyNeural",  # Nữ
-    "vi-VN-NamMinhNeural"   # Nam
+    "vi-VN-HoaiMyNeural",
+    "vi-VN-NamMinhNeural"
 ]
 
 RATES = ["-10%", "+0%", "+10%"]
@@ -47,20 +46,18 @@ def process_audio(raw_bytes):
     if data.ndim > 1:
         data = np.mean(data, axis=1)
 
-    # Resample về 16kHz
     if sr != TARGET_SR:
         gcd = np.gcd(sr, TARGET_SR)
         data = scipy.signal.resample_poly(data, TARGET_SR // gcd, sr // gcd)
 
-    # Chuẩn hóa về đúng 1.0 giây (16,000 samples)
     if len(data) < TARGET_SAMPLES:
         pad = TARGET_SAMPLES - len(data)
-        # Pad đều trước và sau hoặc sau
+
         pad_front = pad // 4
         pad_back = pad - pad_front
         data = np.pad(data, (pad_front, pad_back), mode='constant', constant_values=0)
     elif len(data) > TARGET_SAMPLES:
-        # Tìm đoạn có năng lượng âm thanh lớn nhất để cắt lấy 1s
+
         frame_len = TARGET_SAMPLES
         hop = 800
         best_energy = -1
@@ -72,7 +69,6 @@ def process_audio(raw_bytes):
                 best_idx = i
         data = data[best_idx:best_idx+frame_len]
 
-    # Chuẩn hóa âm lượng nhẹ (-1.0 đến 1.0)
     max_val = np.max(np.abs(data))
     if max_val > 0.01:
         data = data / max_val * 0.9
@@ -99,7 +95,6 @@ async def generate_all():
         if count >= target_count:
             break
 
-    # Chạy theo lô 10 task đồng thời
     batch_size = 10
     for i in range(0, len(tasks), batch_size):
         batch = tasks[i:i+batch_size]

@@ -1,8 +1,3 @@
-/*
- * ESP32-S3 N16R8 Voice Assistant Firmware (ESP-SR / ESP-Skainet)
- * DTV Energy Ecosystem - Smart Voice Control
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +25,6 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 
-/* ─── Audio Streaming & MQTT Relay Modules ─── */
 #include "ws_audio_client.h"
 #include "mqtt_relay.h"
 #include "audio_feedback.h"
@@ -41,7 +35,6 @@ static void add_cors_headers(httpd_req_t *req);
 static esp_err_t api_provision_post_handler(httpd_req_t *req);
 static esp_err_t api_factory_reset_post_handler(httpd_req_t *req);
 
-
 #ifndef MIN
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #endif
@@ -49,12 +42,6 @@ static esp_err_t api_factory_reset_post_handler(httpd_req_t *req);
 static const char *TAG = "ESP32S3_VOICE_MASTER";
 
 static uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-
-// SCHEMATIC SYNC: U1 ESP32-S3-WROOM-1
-// Pin 25: IO48 -> LED1 (System Status / Wi-Fi / MQTT)
-// Pin 24: IO47 -> LED2 (Voice / Activity Indicator)
-// Pin 39: IO1  -> BUT1 (Local Toggle Relay 1)
-// Pin 15: IO3  -> BUT2 (Local Toggle Relay 2)
 
 #define LED1_GPIO GPIO_NUM_48
 #define LED2_GPIO GPIO_NUM_47
@@ -88,10 +75,6 @@ void led2_set(bool on)
     gpio_set_level(LED2_GPIO, on ? 1 : 0);
 }
 
-
-/**
- * @brief Physical Push Buttons Task: BUT1 (IO1) -> Toggle RL1, BUT2 (IO3) -> Toggle RL2
- */
 static void button_monitor_task(void *arg)
 {
     gpio_config_t btn_conf = {
@@ -129,7 +112,7 @@ static void button_monitor_task(void *arg)
             }
         } else {
             if (prev_b1 == 0 && b1_hold_ms < 3000 && b1_hold_ms > 50) {
-                // Short press: Toggle Relay 1
+
                 bool current = mqtt_relay_get_state(1);
                 ESP_LOGI(TAG, "🔘 BUT1 Pressed! Toggling RL1 (GPIO4) -> %s", !current ? "ON" : "OFF");
                 mqtt_relay_set(1, !current);
@@ -142,7 +125,7 @@ static void button_monitor_task(void *arg)
         }
 
         if (prev_b2 == 1 && b2 == 0) {
-            // BUT2 Pressed! Toggle Relay 2
+
             bool current = mqtt_relay_get_state(2);
             ESP_LOGI(TAG, "🔘 BUT2 Pressed! Toggling RL2 (GPIO5) -> %s", !current ? "ON" : "OFF");
             mqtt_relay_set(2, !current);
@@ -158,12 +141,8 @@ static void button_monitor_task(void *arg)
     }
 }
 
-
 static void send_esp_now_request_power(void);
 
-
-
-// Live Telemetry Cache for Web Dashboard & App
 static float live_voltage = 0.0f;
 static float live_current = 0.0f;
 static float live_power   = 0.0f;
@@ -172,40 +151,27 @@ static float live_freq    = 50.0f;
 static float live_pf      = 1.0f;
 static uint32_t last_telemetry_ms = 0;
 
-
-
-// ============================================================================
-// I2S MICROPHONE PIN DEFINITIONS (INMP441 MEMS Mic - Matches Schematic)
-// ============================================================================
 #define MIC_I2S_PORT         I2S_NUM_0
-#define MIC_I2S_GPIO_BCLK    GPIO_NUM_15   // Schematic: MIC_BCLK (IO15)
-#define MIC_I2S_GPIO_WS      GPIO_NUM_16   // Schematic: MIC_WS (IO16)
-#define MIC_I2S_GPIO_DIN     GPIO_NUM_8    // Schematic: MIC_DIN (IO8)
+#define MIC_I2S_GPIO_BCLK    GPIO_NUM_15
+#define MIC_I2S_GPIO_WS      GPIO_NUM_16
+#define MIC_I2S_GPIO_DIN     GPIO_NUM_8
 
-
-// ============================================================================
-// I2S SPEAKER / DAC PIN DEFINITIONS (MAX98357A I2S DAC/AMP - Matches Schematic)
-// ============================================================================
 #define SPK_I2S_PORT         I2S_NUM_1
-#define SPK_I2S_GPIO_BCLK    GPIO_NUM_17   // Schematic: SP_BCLK (IO17)
-#define SPK_I2S_GPIO_WS      GPIO_NUM_18   // Schematic: SP_LRC (IO18)
-#define SPK_I2S_GPIO_DOUT    GPIO_NUM_21   // Schematic: SP_DOUT (IO21)
-#define SPK_SD_GPIO          GPIO_NUM_2    // Schematic: SP_SD (IO2 - Amp Shutdown/Enable)
+#define SPK_I2S_GPIO_BCLK    GPIO_NUM_17
+#define SPK_I2S_GPIO_WS      GPIO_NUM_18
+#define SPK_I2S_GPIO_DOUT    GPIO_NUM_21
+#define SPK_SD_GPIO          GPIO_NUM_2
 
 static i2s_chan_handle_t rx_handle = NULL;
-/* Non-static: shared with ws_audio_client.c for speaker playback */
+
 i2s_chan_handle_t tx_handle = NULL;
 static const esp_afe_sr_iface_t *afe_handle = &ESP_AFE_SR_HANDLE;
 static esp_afe_sr_data_t *afe_data = NULL;
 static volatile bool is_listening = false;
 
-
-/**
- * @brief Initialize I2S Microphone Channel (16kHz, 16-bit Mono/Stereo)
- */
 static esp_err_t init_i2s_microphone(void)
 {
-    ESP_LOGI(TAG, "Initializing INMP441 I2S Microphone (BCLK:%d, WS:%d, DIN:%d)...", 
+    ESP_LOGI(TAG, "Initializing INMP441 I2S Microphone (BCLK:%d, WS:%d, DIN:%d)...",
              MIC_I2S_GPIO_BCLK, MIC_I2S_GPIO_WS, MIC_I2S_GPIO_DIN);
 
     i2s_chan_config_t chan_cfg = {
@@ -296,9 +262,6 @@ static esp_err_t api_tinyml_get_handler(httpd_req_t *req)
     return httpd_resp_send(req, json_resp, HTTPD_RESP_USE_STRLEN);
 }
 
-/**
- * @brief ESP-NOW Data Receive Callback (Handles packets from ESP32 WROOM Energy Slave)
- */
 static void esp_now_recv_callback(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
 {
     if (len < sizeof(esp_now_packet_t)) {
@@ -317,10 +280,8 @@ static void esp_now_recv_callback(const esp_now_recv_info_t *recv_info, const ui
         live_pf      = pkt->pf;
         last_telemetry_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 
-        // Run local TinyML AI inference model on incoming waveform metrics
         run_tinyml_inference(live_voltage, live_current, live_power, live_pf);
 
-        // Pulse status LED on successful packet reception
         led2_set(true);
         vTaskDelay(pdMS_TO_TICKS(10));
         led2_set(false);
@@ -333,18 +294,14 @@ static void esp_now_recv_callback(const esp_now_recv_info_t *recv_info, const ui
         ESP_LOGI(TAG, "  - Energy     : %.3f kWh", pkt->energy);
         ESP_LOGI(TAG, "  - Frequency  : %.1f Hz", pkt->frequency);
         ESP_LOGI(TAG, "  - PowerFact  : %.2f", pkt->pf);
-        ESP_LOGI(TAG, "  - TinyML AI  : [%s] Score: %d%% (%ld us)", 
+        ESP_LOGI(TAG, "  - TinyML AI  : [%s] Score: %d%% (%ld us)",
                  current_tinyml_res.pattern_name, current_tinyml_res.anomaly_score, (long)current_tinyml_res.inference_us);
         ESP_LOGI(TAG, "=================================================");
     }
 
 }
 
-// ============================================================================
-// WEB SERVER & WEB OTA IMPLEMENTATION
-// ============================================================================
-
-static const char index_html[] = 
+static const char index_html[] =
 "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
 "<title>ESP32-S3 Voice Master Hub</title>"
 "<style>"
@@ -521,11 +478,10 @@ static esp_err_t update_post_handler(httpd_req_t *req)
         const char *write_ptr = buf;
         int write_len = recv_len;
 
-        /* If uploaded via multipart form, strip the multipart boundary header from first chunk */
         if (first_chunk) {
             first_chunk = false;
             if ((uint8_t)buf[0] != 0xE9) {
-                /* Search for boundary end (\r\n\r\n) */
+
                 char *payload_start = strstr(buf, "\r\n\r\n");
                 if (payload_start) {
                     payload_start += 4;
@@ -741,10 +697,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG, "📌 GOT IP ADDRESS: " IPSTR, IP2STR(&event->ip_info.ip));
         ESP_LOGI(TAG, "=================================================");
 
-        /* Stop any disconnect reminder sound */
         audio_feedback_stop_disconnect_loop();
 
-        /* Start MQTT client and WebSocket client now that network route is active */
         mqtt_relay_start();
         ws_audio_client_start();
 
@@ -755,10 +709,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         }
     }
 }
-
-/**
- * @brief Initialize Wi-Fi in STA mode & ESP-NOW protocol
- */
 
 static esp_err_t init_esp_now_master(void)
 {
@@ -805,15 +755,12 @@ static esp_err_t init_esp_now_master(void)
     ESP_ERROR_CHECK(esp_now_register_send_cb(esp_now_send_callback));
     ESP_ERROR_CHECK(esp_now_register_recv_cb(esp_now_recv_callback));
 
-    // Register Broadcast Peer on WIFI_IF_STA Channel 11
     esp_now_peer_info_t peer_info = {0};
     memcpy(peer_info.peer_addr, broadcast_mac, 6);
     peer_info.channel = 11;
-    peer_info.ifidx = WIFI_IF_STA; // Mandatory interface definition in ESP-IDF 5.x
+    peer_info.ifidx = WIFI_IF_STA;
     peer_info.encrypt = false;
 
-
-    
     esp_err_t add_err = esp_now_add_peer(&peer_info);
     if (add_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add broadcast peer: %s", esp_err_to_name(add_err));
@@ -823,18 +770,12 @@ static esp_err_t init_esp_now_master(void)
     return ESP_OK;
 }
 
-
-
-
-/**
- * @brief Transmit ESP-NOW Request to query live power metrics from WROOM Slave
- */
 static void send_esp_now_request_power(void)
 {
     ESP_LOGI(TAG, "📡 Sending ESP-NOW REQ_POWER_STATUS to ESP32 WROOM Energy Slave...");
     esp_now_packet_t pkt = {0};
     pkt.msg_type = MSG_TYPE_REQ_POWER_STATUS;
-    pkt.device_id = 1; // Master ID
+    pkt.device_id = 1;
     pkt.timestamp_ms = (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 
     esp_err_t err = esp_now_send(broadcast_mac, (const uint8_t *)&pkt, sizeof(pkt));
@@ -842,11 +783,6 @@ static void send_esp_now_request_power(void)
         ESP_LOGE(TAG, "Failed to send ESP-NOW packet: 0x%x (%s)", err, esp_err_to_name(err));
     }
 }
-
-
-/**
- * @brief Initialize I2S Speaker Channel (16kHz, 16-bit Mono)
- */
 
 static esp_err_t init_i2s_speaker(void)
 {
@@ -882,7 +818,6 @@ static esp_err_t init_i2s_speaker(void)
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(tx_handle));
 
-    // Configure MAX98357A SD pin (GPIO 2) for dynamic power-down
     gpio_config_t sd_conf = {
         .pin_bit_mask = (1ULL << SPK_SD_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -891,22 +826,18 @@ static esp_err_t init_i2s_speaker(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&sd_conf);
-    gpio_set_level(SPK_SD_GPIO, 0); // Start MUTED to eliminate idle hum/hiss!
+    gpio_set_level(SPK_SD_GPIO, 0);
 
     ESP_LOGI(TAG, "I2S Speaker DAC successfully initialized (Amp initially muted on GPIO %d)", SPK_SD_GPIO);
     return ESP_OK;
 }
 
-/* Non-static: dynamically enable/disable MAX98357A Amp via SP_SD GPIO 2 */
 void speaker_enable(bool enable)
 {
     gpio_set_level(SPK_SD_GPIO, enable ? 1 : 0);
     ESP_LOGI(TAG, "Speaker Amp %s (GPIO %d)", enable ? "ENABLED (Unmuted)" : "SHUTDOWN (Muted)", SPK_SD_GPIO);
 }
 
-/**
- * @brief Audio Feed Task: Reads raw 32-bit I2S audio samples from INMP441, converts to 16-bit & feeds into ESP-SR AFE
- */
 static void audio_feed_task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = (esp_afe_sr_data_t *)arg;
@@ -914,7 +845,6 @@ static void audio_feed_task(void *arg)
     int nch = afe_handle->get_channel_num(afe_data);
     int feed_size = audio_chunksize * nch * sizeof(int16_t);
 
-    // Alloc 32-bit stereo buffer for raw INMP441 DMA read
     int raw_buff_size = audio_chunksize * 2 * sizeof(int32_t);
     int32_t *raw_buff = (int32_t *)heap_caps_malloc(raw_buff_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!raw_buff) {
@@ -943,7 +873,6 @@ static void audio_feed_task(void *arg)
             int mono_samples = samples_read / 2;
             if (mono_samples > audio_chunksize) mono_samples = audio_chunksize;
 
-            // Convert Left/Right Channel 24-bit PCM (in 32-bit slot) to 16-bit PCM for ESP-SR
             int64_t sum_l = 0, sum_r = 0;
             for (int i = 0; i < mono_samples; i++) {
                 int32_t left_sample  = raw_buff[i * 2];
@@ -955,23 +884,20 @@ static void audio_feed_task(void *arg)
                 sum_l += abs(l16);
                 sum_r += abs(r16);
 
-                // Auto-select whichever channel has audio signal (handles L/R tied to GND, 3.3V, or floating)
                 i2s_buff[i] = (abs(left_sample) >= abs(right_sample)) ? l16 : r16;
             }
 
-            /* ── Feed PCM to WebSocket if streaming to Pi ── */
             if (ws_audio_is_streaming()) {
                 ws_audio_feed_pcm(i2s_buff, mono_samples);
             }
 
             if (ws_audio_get_state() == WS_STATE_PLAYING || audio_feedback_is_playing()) {
-                // While speaker is playing (TTS or feedback chime), zero out mic samples to AFE to prevent acoustic feedback
+
                 memset(i2s_buff, 0, feed_size);
             }
 
             afe_handle->feed(afe_data, i2s_buff);
 
-            // Log Mic Live Audio Level every ~2 seconds
             frame_count++;
             if (frame_count >= 200) {
                 frame_count = 0;
@@ -1000,10 +926,6 @@ static void audio_feed_task(void *arg)
     vTaskDelete(NULL);
 }
 
-
-/**
- * @brief Audio Detect Task: Gets AFE results (WakeNet wake word detection / Voice activity)
- */
 static void audio_detect_task(void *arg)
 {
     esp_afe_sr_data_t *afe_data = (esp_afe_sr_data_t *)arg;
@@ -1017,7 +939,6 @@ static void audio_detect_task(void *arg)
     while (1) {
         ws_audio_state_t current_ws_state = ws_audio_get_state();
 
-        /* Watchdog: If stuck in PROCESSING for > 7 seconds, auto-reset to IDLE */
         if (current_ws_state == WS_STATE_PROCESSING) {
             if (prev_ws_state != WS_STATE_PROCESSING) {
                 processing_start_tick = xTaskGetTickCount();
@@ -1030,7 +951,7 @@ static void audio_detect_task(void *arg)
         }
 
         if (prev_ws_state == WS_STATE_PLAYING && current_ws_state == WS_STATE_IDLE) {
-            // Speaker playback finished, flush any residual sound out of AFE buffer!
+
             afe_handle->reset_buffer(afe_data);
             is_listening = false;
             ESP_LOGI(TAG, "Speaker playback ended — AFE buffer flushed, WakeNet re-armed!");
@@ -1039,40 +960,33 @@ static void audio_detect_task(void *arg)
 
         bool fb_playing = audio_feedback_is_playing();
         if (prev_fb_playing && !fb_playing) {
-            // Local feedback chime ended, flush any residual echo from AFE buffer
+
             afe_handle->reset_buffer(afe_data);
         }
         prev_fb_playing = fb_playing;
 
-        // Fetch AFE output continuously so the internal audio pipeline is never stalled or overflowed
         afe_fetch_result_t *res = afe_handle->fetch(afe_data);
         if (!res || res->ret_value < 0) {
             continue;
         }
 
-        // While local speaker is playing, house speaker is busy, or chime is playing, discard wake word
         if (current_ws_state == WS_STATE_PLAYING || ws_audio_is_speaker_busy() || fb_playing) {
             continue;
         }
 
         if (res->wakeup_state == WAKENET_DETECTED) {
-            ESP_LOGW(TAG, ">>> [WAKENET DETECTED] Wake Word Triggered! (Wake Word Index: %d, Model Index: %d) <<<", 
+            ESP_LOGW(TAG, ">>> [WAKENET DETECTED] Wake Word Triggered! (Wake Word Index: %d, Model Index: %d) <<<",
                      res->wake_word_index, res->wakenet_model_index);
             is_listening = true;
-            
-            // Turn LED2 (GPIO 47) ON on "Hi ESP" detection!
+
             led2_set(true);
 
-            // Play prompt Ding! feedback chime through speaker (asynchronous non-blocking)
             audio_feedback_play(AUDIO_FB_WAKEUP);
 
-            // Reset AFE buffer so previous audio isn't recorded into the voice command
             afe_handle->reset_buffer(afe_data);
 
-            // Trigger ESP-NOW request to ESP32 WROOM Energy Slave for power status
             send_esp_now_request_power();
 
-            /* ── Start WebSocket audio streaming to Pi 4 ── */
             if (!ws_audio_is_streaming()) {
                 led2_set(true);
                 esp_err_t ws_err = ws_audio_start_stream();
@@ -1091,38 +1005,32 @@ static void audio_detect_task(void *arg)
     vTaskDelete(NULL);
 }
 
-
-/**
- * @brief Continuous Telemetry Polling Task: Polls WROOM Slave every 5s for live power data
- */
 static void telemetry_poll_task(void *arg)
 {
     ESP_LOGI(TAG, "📊 Continuous Telemetry Polling Task Started (5s interval)...");
-    vTaskDelay(pdMS_TO_TICKS(3000)); // Wait for system init
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
     while (1) {
-        // Brief LED flash to indicate polling
+
         led2_set(true);
         send_esp_now_request_power();
         vTaskDelay(pdMS_TO_TICKS(80));
         led2_set(false);
-        vTaskDelay(pdMS_TO_TICKS(4920)); // Total cycle = 5s
+        vTaskDelay(pdMS_TO_TICKS(4920));
     }
 }
 
 void app_main(void)
 {
-    vTaskDelay(pdMS_TO_TICKS(1000)); // Allow serial monitor to connect
+    vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "   DTV ENERGY - ESP32-S3 N16R8 VOICE MASTER    ");
     ESP_LOGI(TAG, "=================================================");
 
-    // 0. Initialize Status LEDs (LED1=GPIO48, LED2=GPIO47) & Button Monitor (BUT1=IO1, BUT2=IO3)
     init_status_leds();
-    led1_set(true); // LED1 on = power & boot
+    led1_set(true);
     xTaskCreate(button_monitor_task, "button_task", 3072, NULL, 3, NULL);
 
-    // 1. Initialize NVS Flash
     esp_err_t ret = nvs_flash_init();
 
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -1134,20 +1042,15 @@ void app_main(void)
         ESP_LOGE(TAG, "NVS Flash Init failed: %s", esp_err_to_name(ret));
     }
 
-    // 1b. Initialize Commercial Device Identity (Hardware ID & User ID)
     device_identity_init();
 
-    // 1c. Initialize OTA Subsystem & confirm boot integrity (cancels rollback if pending)
     ota_updater_init();
 
-    // 2. Initialize ESP-NOW Master Protocol & HTTP Web Server with Web OTA
     init_esp_now_master();
     start_web_server();
 
-    // 2b. Start continuous telemetry polling task (5s interval)
     xTaskCreate(telemetry_poll_task, "telemetry_poll", 3072, NULL, 4, NULL);
 
-    // 3. Check & Log Memory Status (Octal PSRAM 8MB)
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t psram_free    = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
 
@@ -1158,7 +1061,6 @@ void app_main(void)
         ESP_LOGW(TAG, "WARNING: Octal PSRAM is less than 1MB or not initialized!");
     }
 
-    // 3. Initialize Audio Hardware
     esp_err_t mic_err = init_i2s_microphone();
     if (mic_err != ESP_OK) {
         ESP_LOGE(TAG, "Microphone Init Failed: %s", esp_err_to_name(mic_err));
@@ -1175,7 +1077,6 @@ void app_main(void)
         audio_feedback_play(AUDIO_FB_BOOTUP);
     }
 
-    // 4. Configure ESP-SR Audio Front-End (AFE)
     srmodel_list_t *models = esp_srmodel_init("model");
     if (!models || models->num <= 0) {
         ESP_LOGE(TAG, "CRITICAL: Speech recognition models not found or empty in 'model' partition (num=%d)!", models ? models->num : -1);
@@ -1184,16 +1085,16 @@ void app_main(void)
         ESP_LOGI(TAG, "Successfully loaded %d speech recognition models from flash!", models->num);
 
         afe_config_t afe_config = AFE_CONFIG_DEFAULT();
-        afe_config.aec_init = false;  // AEC requires ref_num > 0. Disable for 1-mic setup.
-        afe_config.se_init = true;   // Speech enhancement (noise suppression)
-        afe_config.vad_init = true;  // Voice activity detection
+        afe_config.aec_init = false;
+        afe_config.se_init = true;
+        afe_config.vad_init = true;
         afe_config.wakenet_init = true;
         afe_config.wakenet_model_name = "wn9_hiesp";
         afe_config.wakenet_mode = DET_MODE_2CH_90;
 
         afe_config.afe_mode = SR_MODE_LOW_COST;
         afe_config.memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
-        afe_config.afe_ringbuf_size = 100;  // Double AFE ringbuffer size (default 50) using PSRAM
+        afe_config.afe_ringbuf_size = 100;
         afe_config.pcm_config.total_ch_num = 1;
         afe_config.pcm_config.mic_num = 1;
         afe_config.pcm_config.ref_num = 0;
@@ -1205,16 +1106,13 @@ void app_main(void)
         } else {
             ESP_LOGI(TAG, "ESP-SR AFE Engine & WakeNet Pipeline successfully created!");
 
-            // 5. Create Audio Tasks
             xTaskCreatePinnedToCore(audio_feed_task, "audio_feed_task", 8 * 1024, afe_data, 5, NULL, 0);
             xTaskCreatePinnedToCore(audio_detect_task, "audio_detect_task", 8 * 1024, afe_data, 5, NULL, 1);
         }
     }
 
-    // 6. Initialize MQTT Relay Controller (connects to EMQX broker on Pi 4)
     mqtt_relay_init("mqtt://192.168.11.29:1883", "admin", "SmarthomePass2026!");
 
-    // 7. Initialize WebSocket Audio Client (connects to Pi 4 Gateway)
     ws_audio_client_init("ws://192.168.11.29:8765", tx_handle);
 
     ESP_LOGI(TAG, "=============================================================");

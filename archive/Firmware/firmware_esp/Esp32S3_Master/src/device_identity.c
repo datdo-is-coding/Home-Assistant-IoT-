@@ -1,7 +1,3 @@
-/*
- * AETHERIA OS — Commercial Device Identity & Lifecycle Manager Implementation
- */
-
 #include "device_identity.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -24,8 +20,6 @@ static hardware_identity_t s_hw;
 static user_identity_t s_user;
 static device_lifecycle_state_t s_state = DEVICE_STATE_FACTORY_NEW;
 static bool s_initialized = false;
-
-/* ─── State String Mapping ────────────────────────────────────────────── */
 
 const char *device_identity_state_str(device_lifecycle_state_t state)
 {
@@ -66,8 +60,6 @@ const char *device_identity_get_id(void)
     return s_hw.device_id;
 }
 
-/* ─── Initialization ──────────────────────────────────────────────────── */
-
 esp_err_t device_identity_init(void)
 {
     if (s_initialized) {
@@ -77,13 +69,11 @@ esp_err_t device_identity_init(void)
     memset(&s_hw, 0, sizeof(s_hw));
     memset(&s_user, 0, sizeof(s_user));
 
-    /* 1. Read silicon eFuse MAC address (Globally Unique) */
     esp_read_mac(s_hw.mac_raw, ESP_MAC_WIFI_STA);
     snprintf(s_hw.mac_str, sizeof(s_hw.mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
              s_hw.mac_raw[0], s_hw.mac_raw[1], s_hw.mac_raw[2],
              s_hw.mac_raw[3], s_hw.mac_raw[4], s_hw.mac_raw[5]);
 
-    /* 2. Load or generate Hardware Identity (stored in protected namespace "hw_id") */
     nvs_handle_t hw_handle;
     esp_err_t err = nvs_open(NVS_HW_ID_NAMESPACE, NVS_READWRITE, &hw_handle);
     if (err == ESP_OK) {
@@ -93,7 +83,7 @@ esp_err_t device_identity_init(void)
 
         bool need_save = false;
         if (nvs_get_str(hw_handle, "dev_id", s_hw.device_id, &id_len) != ESP_OK || strlen(s_hw.device_id) == 0) {
-            /* Generate unique device_id from lower 4 bytes of silicon MAC */
+
             snprintf(s_hw.device_id, sizeof(s_hw.device_id), "node_%02x%02x%02x%02x",
                      s_hw.mac_raw[2], s_hw.mac_raw[3], s_hw.mac_raw[4], s_hw.mac_raw[5]);
             nvs_set_str(hw_handle, "dev_id", s_hw.device_id);
@@ -101,7 +91,7 @@ esp_err_t device_identity_init(void)
         }
 
         if (nvs_get_str(hw_handle, "serial", s_hw.serial, &ser_len) != ESP_OK || strlen(s_hw.serial) == 0) {
-            /* Generate commercial serial: S3-2026-XXXXXX */
+
             uint32_t ser_num = ((uint32_t)s_hw.mac_raw[3] << 16) |
                                ((uint32_t)s_hw.mac_raw[4] << 8) |
                                ((uint32_t)s_hw.mac_raw[5]);
@@ -122,7 +112,7 @@ esp_err_t device_identity_init(void)
         }
         nvs_close(hw_handle);
     } else {
-        /* Fallback if NVS error */
+
         snprintf(s_hw.device_id, sizeof(s_hw.device_id), "node_%02x%02x%02x%02x",
                  s_hw.mac_raw[2], s_hw.mac_raw[3], s_hw.mac_raw[4], s_hw.mac_raw[5]);
         snprintf(s_hw.serial, sizeof(s_hw.serial), "S3-2026-000183");
@@ -136,7 +126,6 @@ esp_err_t device_identity_init(void)
     ESP_LOGI(TAG, "🏭 MAC:       %s", s_hw.mac_str);
     ESP_LOGI(TAG, "🏭 =====================================================");
 
-    /* 3. Load User Identity (stored in user-modifiable namespace "user_id") */
     nvs_handle_t usr_handle;
     err = nvs_open(NVS_USER_ID_NAMESPACE, NVS_READONLY, &usr_handle);
     if (err == ESP_OK) {
@@ -190,8 +179,6 @@ esp_err_t device_identity_init(void)
     return ESP_OK;
 }
 
-/* ─── Save User Configuration ─────────────────────────────────────────── */
-
 esp_err_t device_identity_save_user_config(const user_identity_t *config)
 {
     if (!config) {
@@ -227,8 +214,6 @@ esp_err_t device_identity_save_user_config(const user_identity_t *config)
     return err;
 }
 
-/* ─── Factory Reset ───────────────────────────────────────────────────── */
-
 esp_err_t device_identity_factory_reset(void)
 {
     ESP_LOGW(TAG, "⚠️ =========================================================");
@@ -237,7 +222,6 @@ esp_err_t device_identity_factory_reset(void)
     ESP_LOGW(TAG, "⚠️ KEEPING Hardware Identity: '%s' (Serial: %s)", s_hw.device_id, s_hw.serial);
     ESP_LOGW(TAG, "⚠️ =========================================================");
 
-    /* 1. Erase user_id namespace */
     nvs_handle_t h;
     if (nvs_open(NVS_USER_ID_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
         nvs_erase_all(h);
@@ -245,7 +229,6 @@ esp_err_t device_identity_factory_reset(void)
         nvs_close(h);
     }
 
-    /* 2. Erase legacy nvs_relay namespace if present */
     if (nvs_open("nvs_relay", NVS_READWRITE, &h) == ESP_OK) {
         nvs_erase_all(h);
         nvs_commit(h);
@@ -254,13 +237,10 @@ esp_err_t device_identity_factory_reset(void)
 
     device_identity_set_state(DEVICE_STATE_FACTORY_NEW);
 
-    /* 3. Delay and restart */
     vTaskDelay(pdMS_TO_TICKS(1200));
     esp_restart();
     return ESP_OK;
 }
-
-/* ─── Export JSON ─────────────────────────────────────────────────────── */
 
 char *device_identity_export_json(void)
 {

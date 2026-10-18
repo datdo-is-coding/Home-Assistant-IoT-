@@ -29,7 +29,7 @@ class AutomationScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Header
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -81,7 +81,6 @@ class AutomationScreen extends ConsumerWidget {
               ),
             ),
 
-            // SCENES SECTION
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
               sliver: SliverToBoxAdapter(
@@ -112,7 +111,6 @@ class AutomationScreen extends ConsumerWidget {
               ),
             ),
 
-            // Scenes Grid or Empty State
             if (scenes.isEmpty)
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -160,23 +158,47 @@ class AutomationScreen extends ConsumerWidget {
                       final scene = scenes[index];
                       return SceneCard(
                         scene: scene,
-                        onActivate: () {
+                        onActivate: () async {
                           HapticFeedback.heavyImpact();
-                          ref.read(sceneRepositoryProvider).activateScene(scene.id);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(scene.icon, color: Colors.white, size: 18),
-                                  const SizedBox(width: 10),
-                                  Text('Đã kích hoạt ngữ cảnh "${scene.name}"'),
-                                ],
-                              ),
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
+                          try {
+                            await ref.read(sceneRepositoryProvider).activateScene(scene.id);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Row(
+                                    children: [
+                                      Icon(scene.icon, color: Colors.white, size: 18),
+                                      const SizedBox(width: 10),
+                                      Expanded(child: Text('Đã kích hoạt ngữ cảnh "${scene.name}"')),
+                                    ],
+                                  ),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: Theme.of(context).colorScheme.error,
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
+                                      const SizedBox(width: 10),
+                                      const Expanded(
+                                        child: Text('Kích hoạt ngữ cảnh có một số thiết bị không phản hồi'),
+                                      ),
+                                    ],
+                                  ),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            }
+                          }
                         },
                       );
                     },
@@ -185,7 +207,6 @@ class AutomationScreen extends ConsumerWidget {
                 ),
               ),
 
-            // MY AUTOMATIONS HEADER
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 10),
               sliver: SliverToBoxAdapter(
@@ -216,7 +237,6 @@ class AutomationScreen extends ConsumerWidget {
               ),
             ),
 
-            // AUTOMATION LIST or Empty State
             if (automations.isEmpty)
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -274,7 +294,6 @@ class AutomationScreen extends ConsumerWidget {
                 ),
               ),
 
-            // SUGGESTED AUTOMATIONS
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
               sliver: SliverToBoxAdapter(

@@ -1,15 +1,3 @@
-/*
- * MQTT Relay Controller — Implementation
- * DTV Smart Home — ESP32-S3 Combined Node (Voice + Relay)
- *
- * Handles:
- *   1. Dynamic Node Identity (Unique MAC, NVS-persisted room & channel names)
- *   2. Zero-collision Provisioning Flow (Pairing from WebUI)
- *   3. Compact v2 Protocol (protocol_spec.md) + Legacy MQTT backward compatibility
- *   4. Safe relay GPIO control (Active-LOW, Optocoupler PC817)
- *   5. Periodic heartbeat / telemetry echo
- */
-
 #include "mqtt_relay.h"
 #include "audio_feedback.h"
 #include "ota_updater.h"
@@ -35,32 +23,26 @@ static const char *TAG = "MQTT_RELAY";
 #define HEARTBEAT_INTERVAL_S  30
 #define NVS_NAMESPACE         "dtv_cfg"
 
-/* ─── Dynamic Identity Struct ────────────────────────────────────────── */
-
 typedef struct {
     bool is_provisioned;
-    char node_id[64];       /* e.g. "livingroom-node01" or temp "esp32s3_BD69D4" */
-    char room[32];          /* e.g. "livingroom" */
-    char rl1_name[20];      /* e.g. "light" */
-    char rl2_name[20];      /* e.g. "fan" */
+    char node_id[64];
+    char room[32];
+    char rl1_name[20];
+    char rl2_name[20];
     uint32_t cfg_version;
     uint8_t mac[6];
-    char mac_str[18];       /* "30:ED:A0:BD:69:D4" */
-    char mac_lower[18];     /* "30:ed:a0:bd:69:d4" */
-    char mac_clean[13];     /* "30EDA0BD69D4" */
+    char mac_str[18];
+    char mac_lower[18];
+    char mac_clean[13];
 } node_config_t;
 
 static node_config_t s_node;
 
-/* ─── State ──────────────────────────────────────────────────────────── */
-
 static esp_mqtt_client_handle_t mqtt_client = NULL;
 static volatile bool mqtt_connected = false;
-static volatile bool relay_state[2] = {false, false};  /* ch1, ch2 */
+static volatile bool relay_state[2] = {false, false};
 static const int relay_gpio[2] = {RELAY_CH1_GPIO, RELAY_CH2_GPIO};
 static uint32_t boot_time_ms = 0;
-
-/* ─── Forward Declarations ───────────────────────────────────────────── */
 
 static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
@@ -69,8 +51,6 @@ static void handle_ota_command(const char *payload);
 static void heartbeat_task(void *arg);
 static void publish_registration(void);
 static void load_nvs_config(void);
-
-/* ─── NVS Configuration Helpers ──────────────────────────────────────── */
 
 static void load_nvs_config(void)
 {
@@ -87,7 +67,6 @@ static void load_nvs_config(void)
              hw->mac_raw[0], hw->mac_raw[1], hw->mac_raw[2],
              hw->mac_raw[3], hw->mac_raw[4], hw->mac_raw[5]);
 
-    /* Primary key is hardware device_id (e.g. node_7f3a91c2) */
     strncpy(s_node.node_id, hw->device_id, sizeof(s_node.node_id) - 1);
     strncpy(s_node.room, usr->room, sizeof(s_node.room) - 1);
     strncpy(s_node.rl1_name, usr->rl1_name, sizeof(s_node.rl1_name) - 1);
@@ -187,8 +166,6 @@ uint32_t mqtt_relay_get_cfg_version(void)
     return s_node.cfg_version;
 }
 
-/* ─── Parse and Apply Provision JSON from Gateway ────────────────────── */
-
 bool mqtt_relay_handle_cfg_json(const char *json_str)
 {
     if (!json_str) return false;
@@ -196,7 +173,6 @@ bool mqtt_relay_handle_cfg_json(const char *json_str)
     cJSON *root = cJSON_Parse(json_str);
     if (!root) return false;
 
-    /* Check if this is a remote factory reset command */
     const cJSON *act_item = cJSON_GetObjectItem(root, "action");
     if (!act_item) act_item = cJSON_GetObjectItem(root, "cmd");
     if (cJSON_IsString(act_item) && (strcmp(act_item->valuestring, "factory_reset") == 0 ||
@@ -211,7 +187,6 @@ bool mqtt_relay_handle_cfg_json(const char *json_str)
     if (!id_item) id_item = cJSON_GetObjectItem(root, "node_id");
     if (!id_item) id_item = cJSON_GetObjectItem(root, "device_id");
 
-    /* Support user identity attributes */
     const cJSON *name_item = cJSON_GetObjectItem(root, "name");
     const cJSON *room_item = cJSON_GetObjectItem(root, "room");
     const cJSON *loc_item  = cJSON_GetObjectItem(root, "location");
@@ -247,7 +222,6 @@ bool mqtt_relay_handle_cfg_json(const char *json_str)
 
     u.is_provisioned = true;
 
-    /* Idempotency check: nếu cấu hình và phiên bản đã hoàn toàn giống cấu hình hiện tại, không reboot */
     if (cur && cur->is_provisioned && cur->cfg_version == u.cfg_version &&
         strcmp(cur->name, u.name) == 0 &&
         strcmp(cur->room, u.room) == 0 &&
@@ -266,7 +240,6 @@ bool mqtt_relay_handle_cfg_json(const char *json_str)
     device_identity_save_user_config(&u);
     load_nvs_config();
 
-    /* Send instant ACK to smarthome/hello so Gateway WebUI immediately updates */
     if (mqtt_client && mqtt_connected) {
         publish_registration();
     }
@@ -274,14 +247,11 @@ bool mqtt_relay_handle_cfg_json(const char *json_str)
     audio_feedback_play(AUDIO_FB_SUCCESS);
     cJSON_Delete(root);
 
-    /* Soft restart in 1 second so all subsystems cleanly adopt the new node identity */
     ESP_LOGI(TAG, "🔄 Rebooting in 1s to apply new node identity across all tasks...");
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
     return true;
 }
-
-/* ─── Device OS Twin: Desired / Reported Config (Spec Section 4) ───── */
 
 void mqtt_relay_publish_reported_config(uint32_t version)
 {
@@ -369,7 +339,6 @@ bool mqtt_relay_handle_desired_config(const char *json_str)
         strncpy(u.rl2_name, rl2->valuestring, sizeof(u.rl2_name) - 1);
     }
 
-    /* Idempotency check: if config version and settings are already up-to-date, skip saving */
     if (cur && cur->is_provisioned && cur->cfg_version == u.cfg_version &&
         strcmp(cur->name, u.name) == 0 &&
         strcmp(cur->room, u.room) == 0 &&
@@ -390,15 +359,11 @@ bool mqtt_relay_handle_desired_config(const char *json_str)
     device_identity_save_user_config(&u);
     load_nvs_config();
 
-    /* Immediately echo reported twin state */
     mqtt_relay_publish_reported_config(u.cfg_version);
 
-    /* Desired twin sync is a background operation — do not play intrusive audio chimes */
     cJSON_Delete(root);
     return true;
 }
-
-/* ─── GPIO Relay Control ─────────────────────────────────────────────── */
 
 static void init_relay_gpios(void)
 {
@@ -411,7 +376,6 @@ static void init_relay_gpios(void)
     };
     gpio_config(&io_conf);
 
-    /* Initialize relays to OFF state (Active-LOW: 1=OFF, 0=ON) */
     for (int i = 0; i < 2; i++) {
         int level = RELAY_ACTIVE_LOW ? 1 : 0;
         gpio_set_level(relay_gpio[i], level);
@@ -423,31 +387,24 @@ static void init_relay_gpios(void)
              RELAY_ACTIVE_LOW ? "LOW" : "HIGH");
 }
 
-/* ─── Public API ─────────────────────────────────────────────────────── */
-
 esp_err_t mqtt_relay_init(const char *broker_uri, const char *username, const char *password)
 {
     ESP_LOGI(TAG, "Initializing MQTT relay controller → %s", broker_uri);
 
     boot_time_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
-    /* Load NVS node configuration & MAC address */
     load_nvs_config();
 
-    /* Initialize relay GPIOs */
     init_relay_gpios();
 
-    /* Generate unique MQTT client ID with chip MAC so multiple nodes never clash */
     static char unique_client_id[64];
     snprintf(unique_client_id, sizeof(unique_client_id), "esp32s3_%02X%02X%02X",
              s_node.mac[3], s_node.mac[4], s_node.mac[5]);
     ESP_LOGI(TAG, "Unique MQTT Client ID: %s", unique_client_id);
 
-    /* Configure LWT (Last Will and Testament) topic on industrial status path */
     static char s_lwt_topic[96];
     snprintf(s_lwt_topic, sizeof(s_lwt_topic), "home/devices/%s/status", s_node.node_id);
 
-    /* Configure MQTT client */
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = broker_uri,
         .credentials.username = username,
@@ -469,7 +426,6 @@ esp_err_t mqtt_relay_init(const char *broker_uri, const char *username, const ch
         return ESP_FAIL;
     }
 
-    /* Register event handler */
     esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID,
                                    mqtt_event_handler, NULL);
 
@@ -492,7 +448,6 @@ esp_err_t mqtt_relay_start(void)
     }
     mqtt_started = true;
 
-    /* Create heartbeat task */
     xTaskCreate(heartbeat_task, "mqtt_heartbeat", 3072, NULL, 2, NULL);
     return ESP_OK;
 }
@@ -514,7 +469,6 @@ void mqtt_relay_set(int channel, bool state)
              channel, (channel == 1 ? s_node.rl1_name : s_node.rl2_name),
              state ? "ON" : "OFF", relay_gpio[idx], level);
 
-    /* Publish updated status to MQTT */
     if (mqtt_connected) {
         mqtt_relay_publish_status();
     }
@@ -532,7 +486,6 @@ void mqtt_relay_publish_status(void)
 
     uint32_t uptime_s = (uint32_t)((esp_timer_get_time() / 1000 - boot_time_ms) / 1000);
 
-    /* Compact v2 status payload */
     char status_json[256];
     snprintf(status_json, sizeof(status_json),
              "{\"t\":\"ack\",\"id\":\"%s\",\"online\":true,\"ch1\":%d,\"ch2\":%d,\"rl\":[%d,%d],\"uptime_s\":%lu}",
@@ -545,7 +498,6 @@ void mqtt_relay_publish_status(void)
     snprintf(topic, sizeof(topic), "smarthome/status/%s", s_node.node_id);
     esp_mqtt_client_publish(mqtt_client, topic, status_json, 0, 1, 0);
 
-    /* Spec v1.0 Industrial Status Topic (home/devices/{device_id}/status) */
     char dev_status_topic[96];
     snprintf(dev_status_topic, sizeof(dev_status_topic), "home/devices/%s/status", s_node.node_id);
     char dev_status_json[192];
@@ -554,7 +506,6 @@ void mqtt_relay_publish_status(void)
              s_node.node_id, (unsigned long)uptime_s, (unsigned long)esp_get_free_heap_size());
     esp_mqtt_client_publish(mqtt_client, dev_status_topic, dev_status_json, 0, 1, 1);
 
-    /* Spec v1.0 Industrial Telemetry Topic (home/devices/{device_id}/telemetry) */
     char tele_topic[96];
     snprintf(tele_topic, sizeof(tele_topic), "home/devices/%s/telemetry", s_node.node_id);
     char tele_json[256];
@@ -563,8 +514,6 @@ void mqtt_relay_publish_status(void)
              s_node.node_id, (unsigned long)esp_get_free_heap_size(), (unsigned long)uptime_s);
     esp_mqtt_client_publish(mqtt_client, tele_topic, tele_json, 0, 0, 0);
 }
-
-/* ─── MQTT Event Handler ─────────────────────────────────────────────── */
 
 static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -579,10 +528,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         audio_feedback_stop_disconnect_loop();
         audio_feedback_play(AUDIO_FB_TING);
 
-        /* Subscribe to provisioning topics matching this device's MAC */
         char topic_buf[96];
 
-        /* 1. Provision topic by MAC (Upper & Lower) */
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cfg/%s", s_node.mac_str);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cfg/%s", s_node.mac_lower);
@@ -590,28 +537,23 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cfg/%s", s_node.mac_clean);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
 
-        /* 2. Provision topic by Node ID and MAC (for factory unprovisioned nodes) */
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cfg/%s", s_node.node_id);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
 
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cfg/%s", s_node.mac_str);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
 
-        /* 3. Command topics (Compact & Legacy) */
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/cmd/%s", s_node.node_id);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/command/%s", s_node.node_id);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
 
-        /* 4. Global broadcast config / reset */
         esp_mqtt_client_subscribe(mqtt_client, "smarthome/cfg/all", 1);
 
-        /* 5. OTA firmware trigger topics */
         snprintf(topic_buf, sizeof(topic_buf), "smarthome/ota/%s", s_node.node_id);
         esp_mqtt_client_subscribe(mqtt_client, topic_buf, 1);
         esp_mqtt_client_subscribe(mqtt_client, "smarthome/ota/all", 1);
 
-        /* 6. Spec v1.0 Industrial Device OS Topics (home/devices/...) */
         char ind_buf[96];
         snprintf(ind_buf, sizeof(ind_buf), "home/devices/%s/config/desired", s_node.node_id);
         esp_mqtt_client_subscribe(mqtt_client, ind_buf, 1);
@@ -621,12 +563,10 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
         ESP_LOGI(TAG, "Subscribed to cmd/cfg/ota topics for Node '%s' (MAC: %s)", s_node.node_id, s_node.mac_str);
 
-        /* Publish online status (retained, QoS 1) on home/devices/{device_id}/status */
         char st_top[96];
         snprintf(st_top, sizeof(st_top), "home/devices/%s/status", s_node.node_id);
         esp_mqtt_client_publish(mqtt_client, st_top, "online", 6, 1, 1);
 
-        /* If unprovisioned / FACTORY_NEW, publish announcement to home/discovery/unclaimed */
         if (!s_node.is_provisioned) {
             cJSON *ucl = cJSON_CreateObject();
             if (ucl) {
@@ -646,10 +586,8 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
             }
         }
 
-        /* Echo Reported Configuration Twin immediately upon connection */
         mqtt_relay_publish_reported_config(0);
 
-        /* Publish registration & initial status */
         publish_registration();
         mqtt_relay_publish_status();
         break;
@@ -673,16 +611,15 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
 
             ESP_LOGI(TAG, "📥 MQTT RX [%s]: %s", topic, payload);
 
-            /* Check if this is a desired twin config */
             if (strstr(topic, "/config/desired") != NULL) {
                 mqtt_relay_handle_desired_config(payload);
             }
-            /* Check if this is a provision configuration (legacy) */
+
             else if (strncmp(topic, "smarthome/cfg/", 14) == 0 ||
                      strncmp(topic, "smarthome/config/", 17) == 0) {
                 mqtt_relay_handle_cfg_json(payload);
             }
-            /* Check if this is a relay 1 set command */
+
             else if (strstr(topic, "/relay/1/set") != NULL) {
                 int st = (strstr(payload, "\"state\": 1") || strstr(payload, "\"state\":1") || strcmp(payload, "1") == 0) ? 1 : 0;
                 mqtt_relay_set(1, st);
@@ -692,7 +629,7 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
                 snprintf(rep_pay, sizeof(rep_pay), "{\"channel\":1,\"state\":%d}", st);
                 esp_mqtt_client_publish(mqtt_client, rep_top, rep_pay, 0, 1, 0);
             }
-            /* Check if this is a relay 2 set command */
+
             else if (strstr(topic, "/relay/2/set") != NULL) {
                 int st = (strstr(payload, "\"state\": 1") || strstr(payload, "\"state\":1") || strcmp(payload, "1") == 0) ? 1 : 0;
                 mqtt_relay_set(2, st);
@@ -702,12 +639,12 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
                 snprintf(rep_pay, sizeof(rep_pay), "{\"channel\":2,\"state\":%d}", st);
                 esp_mqtt_client_publish(mqtt_client, rep_top, rep_pay, 0, 1, 0);
             }
-            /* Check if this is a command message */
+
             else if (strncmp(topic, "smarthome/cmd/", 14) == 0 ||
                      strncmp(topic, "smarthome/command/", 18) == 0) {
                 handle_command(event->data, event->data_len);
             }
-            /* Check if this is an OTA firmware trigger */
+
             else if (strncmp(topic, "smarthome/ota/", 14) == 0) {
                 handle_ota_command(payload);
             }
@@ -724,8 +661,6 @@ static void mqtt_event_handler(void *arg, esp_event_base_t event_base,
         break;
     }
 }
-
-/* ─── Command Handler ────────────────────────────────────────────────── */
 
 static void handle_command(const char *data, int len)
 {
@@ -745,7 +680,6 @@ static void handle_command(const char *data, int len)
     bool is_toggle = false;
     int seq = 0;
 
-    /* ── 1. Compact Protocol (protocol_spec.md): {"t":"rl","ch":1,"s":1,"seq":n} ── */
     const cJSON *t_item = cJSON_GetObjectItem(root, "t");
     const cJSON *action_item = cJSON_GetObjectItem(root, "action");
 
@@ -758,7 +692,7 @@ static void handle_command(const char *data, int len)
         if (cJSON_IsNumber(s_item)) new_state = (s_item->valueint == 1);
         if (cJSON_IsNumber(seq_item)) seq = seq_item->valueint;
     }
-    /* ── 2. Legacy Protocol: {"channel":"ch1","action":"turn_on"} ── */
+
     else {
         const cJSON *ch_item = cJSON_GetObjectItem(root, "channel");
         if (cJSON_IsString(ch_item)) {
@@ -780,7 +714,6 @@ static void handle_command(const char *data, int len)
         }
     }
 
-    /* Check for direct reset command {"t":"reset"} */
     if (cJSON_IsString(t_item) && strcmp(t_item->valuestring, "reset") == 0) {
         cJSON_Delete(root);
         free(json_str);
@@ -794,7 +727,6 @@ static void handle_command(const char *data, int len)
         }
         mqtt_relay_set(channel, new_state);
 
-        /* Reply with compact ACK */
         if (mqtt_client && mqtt_connected) {
             char ack_json[192];
             snprintf(ack_json, sizeof(ack_json),
@@ -813,8 +745,6 @@ static void handle_command(const char *data, int len)
     cJSON_Delete(root);
     free(json_str);
 }
-
-/* ─── OTA Command Handler & Progress Publisher ────────────────────────── */
 
 static void handle_ota_command(const char *payload)
 {
@@ -853,8 +783,6 @@ void mqtt_relay_publish_ota_progress(int percent, const char *status, const char
 
     esp_mqtt_client_publish(mqtt_client, topic, payload, 0, 1, 0);
 }
-
-/* ─── Registration & Discovery Beacon ────────────────────────────────── */
 
 static void publish_registration(void)
 {
@@ -902,8 +830,6 @@ static void publish_registration(void)
                  hw->device_id, device_identity_state_str(state), hw->serial);
     }
 }
-
-/* ─── Heartbeat Task ─────────────────────────────────────────────────── */
 
 static void heartbeat_task(void *arg)
 {

@@ -3,7 +3,6 @@
 #include <cstdint>
 #include "esp_err.h"
 
-// Provision only over USB while BOOT is held. No network API writes trust keys.
 struct TrustedPeer { uint8_t mac[6]; uint8_t lmk[16]; };
 static_assert(sizeof(TrustedPeer) == 22, "Persistent peer layout");
 namespace SecurityConfig {

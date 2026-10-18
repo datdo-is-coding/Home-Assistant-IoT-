@@ -40,6 +40,40 @@ class VoiceSafety(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Đã bật', result['voice_reply'])
         self.assertIn('xác nhận', result['voice_reply'])
 
+    async def test_evidence_grounded_voice_replies(self):
+        cases = [
+            (VerifyResult.CONFIRMED_LOAD, "đã bật"),
+            (VerifyResult.ACK_ONLY, "Đã đặt"),
+            (VerifyResult.ALREADY_IN_STATE, "đang ở trạng thái bật"),
+        ]
+        for verify_res, expected_substring in cases:
+            with self.subTest(verify_res=verify_res):
+                gateway = SmartHomeGateway.__new__(SmartHomeGateway)
+                gateway.intent = IntentEngine()
+                gateway.dialog = DialogManager()
+                gateway.registry = SimpleNamespace(
+                    find_node_by_device=lambda *args: ('AB123', 'ch1'),
+                    resolve_fullname=lambda *args: 'đèn phòng khách',
+                    next_seq=lambda *args: 7,
+                )
+                gateway.verifier = CommandVerifier(None, gateway.registry)
+                gateway.verifier.verify_command = AsyncMock(return_value=(verify_res, 0, 0, 0))
+                gateway.tts = SimpleNamespace(synthesize=AsyncMock(return_value=None), synthesize_pcm=AsyncMock(return_value=None))
+                result = await gateway.process_voice_command('bật đèn phòng khách', client_node_id='SB1')
+                self.assertEqual(result['verify'], verify_res.value)
+                self.assertIn(expected_substring, result['voice_reply'])
+
+    async def test_verify_command_already_in_state(self):
+        registry = SimpleNamespace(
+            get_rated_watts=lambda *args: 20,
+            get_all_nodes=lambda: {'AB123': {'relay_state': [1, 0]}}
+        )
+        mqtt = SimpleNamespace(get_current_power=lambda nid: 15.0)
+        verifier = CommandVerifier(mqtt, registry)
+        res, p_before, p_after, delta = await verifier.verify_command('AB123', 'ch1', 'turn_on')
+        self.assertEqual(res, VerifyResult.ALREADY_IN_STATE)
+        self.assertEqual(delta, 0.0)
+
     async def test_asr_only_acceptance_and_event_loop(self):
         def recognize(*args):
             time.sleep(0.08)
@@ -59,6 +93,25 @@ class VoiceSafety(unittest.IsolatedAsyncioTestCase):
         await server._process_audio(ws, [0] * 160, 16000)
         self.assertFalse(json.loads(ws.send.call_args.args[0])['accepted'])
         gateway.process_voice_command.assert_not_awaited()
+
+    async def test_command_result_includes_has_tts(self):
+        gateway = SimpleNamespace(
+            asr=SimpleNamespace(transcribe_with_confidence=lambda *args: ('bật đèn', 0.95)),
+            process_voice_command=AsyncMock(return_value={'voice_reply': 'Đã bật đèn.', 'verify': 'success'}),
+        )
+        server = AudioServer(gateway)
+        server._send_voice_reply = AsyncMock()
+        ws = SimpleNamespace(asr_only=False, send=AsyncMock())
+        await server._process_audio(ws, [0] * 160, 16000)
+        cmd_result = None
+        for call in ws.send.call_args_list:
+            data = json.loads(call.args[0])
+            if data.get("type") == "command_result":
+                cmd_result = data
+                break
+        self.assertIsNotNone(cmd_result)
+        self.assertTrue(cmd_result["has_tts"])
+        self.assertEqual(cmd_result["voice_reply"], "Đã bật đèn.")
 
     async def test_context_does_not_cross_clients(self):
         engine = IntentEngine()
@@ -109,6 +162,15 @@ class CommandAcknowledgements(unittest.IsolatedAsyncioTestCase):
             result, *_ = await verifier.verify_command('AB123', 'ch1', 'turn_on', seq=7)
         self.assertEqual(result, VerifyResult.TIMEOUT)
         self.assertNotIn('Đã bật', verifier.generate_failure_message('turn_on', 'light', '', result))
+
+    async def test_dispatch_failed_reports_device_disconnected(self):
+        mqtt = MQTTHandler()
+        mqtt.send_command = AsyncMock(return_value=False)
+        verifier = CommandVerifier(mqtt, SimpleNamespace(get_rated_watts=lambda *args: 0))
+        result, *_ = await verifier.verify_command('AB123', 'ch1', 'turn_on', seq=7)
+        self.assertEqual(result, VerifyResult.TIMEOUT)
+        msg = verifier.generate_failure_message('turn_on', 'light', '', result)
+        self.assertEqual(msg, 'Thiết bị đang mất kết nối.')
 
     async def test_wrong_boot_session_ack_is_ignored(self):
         mqtt = MQTTHandler()

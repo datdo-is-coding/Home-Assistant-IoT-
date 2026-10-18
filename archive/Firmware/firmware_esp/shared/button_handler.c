@@ -1,14 +1,3 @@
-/*
- * Button Handler — Implementation
- * DTV Smart Home — Shared between T1 Actuator Nodes
- *
- * FreeRTOS task that monitors physical push buttons with debounce.
- * Extracted from Esp32S3_Master/main.c button_monitor_task.
- *
- * BUT1 (GPIO 1): Short press → toggle RL1, Hold 10s → factory reset
- * BUT2 (GPIO 3): Short press → toggle RL2
- */
-
 #include "button_handler.h"
 
 #include "freertos/FreeRTOS.h"
@@ -22,7 +11,7 @@ static button_event_cb_t s_callback = NULL;
 
 static void button_monitor_task(void *arg)
 {
-    /* Configure button GPIOs as input with internal pull-up */
+
     gpio_config_t btn_conf = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
@@ -40,7 +29,6 @@ static void button_monitor_task(void *arg)
         int b1 = gpio_get_level(BUT1_GPIO);
         int b2 = gpio_get_level(BUT2_GPIO);
 
-        /* ── BUT1: supports short press + long hold factory reset ── */
         if (b1 == 0) {
             b1_hold_ms += 50;
 
@@ -53,14 +41,14 @@ static void button_monitor_task(void *arg)
             } else if (b1_hold_ms >= 10000 && s_callback) {
                 ESP_LOGW(TAG, "⚠️ BUT1 held 10s! Triggering factory reset...");
                 s_callback(1, BUTTON_EVT_FACTORY_RESET);
-                /* Prevent re-triggering until released */
+
                 while (gpio_get_level(BUT1_GPIO) == 0) {
                     vTaskDelay(pdMS_TO_TICKS(50));
                 }
                 b1_hold_ms = 0;
             }
         } else {
-            /* Button released — check for short press */
+
             if (prev_b1 == 0 && b1_hold_ms < 3000 && b1_hold_ms > 50) {
                 ESP_LOGI(TAG, "🔘 BUT1 short press detected");
                 if (s_callback) s_callback(1, BUTTON_EVT_SHORT_PRESS);
@@ -68,7 +56,6 @@ static void button_monitor_task(void *arg)
             b1_hold_ms = 0;
         }
 
-        /* ── BUT2: short press only ── */
         if (prev_b2 == 1 && b2 == 0) {
             ESP_LOGI(TAG, "🔘 BUT2 pressed");
             if (s_callback) s_callback(2, BUTTON_EVT_SHORT_PRESS);

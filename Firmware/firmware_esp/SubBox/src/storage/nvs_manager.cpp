@@ -1,8 +1,3 @@
-/**
- * @file nvs_manager.cpp
- * @brief Persistent Non-Volatile Storage (NVS) Implementation
- */
-
 #include "nvs_manager.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -16,11 +11,7 @@ static const char* NVS_NAMESPACE = "subbox_cfg";
 
 esp_err_t NVSManager::init() {
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "Erasing and re-initializing NVS flash...");
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
+
     return ret;
 }
 
@@ -29,7 +20,7 @@ esp_err_t NVSManager::loadConfig(SubBoxPersistentConfig& config) {
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
 
     config = {};
-    // Apply defaults first
+
     uint8_t mac[6]{}; esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(config.subbox_id, sizeof(config.subbox_id), "SB%02X%02X%02X%02X%02X%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
     strncpy(config.room_name, SUBBOX_DEFAULT_ROOM_NAME, sizeof(config.room_name) - 1);

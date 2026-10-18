@@ -97,7 +97,7 @@ class _PairSheetState extends State<PairSheet> {
   final _name = TextEditingController();
   final _room = TextEditingController();
   final _form = GlobalKey<FormState>();
-  String _first = 'light', _second = 'fan';
+  String _first = 'light', _second = 'fan', _third = 'switch';
   bool _busy = false;
   String? _error;
   @override
@@ -105,6 +105,14 @@ class _PairSheetState extends State<PairSheet> {
     _name.dispose();
     _room.dispose();
     super.dispose();
+  }
+
+  bool get _hasChannel3 {
+    final rawRl = widget.node['rl'];
+    final rlLen = rawRl is List ? rawRl.length : 0;
+    final hw = (widget.node['hardware'] ?? widget.node['hardware_type'] ?? '').toString();
+    final name = (widget.node['name'] ?? widget.id).toString();
+    return rlLen >= 3 || hw.contains('ActionBox') || hw.contains('V2') || hw == 'esp32s3' || name.contains('ActionBox');
   }
 
   Future<void> _save() async {
@@ -122,6 +130,7 @@ class _PairSheetState extends State<PairSheet> {
             'room': _room.text.trim(),
             'rl1': _first,
             'rl2': _second,
+            if (_hasChannel3) 'rl3': _third,
           },
           timeout: const Duration(seconds: 20));
       if (result['success'] == false || result['error'] != null) {
@@ -191,6 +200,17 @@ class _PairSheetState extends State<PairSheet> {
                           onChanged: _busy
                               ? null
                               : (v) => setState(() => _second = v!)),
+                      if (_hasChannel3) ...[
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<String>(
+                            initialValue: _third,
+                            decoration:
+                                const InputDecoration(labelText: 'Kênh 3'),
+                            items: _types,
+                            onChanged: _busy
+                                ? null
+                                : (v) => setState(() => _third = v!)),
+                      ],
                       if (_error != null)
                         Padding(
                             padding: const EdgeInsets.only(top: 16),

@@ -1,8 +1,3 @@
-/**
- * @file button_driver.cpp
- * @brief Non-blocking Push Button Driver Implementation
- */
-
 #include "button_driver.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -120,7 +115,7 @@ void button_driver_tick(void) {
                         ESP_LOGD(TAG, "Ch%u Button Pressed", btn->channel);
                     }
                 } else {
-                    /* Glitch rejected */
+
                     btn->state = BTN_STATE_RELEASED;
                 }
                 break;
@@ -157,7 +152,7 @@ void button_driver_tick(void) {
                         ESP_LOGD(TAG, "Ch%u Button Released after %lld ms", btn->channel, total_press_ms);
 
                         if (!btn->long_press_dispatched && !btn->factory_reset_dispatched) {
-                            /* Valid short press */
+
                             ESP_LOGI(TAG, "Ch%u Button SHORT PRESS -> Toggle Relay", btn->channel);
                             if (s_event_callback) {
                                 s_event_callback(btn->channel, BUTTON_EVENT_SHORT_PRESS, s_callback_user_data);
@@ -169,7 +164,7 @@ void button_driver_tick(void) {
                         }
                     }
                 } else {
-                    /* Glitch back to pressed */
+
                     btn->state = BTN_STATE_PRESSED;
                 }
                 break;

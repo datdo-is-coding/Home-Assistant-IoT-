@@ -1,8 +1,3 @@
-/**
- * @file context_manager.cpp
- * @brief Context Tracking and Pronoun Resolution Implementation
- */
-
 #include "context_manager.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -60,20 +55,18 @@ CommandResolution ContextManager::resolve(
     res.is_valid = true;
     res.error_reason.clear();
 
-    // 1. Resolve Target Room vs Speaker Room
     if (entities.room != RoomType::UNSPECIFIED) {
-        // Explicitly mentioned target room (e.g. "bật đèn phòng bếp")
+
         res.target_room = entities.room;
     } else {
-        // Unspecified -> Default to current SubBox room
+
         res.target_room = m_subbox_room;
     }
 
-    // 2. Resolve Target Device
     if (entities.device != DeviceType::NONE) {
         res.device = entities.device;
     } else {
-        // Check for pronoun or relative references ("nó", "lại", "đó", "cái đó")
+
         bool has_pronoun = (raw_text.find(" nó") != std::string::npos ||
                             raw_text.find(" lại") != std::string::npos ||
                             raw_text.find(" đó") != std::string::npos ||
@@ -89,7 +82,7 @@ CommandResolution ContextManager::resolve(
                      deviceToString(res.device), roomToString(res.target_room));
         } else if (intent == IntentType::INCREASE || intent == IntentType::DECREASE || intent == IntentType::STOP ||
                    intent == IntentType::TURN_ON || intent == IntentType::TURN_OFF || intent == IntentType::TOGGLE) {
-            // Bare action commands ("tắt", "bật", "tăng lên", "giảm đi", "dừng lại") inherit last device
+
             if (usable_history && m_last_device != DeviceType::NONE) {
                 res.device = m_last_device;
                 res.resolved_via_context = true;
@@ -104,7 +97,7 @@ CommandResolution ContextManager::resolve(
                 res.error_reason = "Không rõ thiết bị nào cần điều khiển";
             }
         } else if (intent == IntentType::COMPLEX) {
-            // Complex commands are valid for Pi4 forwarding even without local device resolution
+
             res.device = DeviceType::NONE;
             res.is_valid = true;
         } else {

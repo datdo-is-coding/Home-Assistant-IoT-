@@ -1,16 +1,3 @@
-/*
- * T2 Zone Controller — Main Entry Point
- * DTV Smart Home — 3-Tier IoT Architecture
- *
- * ESP32-S3 N16R8 Zone Controller:
- *   - ESP-NOW Mesh Master (manages T1 Actuator Nodes)
- *   - MAX98357A I2S Speaker / DAC (TTS playback & local audio chimes)
- *   - Wi-Fi Station (connects to Home Network / Gateway)
- *   - MQTT Zone Gateway (subscribes to relay cmds, publishes states)
- *   - WebSocket Audio Proxy (relays T1 PCM to Gateway, plays TTS)
- *   - Zone Manager (maintains node table, heartbeats, online status)
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,13 +27,9 @@
 
 static const char *TAG = "T2_MAIN";
 
-/* ─── State ──────────────────────────────────────────────────────────── */
-
 static i2s_chan_handle_t s_spk_tx_handle = NULL;
 static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
-
-/* ─── Speaker Enable / Disable (MAX98357A SD Pin) ─────────────────────── */
 
 void speaker_enable(bool enable)
 {
@@ -54,14 +37,11 @@ void speaker_enable(bool enable)
     ESP_LOGD(TAG, "Speaker Amp %s (GPIO %d)", enable ? "ENABLED" : "MUTED", SPK_SD_GPIO);
 }
 
-/* ─── I2S Speaker Initialization ─────────────────────────────────────── */
-
 static esp_err_t init_i2s_speaker(void)
 {
     ESP_LOGI(TAG, "Initializing MAX98357A I2S Speaker DAC (BCLK:%d, WS:%d, DOUT:%d, SD:%d)...",
              SPK_I2S_GPIO_BCLK, SPK_I2S_GPIO_WS, SPK_I2S_GPIO_DOUT, SPK_SD_GPIO);
 
-    /* Configure SD pin (shutdown / mute) */
     gpio_config_t sd_conf = {
         .pin_bit_mask = (1ULL << SPK_SD_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -70,7 +50,7 @@ static esp_err_t init_i2s_speaker(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&sd_conf);
-    gpio_set_level(SPK_SD_GPIO, 0); /* Start muted to avoid pop/hiss */
+    gpio_set_level(SPK_SD_GPIO, 0);
 
     i2s_chan_config_t chan_cfg = {
         .id = SPK_I2S_PORT,
@@ -104,8 +84,6 @@ static esp_err_t init_i2s_speaker(void)
 
     return i2s_channel_enable(s_spk_tx_handle);
 }
-
-/* ─── Wi-Fi Event Handler ────────────────────────────────────────────── */
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -159,13 +137,10 @@ static esp_err_t init_wifi(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    /* Lock channel for ESP-NOW compatibility */
     esp_wifi_set_channel(ESPNOW_WIFI_CHANNEL, WIFI_SECOND_CHAN_NONE);
 
     return ESP_OK;
 }
-
-/* ─── Interactive Serial CLI Task ────────────────────────────────────── */
 
 static void t2_cli_task(void *arg)
 {
@@ -228,9 +203,6 @@ static void t2_cli_task(void *arg)
     }
 }
 
-
-/* ─── Main Application ───────────────────────────────────────────────── */
-
 void app_main(void)
 {
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -241,7 +213,6 @@ void app_main(void)
              FW_VERSION_MAJOR, FW_VERSION_MINOR, FW_VERSION_PATCH, DEFAULT_ZONE_NAME);
     ESP_LOGI(TAG, "==========================================================");
 
-    /* 0. Status LEDs */
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << LED1_GPIO) | (1ULL << LED2_GPIO),
         .mode = GPIO_MODE_OUTPUT,
@@ -253,7 +224,6 @@ void app_main(void)
     gpio_set_level(LED1_GPIO, 0);
     gpio_set_level(LED2_GPIO, 0);
 
-    /* 1. NVS Flash */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "Erasing NVS flash...");
@@ -264,10 +234,8 @@ void app_main(void)
         ESP_LOGE(TAG, "NVS Flash Init failed: %s", esp_err_to_name(ret));
     }
 
-    /* 2. Commercial Device Identity */
     device_identity_init();
 
-    /* 3. Speaker I2S & Audio Feedback */
     esp_err_t spk_err = init_i2s_speaker();
     if (spk_err == ESP_OK) {
         ESP_LOGI(TAG, "Speaker ready. Playing bootup sound...");
@@ -277,38 +245,31 @@ void app_main(void)
         ESP_LOGW(TAG, "Speaker init failed: %s", esp_err_to_name(spk_err));
     }
 
-    /* 4. Zone Manager */
     zone_manager_init(DEFAULT_ZONE_NAME);
 
-    /* 5. Wi-Fi STA */
     init_wifi();
 
-    /* 6. ESP-NOW Master Protocol */
     espnow_master_init();
 
-    /* 7. Audio Proxy (WebSocket stream to Gateway + TTS playback) */
     char ws_uri[64];
     snprintf(ws_uri, sizeof(ws_uri), "ws://%s:%d", DEFAULT_GATEWAY_IP, DEFAULT_WS_PORT);
     audio_proxy_init(ws_uri, s_spk_tx_handle);
 
-    /* 8. MQTT Zone Gateway (Subscribes to relay cmds, publishes states) */
     char mqtt_uri[64];
     snprintf(mqtt_uri, sizeof(mqtt_uri), "mqtt://%s:%d", DEFAULT_GATEWAY_IP, DEFAULT_MQTT_PORT);
     mqtt_zone_init(mqtt_uri, DEFAULT_MQTT_USER, DEFAULT_MQTT_PASS);
 
 #if HAS_IR
-    /* 9. Infrared Blaster & Receiver */
+
     ir_controller_init(IR_TX_GPIO, IR_RX_GPIO);
 #endif
 
-    /* 10. Memory Diagnostic */
     size_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     size_t psram_free    = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG, "Free Internal RAM : %u KB", (unsigned)(internal_free / 1024));
     ESP_LOGI(TAG, "Free Octal PSRAM  : %u KB (%u MB)",
              (unsigned)(psram_free / 1024), (unsigned)(psram_free / (1024 * 1024)));
 
-    /* 11. Interactive Serial CLI */
     xTaskCreate(t2_cli_task, "t2_cli", 3584, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "🚀 T2 Zone Controller running! Listening for T1 mesh nodes and Gateway commands.");

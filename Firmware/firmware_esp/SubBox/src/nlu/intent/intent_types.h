@@ -1,23 +1,18 @@
-/**
- * @file intent_types.h
- * @brief Intent Enumeration and Helper Functions
- */
-
 #pragma once
 
 enum class IntentType {
-    TURN_ON,            /**< "bật đèn", "mở quạt" */
-    TURN_OFF,           /**< "tắt đèn", "đóng relay" */
-    TOGGLE,             /**< "đổi trạng thái đèn" */
-    SET_TEMPERATURE,    /**< "chỉnh nhiệt độ 25 độ" */
-    INCREASE,           /**< "tăng quạt", "tăng 2 độ" */
-    DECREASE,           /**< "giảm quạt", "hạ nhiệt độ" */
-    QUERY_STATE,        /**< "đèn đang bật hay tắt" */
-    QUERY_CURRENT,      /**< "dòng điện bao nhiêu ampe" */
-    QUERY_POWER,        /**< "công suất tiêu thụ là bao nhiêu" */
-    STOP,               /**< "dừng lại", "ngừng" */
-    UNKNOWN,            /**< Unrecognized local speech */
-    COMPLEX             /**< Multi-condition / conditional sentence -> Forward to Pi4 */
+    TURN_ON,
+    TURN_OFF,
+    TOGGLE,
+    SET_TEMPERATURE,
+    INCREASE,
+    DECREASE,
+    QUERY_STATE,
+    QUERY_CURRENT,
+    QUERY_POWER,
+    STOP,
+    UNKNOWN,
+    COMPLEX
 };
 
 inline const char* intentToString(IntentType intent) {

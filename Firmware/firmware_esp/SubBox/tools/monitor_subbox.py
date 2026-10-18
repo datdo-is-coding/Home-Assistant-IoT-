@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 """
 SubBox Real-time Serial Monitor & Verification Tool
 Monitors COM9 for ESP-NOW audio streaming, NLU resolution, and ActionBox actuation commands.
@@ -46,7 +46,7 @@ try:
                 line = line.strip('\r')
                 if not line:
                     continue
-                # Highlight important events
+
                 if "ESPNOW RX" in line or "Audio STREAM" in line:
                     print(f"\033[96m[AUDIO ESP-NOW]\033[0m {line}")
                 elif "NLU Processing" in line or "IntentParser" in line:

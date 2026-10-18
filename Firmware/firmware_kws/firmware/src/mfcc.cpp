@@ -85,14 +85,12 @@ void MFCCExtractor::init_lifter() {
     }
 }
 
-// Thuật toán FFT Cooley-Tukey Radix-2 512-điểm
 void MFCCExtractor::rfft(const float* input, float* real_out, float* imag_out) {
     for (int i = 0; i < FFT_SIZE; i++) {
         real_out[i] = (i < FRAME_LEN_SAMPLES) ? input[i] : 0.0f;
         imag_out[i] = 0.0f;
     }
 
-    // Bit-reversal permutation
     int j = 0;
     for (int i = 0; i < FFT_SIZE - 1; i++) {
         if (i < j) {
@@ -111,7 +109,6 @@ void MFCCExtractor::rfft(const float* input, float* real_out, float* imag_out) {
         j += k;
     }
 
-    // Butterfly computations
     for (int len = 2; len <= FFT_SIZE; len <<= 1) {
         float angle = -2.0f * (float)M_PI / (float)len;
         float wlen_r = cosf(angle);
@@ -141,7 +138,7 @@ void MFCCExtractor::rfft(const float* input, float* real_out, float* imag_out) {
 }
 
 void MFCCExtractor::extract(const float* audio_in, float* mfcc_out) {
-    // 1. Pre-emphasis: y[t] = x[t] - 0.97 * x[t-1]
+
     static float emphasized[TOTAL_SAMPLES];
     emphasized[0] = audio_in[0];
     for (int i = 1; i < TOTAL_SAMPLES; i++) {
@@ -157,20 +154,16 @@ void MFCCExtractor::extract(const float* audio_in, float* mfcc_out) {
     for (int frame = 0; frame < NUM_FRAMES; frame++) {
         int start_idx = frame * FRAME_STEP_SAMPLES;
 
-        // Windowing
         for (int i = 0; i < FRAME_LEN_SAMPLES; i++) {
             frame_buf[i] = emphasized[start_idx + i] * hamming_window[i];
         }
 
-        // RFFT
         rfft(frame_buf, real_fft, imag_fft);
 
-        // Power spectrum: (|real|^2 + |imag|^2) / FFT_SIZE
         for (int k = 0; k <= FFT_SIZE / 2; k++) {
             power_spectrum[k] = (real_fft[k] * real_fft[k] + imag_fft[k] * imag_fft[k]) / (float)FFT_SIZE;
         }
 
-        // Mel Filterbank energies
         for (int m = 0; m < NUM_MEL_FILTERS; m++) {
             float energy = 0.0f;
             for (int k = 0; k <= FFT_SIZE / 2; k++) {
@@ -180,7 +173,6 @@ void MFCCExtractor::extract(const float* audio_in, float* mfcc_out) {
             filter_energies[m] = logf(energy);
         }
 
-        // DCT-II + Liftering + Z-Score Normalization
         int out_offset = frame * NUM_MFCC_COEFFS;
         for (int c = 0; c < NUM_MFCC_COEFFS; c++) {
             float coeff = 0.0f;
@@ -188,7 +180,7 @@ void MFCCExtractor::extract(const float* audio_in, float* mfcc_out) {
                 coeff += dct_matrix[c][m] * filter_energies[m];
             }
             coeff *= lifter[c];
-            // Chuẩn hóa theo mean và std của tập train
+
             mfcc_out[out_offset + c] = (coeff - NORM_MEAN) / NORM_STD;
         }
     }

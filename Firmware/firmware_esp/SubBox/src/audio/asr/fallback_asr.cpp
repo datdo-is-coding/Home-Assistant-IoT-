@@ -12,7 +12,7 @@ bool FallbackASR::init() {
 }
 
 bool FallbackASR::start() {
-    // Check if WebSocket has been lost for > 3s
+
     uint32_t now = esp_timer_get_time() / 1000;
     if (now - last_ws_success_time_ > 3000) {
         use_offline_ = true;

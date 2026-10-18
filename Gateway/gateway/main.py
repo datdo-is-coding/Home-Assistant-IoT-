@@ -34,7 +34,6 @@ from ota_manager import OTAManager
 from auth_manager import AuthManager
 from sound_manager import SoundManager
 
-# Optional AI Modules (chỉ load khi AI_ENABLED = True)
 if getattr(config, "AI_ENABLED", False):
     try:
         from memory_engine import MemoryEngine
@@ -61,20 +60,19 @@ except ImportError:
 
 logger = logging.getLogger("gateway")
 
-
 class SmartHomeGateway:
     def __init__(self):
         self.registry = RegistryManager()
         self.mqtt = MQTTHandler()
         self.intent = IntentEngine(registry=self.registry)
-        # đảm bảo intent luôn có registry mới nhất
+
         self.intent.set_registry(self.registry)
         self.dialog = DialogManager(registry=self.registry)
         self.tts = TTSEngine()
         self.asr = ASREngine()
         self.audio_server = AudioServer(self)
         self.verifier = CommandVerifier(self.mqtt, self.registry)
-        # verifier cần biết audio_server để chọn WS vs MQTT
+
         self.verifier.audio_server = self.audio_server
         self.discovery = DiscoveryManager(self)
         self.ota = OTAManager(self)
@@ -82,7 +80,6 @@ class SmartHomeGateway:
         self.sound = SoundManager(self)
         self.web_server = WebServer(self)
 
-        # AI Optional Modules — Tạm thời bỏ qua/tắt mặc định, ưu tiên thuần relay voice control
         self.memory = MemoryEngine() if (getattr(config, "AI_ENABLED", False) and MemoryEngine) else None
         self.persona = PersonaEngine() if (getattr(config, "PERSONA_ENABLED", False) and PersonaEngine) else None
         self.proactive = ProactiveAgent(self) if (getattr(config, "PROACTIVE_ENABLED", False) and ProactiveAgent) else None
@@ -91,14 +88,6 @@ class SmartHomeGateway:
         if HAS_INFLUX:
             self.telemetry_writer = TelemetryWriter()
         self._running = False
-
-    def broadcast_event(self, event_type: str, data: dict):
-        """Send SSE event to WebUI and subscribers."""
-        if hasattr(self, "web_server") and self.web_server:
-            if hasattr(self.web_server, "broadcast_event"):
-                self.web_server.broadcast_event(event_type, data)
-            elif hasattr(self.web_server, "broadcast"):
-                self.web_server.broadcast(event_type, data)
 
     async def start(self):
         logger.info("=" * 60)
@@ -115,12 +104,11 @@ class SmartHomeGateway:
         if self.telemetry_writer:
             self.telemetry_writer.initialize()
 
-        # MQTT handlers: compact + legacy + Home Assistant Discovery
         self._subbox_voice_requests = {}
         self.mqtt.on_message("home/subbox/+/voice/request", self._on_subbox_voice)
         self.mqtt.on_message("home/subbox/+/event/actionbox", self._on_subbox_actionbox)
         self.mqtt.on_message("smarthome/hello", self._on_hello)
-        self.mqtt.on_message("smarthome/register", self._on_node_register)  # legacy
+        self.mqtt.on_message("smarthome/register", self._on_node_register)
         self.mqtt.on_message("smarthome/discovery/#", self._on_native_discovery)
         self.mqtt.on_message("homeassistant/#", self._on_ha_discovery)
         self.mqtt.on_message("smarthome/telemetry/#", self._on_telemetry)
@@ -129,7 +117,6 @@ class SmartHomeGateway:
         self.mqtt.on_message("smarthome/ota/progress/#", self._on_ota_progress)
         self.mqtt.on_message("smarthome/ota_progress/#", self._on_ota_progress)
 
-        # Spec v1.0 Industrial Device OS Topics:
         self.mqtt.on_message("home/discovery/unclaimed", self._on_unclaimed_device)
         self.mqtt.on_message("home/devices/+/status", self._on_device_status)
         self.mqtt.on_message("home/devices/+/telemetry", self._on_device_telemetry)
@@ -140,9 +127,7 @@ class SmartHomeGateway:
         asyncio.create_task(self._announce_all_nodes())
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.start()
-        # ESP32 nodes play bootup sound locally on hardware init; avoid re-broadcasting over WS on gateway start
-        # if hasattr(self, "sound") and self.sound:
-        #     asyncio.create_task(self._play_bootup_sound())
+
         logger.info("Starting MQTT client...")
         try:
             await self.mqtt.connect()
@@ -158,7 +143,6 @@ class SmartHomeGateway:
         except Exception as e:
             logger.debug(f"Bootup sound task error: {e}")
 
-    # ── Voice pipeline (2 lớp, chống ảo giác + Multi-Turn Dialog) ─────────
     async def process_voice_command(
         self,
         user_text: str,
@@ -174,11 +158,9 @@ class SmartHomeGateway:
         }
         logger.info(f'Voice: "{user_text}" [client={client_node_id}, detected_room={detected_room}]')
 
-        # Thông báo hoạt động người dùng cho Proactive Agent
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.notify_user_activity(user_text)
 
-        # Xử lý lệnh hủy trực tiếp
         if any(w in user_text.lower().strip().split() for w in ("thôi", "hủy", "dừng", "cancel")):
             self.dialog.clear_session(client_node_id)
             reply = "Đã hủy lệnh."
@@ -191,7 +173,6 @@ class SmartHomeGateway:
             })
             return result
 
-        # Xử lý lệnh báo thức / nhạc buổi sáng (Morning Alarm / Wakeup Sound)
         is_alarm = any(w in user_text.lower() for w in (
             "báo thức", "đặt báo thức", "đánh thức", "chuông báo thức",
             "bật nhạc buổi sáng", "nhạc buổi sáng", "morning sound", "âm thanh buổi sáng"
@@ -209,7 +190,6 @@ class SmartHomeGateway:
                 asyncio.create_task(self.sound.play_sound_and_speak(SoundManager.SOUND_MORNING, reply, target_node=client_node_id))
             return result
 
-        # ─── BƯỚC 0: Hội thoại người thật (CHỈ chạy khi bật option AI / Persona) ───
         if getattr(config, "PERSONA_ENABLED", False) and hasattr(self, "persona") and self.persona and self.persona.is_conversational(user_text):
             self.dialog.clear_session(client_node_id)
             logger.info(f"🗣️ Conversational query detected: '{user_text}'")
@@ -234,10 +214,9 @@ class SmartHomeGateway:
             })
             return result
 
-        # ─── BƯỚC 1: Kiểm tra xem client có đang trong phiên đối thoại dở dang không ───
         active_session = self.dialog.get_active_session(client_node_id)
         if active_session:
-            # Nếu người dùng nói một lệnh mới (có từ khóa hành động bật/tắt/mở/đóng...), tự động hủy session cũ
+
             is_new_command = any(w in user_text.lower() for w in ("bật", "tắt", "mở", "đóng", "cài", "đặt", "chỉnh", "bạn bè"))
             if is_new_command:
                 logger.info(f"🔄 User issued fresh command during session for {client_node_id}. Clearing stale session.")
@@ -267,7 +246,6 @@ class SmartHomeGateway:
                 })
                 return result
 
-            # ─── BƯỚC 1.5: Kiểm tra nếu intent là unknown (câu nói không rõ hoặc bị từ chối) ───
             cmd = intent.get("command", {})
             if cmd.get("action") == "unknown":
                 if hasattr(self, "sound") and self.sound:
@@ -285,7 +263,6 @@ class SmartHomeGateway:
                 logger.info(f"❓ Unknown intent rejected decisively: {reply} (Follow-Up ACTIVE)")
                 return result
 
-            # ─── BƯỚC 2: Kiểm tra thiếu slot / mơ hồ cần hỏi lại người dùng ───
             needs_clarify, clarify_q, missing_slot, intent = self.dialog.inspect_intent(
                 intent, detected_room=detected_room, client_key=client_node_id
             )
@@ -308,7 +285,6 @@ class SmartHomeGateway:
         location = cmd.get("location")
         action = cmd.get("action", "turn_on")
 
-        # Xử lý lệnh toàn bộ thiết bị (Bulk turn_on / turn_off)
         if device == "all" and action in ("turn_on", "turn_off"):
             all_online = self.registry.get_online_nodes()
             room_filter = str(location).lower().strip() if location else None
@@ -320,7 +296,7 @@ class SmartHomeGateway:
                 for cid in node.get("channels", {}).keys():
                     seq = self.registry.next_seq(nid)
                     verified, *_ = await self.verifier.verify_command(nid, cid, action, seq=seq)
-                    if verified == VerifyResult.SUCCESS:
+                    if verified in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE):
                         affected_count += 1
                     else:
                         failed_count += 1
@@ -356,12 +332,11 @@ class SmartHomeGateway:
             logger.info(f"Bulk {action} executed for {affected_count} channels (room={location})")
             return result
 
-        # Lớp 2: phân giải node_id/channel TỪ REGISTRY THỰC TẾ — không bao giờ bịa
         lookup = self.registry.find_node_by_device(device, location)
         if not lookup:
             if hasattr(self, "sound") and self.sound:
                 asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
-            # Phân biệt: mơ hồ (nhiều node cùng tên) vs không tồn tại
+
             all_online = self.registry.get_online_nodes()
             if not all_online:
                 reply = "Chưa có thiết bị kết nối."
@@ -372,7 +347,7 @@ class SmartHomeGateway:
                 reply = clean_voice_text(f"Không tìm thấy {dev_name} ở {room_name}.")
                 follow_up = False
             elif device and not location:
-                # mơ hồ: có nhiều node cùng device nhưng không nói phòng -> Hỏi lại và mở mic!
+
                 room_names = [get_room_name(r) for r in self.registry.allowed_rooms()]
                 dev_name = get_device_name(device)
                 reply = clean_voice_text(f"Điều khiển {dev_name} ở phòng nào?")
@@ -405,7 +380,6 @@ class SmartHomeGateway:
         result.update({"node_id": node_id, "channel": channel, "fullname": fullname})
         logger.info(f"Resolver OK: {device}@{location} → {fullname} ({node_id}/{channel}) {action}")
 
-        # Dispatch + verify (WS ưu tiên, fallback MQTT)
         seq = self.registry.next_seq(node_id)
         verify_result, p_before, p_after, delta = await self.verifier.verify_command(
             node_id, channel, action, seq=seq
@@ -415,44 +389,38 @@ class SmartHomeGateway:
         action_str = "bật" if action == "turn_on" else "tắt"
         dev_str = get_device_name(device or channel)
         room_str = get_room_name(location)
-        if verify_result == VerifyResult.SUCCESS:
-            if room_str:
-                voice_reply = intent.get("voice_reply") or f"Đã {action_str} {dev_str} {room_str}."
-            else:
-                voice_reply = intent.get("voice_reply") or f"Đã {action_str} {dev_str}."
+        target_desc = f"{dev_str} {room_str}".strip() if room_str else dev_str
+
+        if verify_result == VerifyResult.CONFIRMED_LOAD:
+            voice_reply = f"{target_desc} đã {action_str}."
+        elif verify_result in (VerifyResult.ACK_ONLY, VerifyResult.SUCCESS):
+            voice_reply = f"Đã đặt {target_desc} sang {action_str}."
+        elif verify_result == VerifyResult.ALREADY_IN_STATE:
+            voice_reply = f"{target_desc} đang ở trạng thái {action_str}."
         else:
             voice_reply = self.verifier.generate_failure_message(action, device or channel, location or "", verify_result)
 
-        # Luôn làm sạch voice_reply để loại bỏ id_room hay fullname trước khi phát ra loa
         voice_reply = clean_voice_text(voice_reply)
         result["voice_reply"] = voice_reply
+        result["success"] = verify_result in (
+            VerifyResult.SUCCESS, VerifyResult.ACK_ONLY,
+            VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE
+        )
 
-        # ─── Acoustic Feedback Engine (Tinh tế, êm dịu, sang trọng) ───
-        fb_mode = getattr(config, "AUDIO_FEEDBACK_MODE", "hybrid").lower()
-        if fb_mode in ("hybrid", "chime") and verify_result == VerifyResult.SUCCESS:
-            chime_pcm = self.sound.get_pcm_data(SoundManager.SOUND_LISTEN_SUCCESS) if hasattr(self, "sound") and self.sound else None
-            if chime_pcm:
-                result["tts_audio"] = chime_pcm
-                result["tts_format"] = "pcm"
-                result["audio_effect"] = SoundManager.SOUND_LISTEN_SUCCESS
-            else:
-                pcm = await self.tts.synthesize_pcm(voice_reply)
-                result["tts_audio"] = pcm or await self.tts.synthesize(voice_reply)
-                result["tts_format"] = "pcm" if pcm else "mp3"
-        elif fb_mode == "chime" and verify_result == VerifyResult.FAILED:
-            wrong_pcm = self.sound.get_pcm_data(SoundManager.SOUND_WRONG) if hasattr(self, "sound") and self.sound else None
-            if wrong_pcm:
-                result["tts_audio"] = wrong_pcm
-                result["tts_format"] = "pcm"
-                result["audio_effect"] = SoundManager.SOUND_WRONG
-        else:
-            pcm = await self.tts.synthesize_pcm(voice_reply)
-            if pcm:
-                result["tts_audio"] = pcm
-                result["tts_format"] = "pcm"
-            else:
-                result["tts_audio"] = await self.tts.synthesize(voice_reply)
-                result["tts_format"] = "mp3"
+        if hasattr(self, "tts") and self.tts:
+            try:
+                try:
+                    pcm = await self.tts.synthesize_pcm(voice_reply, sample_rate=config.AUDIO_SAMPLE_RATE)
+                except TypeError:
+                    pcm = await self.tts.synthesize_pcm(voice_reply)
+                if pcm:
+                    result["tts_audio"] = pcm
+                    result["tts_format"] = "pcm"
+                else:
+                    result["tts_audio"] = await self.tts.synthesize(voice_reply)
+                    result["tts_format"] = "mp3"
+            except Exception as e:
+                logger.error(f"TTS synthesis error: {e}")
 
         if hasattr(self, "memory") and self.memory:
             self.memory.record_command(
@@ -461,7 +429,7 @@ class SmartHomeGateway:
                 node_id=node_id, channel=channel,
                 verify_result=verify_result.value, power_before=p_before, power_after=p_after,
             )
-        # broadcast để WebUI cập nhật relay ngay
+
         self.broadcast_event("command_result", {
             "voice_reply": voice_reply, "verify": verify_result.value,
             "node_id": node_id, "channel": channel, "fullname": fullname, "action": action,
@@ -471,10 +439,13 @@ class SmartHomeGateway:
         return result
 
     def broadcast_event(self, event_name: str, data: dict):
+        """Send SSE event to WebUI and subscribers."""
         if hasattr(self, "web_server") and self.web_server:
-            self.web_server.broadcast_event(event_name, data)
+            if hasattr(self.web_server, "broadcast_event"):
+                self.web_server.broadcast_event(event_name, data)
+            elif hasattr(self.web_server, "broadcast"):
+                self.web_server.broadcast(event_name, data)
 
-    # ── MQTT Callbacks ─────────────────────────────────────────────────
     async def _on_subbox_voice(self, topic, payload):
         if not isinstance(payload, dict):
             return
@@ -512,20 +483,90 @@ class SmartHomeGateway:
         if not isinstance(node_id, str):
             return
         channels = payload["channels"]
-        if node_id not in self.registry.get_all_nodes():
-            # Discovery uses the existing provisioning UI; never invent an approved device.
+
+        target_node_id = node_id
+        if target_node_id not in self.registry.get_all_nodes():
+            uid = payload.get("hardware_uid") or (self.mqtt.node_identities.get(node_id) or {}).get("hardware_uid")
+            if uid:
+                mac_norm = ":".join(uid[i:i+2] for i in range(0, 12, 2)).upper()
+                for nid, ninfo in self.registry.get_all_nodes().items():
+                    n_mac = (ninfo.get("mac") or ninfo.get("address", {}).get("mac") or "").upper()
+                    if n_mac == mac_norm:
+                        target_node_id = nid
+                        if node_id in self.mqtt.node_identities:
+                            self.mqtt.node_identities[target_node_id] = {**self.mqtt.node_identities[node_id], "hw_node_id": node_id}
+                        if node_id in self.mqtt.node_routes:
+                            self.mqtt.node_routes[target_node_id] = self.mqtt.node_routes[node_id]
+                        break
+
+        if target_node_id not in self.registry.get_all_nodes():
+
             if node_id not in self.registry.data.get("pending", {}):
                 identity = self.mqtt.node_identities.get(node_id)
                 if not identity or node_id in self.mqtt.conflicting_nodes:
                     return
                 uid = identity["hardware_uid"]
                 self.registry.on_hello({"id": node_id, "hardware": "ActionBox", "state": "FACTORY_NEW",
-                    "serial": uid, "mac": ":".join(uid[i:i+2] for i in range(0, 12, 2))})
+                    "serial": uid, "mac": ":".join(uid[i:i+2] for i in range(0, 12, 2)),
+                    "rl": [0] * max(len(channels), 3)})
             return
         states = {c.get("channel"): c.get("state") == "ON" for c in channels if isinstance(c, dict)}
-        if 1 in states and 2 in states:
-            self.registry.update_relay_state(node_id, [int(states[1]), int(states[2])])
-        self.registry.update_heartbeat(node_id)
+        sorted_channels = sorted([k for k in states.keys() if isinstance(k, int)])
+        if sorted_channels:
+            self.registry.update_relay_state(target_node_id, [int(states[k]) for k in sorted_channels])
+
+        node = self.registry.get_all_nodes().get(target_node_id)
+        if node:
+            for c in channels:
+                if isinstance(c, dict):
+                    ch_num = c.get("channel")
+                    pw = c.get("power_w", c.get("power", c.get("p")))
+                    if ch_num is not None and pw is not None:
+                        ch_key = f"ch{ch_num}"
+                        if "channels" in node and ch_key in node["channels"]:
+                            try:
+                                node["channels"][ch_key]["power"] = float(pw)
+                            except (ValueError, TypeError):
+                                pass
+
+            existing_channels = node.setdefault("channels", {})
+            if len(existing_channels) < len(sorted_channels):
+                updated = False
+                for ch_num in sorted_channels:
+                    ch_key = f"ch{ch_num}"
+                    if ch_key not in existing_channels:
+                        dt = "switch"
+                        existing_channels[ch_key] = {
+                            "device_type": dt,
+                            "fullname": f"{node_id}-{dt}",
+                            "name": f"Kênh {ch_num}",
+                            "aliases": [dt],
+                            "gpio": 5 if ch_num == 3 else (4 if ch_num == 1 else (5 if ch_num == 2 else 5)),
+                            "rated_watts": 100 if ch_num == 3 else (40 if ch_num == 1 else 55),
+                            "description": dt
+                        }
+                        if "configuration" in node and "relays" in node["configuration"]:
+                            node["configuration"]["relays"][ch_key] = {
+                                "device_type": dt,
+                                "fullname": f"{node_id}-{dt}",
+                                "name": f"Kênh {ch_num}",
+                                "gpio": 5 if ch_num == 3 else (4 if ch_num == 1 else 5)
+                            }
+                        updated = True
+                caps = node.get("capabilities", [])
+                if len(sorted_channels) >= 3:
+                    if "relay_2ch" in caps:
+                        node["capabilities"] = [c if c != "relay_2ch" else "relay_3ch" for c in caps]
+                        updated = True
+                    elif "relay_3ch" not in caps:
+                        caps.append("relay_3ch")
+                        node["capabilities"] = caps
+                        updated = True
+                if updated:
+                    self.registry.save(changed_node=target_node_id)
+                    if hasattr(self, "discovery") and self.discovery:
+                        await self.discovery.publish_ha_discovery_for_node(target_node_id)
+        self.registry.update_heartbeat(target_node_id)
 
     async def _on_hello(self, topic: str, payload: dict):
         """Node mới hoặc đã provision gửi hello qua MQTT (compact)."""
@@ -534,7 +575,7 @@ class SmartHomeGateway:
         hello = payload if payload.get("t") == "hello" else {"t": "hello", **payload}
         res = self.registry.on_hello(hello, ws_available=False)
         self.broadcast_event("node_hello", hello)
-        # nếu pending → WebUI sẽ hiện nút đăng ký
+
         if res.get("action") == "pending":
             self.broadcast_event("pending_node", {"mac": res["mac"], "hello": hello})
             logger.info(f"📥 Pending node (MQTT): {res['mac']}")
@@ -549,7 +590,7 @@ class SmartHomeGateway:
         """Legacy register (giữ tương thích)."""
         if not isinstance(payload, dict):
             return
-        # nếu đã có hello flow thì bỏ qua legacy để tránh trùng
+
         if payload.get("t") == "hello":
             await self._on_hello(topic, payload)
             return
@@ -566,12 +607,37 @@ class SmartHomeGateway:
         node_id = topic.split("/")[-1]
         self.registry.update_heartbeat(node_id)
         if isinstance(payload, dict):
-            # chuẩn hoá compact keys p→power cho WebUI
+
             norm = dict(payload)
             if "p" in norm and "power" not in norm: norm["power"] = norm["p"]
             if "v" in norm and "voltage" not in norm: norm["voltage"] = norm["v"]
             if "i" in norm and "current" not in norm: norm["current"] = norm["i"]
             self.broadcast_event("node_telemetry", {"node_id": node_id, **norm})
+
+            # Update per-channel power in registry if present in telemetry
+            node = self.registry.data.get("nodes", {}).get(node_id)
+            if node:
+                node_channels = node.setdefault("channels", {})
+                ch_list = payload.get("channels")
+                if isinstance(ch_list, list):
+                    for idx, ch_item in enumerate(ch_list):
+                        if isinstance(ch_item, dict):
+                            pw = ch_item.get("power_w", ch_item.get("power", ch_item.get("p")))
+                            if pw is not None:
+                                try:
+                                    ch_key = f"ch{idx+1}"
+                                    node_channels.setdefault(ch_key, {})["power"] = float(pw)
+                                except (ValueError, TypeError):
+                                    pass
+                elif isinstance(ch_list, dict):
+                    for ch_k, ch_item in ch_list.items():
+                        if isinstance(ch_item, dict):
+                            pw = ch_item.get("power_w", ch_item.get("power", ch_item.get("p")))
+                            if pw is not None:
+                                try:
+                                    node_channels.setdefault(ch_k, {})["power"] = float(pw)
+                                except (ValueError, TypeError):
+                                    pass
         if self.telemetry_writer:
             node_info = self.registry.get_all_nodes().get(node_id, {})
             area = node_info.get("room", node_info.get("area", "unknown"))
@@ -586,7 +652,7 @@ class SmartHomeGateway:
         node_id = topic.split("/")[-1]
         self.registry.update_heartbeat(node_id)
         if isinstance(payload, dict):
-            # compact ack: {"t":"ack","id":"...","rl":[1,0],"seq":n}
+
             if payload.get("t") == "ack":
                 self.mqtt.record_compact_ack(node_id, payload)
                 rl = payload.get("rl", [])
@@ -594,7 +660,8 @@ class SmartHomeGateway:
                     self.registry.update_relay_state(node_id, rl)
                 self.broadcast_event("node_status", {
                     "node_id": node_id, "rl_state": rl, "seq": payload.get("seq"),
-                    "ch1": rl[0] if len(rl)>0 else None, "ch2": rl[1] if len(rl)>1 else None
+                    "ch1": rl[0] if len(rl)>0 else None, "ch2": rl[1] if len(rl)>1 else None,
+                    "ch3": rl[2] if len(rl)>2 else None
                 })
             else:
                 self.broadcast_event("node_status", payload)
@@ -642,12 +709,14 @@ class SmartHomeGateway:
         for nid in list(self.registry.get_all_nodes().keys()):
             await self.discovery.publish_ha_discovery_for_node(nid)
 
-    # ── WebUI gọi: provision node pending ───────────────────────────────
-    async def provision_pending(self, mac_or_id: str, room: str, rl1: str, rl2: str,
+    async def provision_pending(self, mac_or_id: str = None, room: str = "livingroom",
+                                rl1: str = "light", rl2: str = "fan", rl3: Optional[str] = None,
                                 node_short: str = None, name: str = None,
-                                location: str = None, description: str = None) -> dict:
+                                location: str = None, description: str = None,
+                                mac: str = None) -> dict:
+        target = mac_or_id or mac
         node = self.registry.provision_node(
-            mac_or_id, room, rl1, rl2,
+            target, room, rl1, rl2, rl3=rl3,
             node_short=node_short, name=name, location=location, description=description
         )
         if not node:
@@ -655,18 +724,17 @@ class SmartHomeGateway:
         node_id = node.get("device_id") or node.get("node_id")
         mac = node.get("mac", "")
         cfg = self.registry.get_provision_payload(node_id)
-        # Gửi qua MQTT retain cho cả MAC và device_id
+
         if mac:
             await self.mqtt.send_cfg(mac, cfg)
         await self.mqtt.send_cfg(node_id, cfg)
-        # Công bố Home Assistant discovery để HA phát hiện node ngay lập tức
+
         await self.discovery.publish_ha_discovery_for_node(node_id)
         self.broadcast_event("node_provisioned", {"node_id": node_id, "device_id": node_id, "cfg": cfg})
         if mac:
             self.broadcast_event("pending_remove", {"mac": mac.upper(), "device_id": node_id})
         return {"success": True, "device_id": node_id, "node_id": node_id, "cfg": cfg}
 
-    # ── Device OS Twin Handlers (Spec Section 4, 8 & 9) ─────────────────
     async def _on_unclaimed_device(self, topic: str, payload: Any):
         """Thiết bị xuất xưởng / unprovisioned phát hiện qua home/discovery/unclaimed"""
         if not isinstance(payload, dict):
@@ -748,9 +816,12 @@ class SmartHomeGateway:
         if hasattr(self.registry, "update_relay_state") and device_id in self.registry.data.get("nodes", {}):
             n = self.registry.data["nodes"][device_id]
             cur_rl = list(n.get("relay_state", [0, 0]))
-            ch_idx = 0 if channel in ("1", "ch1", 1) else 1
-            if ch_idx < len(cur_rl):
-                cur_rl[ch_idx] = 1 if state else 0
+            ch_idx = {"ch1": 0, "ch2": 1, "ch3": 2, "1": 0, "2": 1, "3": 2, 1: 0, 2: 1, 3: 2}.get(channel, 0)
+            caps = n.get("capabilities", [])
+            min_len = 3 if ("relay_3ch" in caps or len(n.get("channels", {})) >= 3) else 2
+            while len(cur_rl) < max(ch_idx + 1, min_len):
+                cur_rl.append(0)
+            cur_rl[ch_idx] = 1 if state else 0
             self.registry.update_relay_state(device_id, cur_rl)
 
         evt = {
@@ -765,9 +836,9 @@ class SmartHomeGateway:
     async def update_device_desired_config(self, device_id: str, desired_dict: dict) -> dict:
         """Cập nhật Desired Configuration Twin và phát MQTT QoS 1 retain"""
         new_v, desired_payload = self.registry.update_desired_config(device_id, desired_dict)
-        # Gửi topic industrial
+
         await self.mqtt.send_desired_config(device_id, desired_payload)
-        # Gửi thêm legacy cfg topic
+
         legacy_cfg = self.registry.get_provision_payload(device_id)
         if legacy_cfg:
             await self.mqtt.send_cfg(device_id, legacy_cfg)
@@ -817,11 +888,19 @@ class SmartHomeGateway:
         self.broadcast_event("node_status", {"node_id": device_id.split("::")[0], "updated": True})
         return {"success": ok, "device_id": device_id, "channel": channel, "alias": alias}
 
-    def get_voice_vocabulary_diagnostics(self) -> dict:
-        """Thu thập thông tin chẩn đoán từ vựng và nhận diện giọng nói."""
+    def get_voice_vocabulary_diagnostics(self, user: Optional[dict] = None) -> dict:
+        """Thu thập thông tin chẩn đoán từ vựng và nhận diện giọng nói có phân quyền."""
         asr_diag = self.asr.dump_active_vocabulary(self.registry) if hasattr(self, "asr") and self.asr else {"initialized": False, "hotwords_count": 0, "hotwords": []}
         stored = []
-        for nid, n in self.registry.get_all_nodes().items():
+
+        if hasattr(self.registry, "get_user_accessible_nodes"):
+            accessible_nodes = self.registry.get_user_accessible_nodes(user)
+        elif user and user.get("role") != "admin" and hasattr(self, "auth") and self.auth:
+            accessible_nodes = self.auth.filter_nodes(user, self.registry.get_all_nodes())
+        else:
+            accessible_nodes = self.registry.get_all_nodes()
+
+        for nid, n in accessible_nodes.items():
             for cid, ch in n.get("channels", {}).items():
                 aliases = ch.get("aliases", [])
                 stored.append({
@@ -832,6 +911,24 @@ class SmartHomeGateway:
                     "device_type": ch.get("device_type", ""),
                     "aliases": list(aliases),
                 })
+
+        if user and user.get("role") != "admin" and isinstance(asr_diag, dict):
+            allowed_alias_phrases = set()
+            for s in stored:
+                for a in s.get("aliases", []):
+                    allowed_alias_phrases.add(a.lower())
+                if s.get("name"):
+                    allowed_alias_phrases.add(s["name"].lower())
+            filtered_hotwords = [
+                hw for hw in asr_diag.get("hotwords", [])
+                if any(phrase in hw.lower() for phrase in allowed_alias_phrases)
+            ]
+            asr_diag = {
+                **asr_diag,
+                "hotwords": filtered_hotwords,
+                "hotwords_count": len(filtered_hotwords),
+            }
+
         return {
             "success": True,
             "gateway_connected": True,
@@ -850,8 +947,6 @@ class SmartHomeGateway:
                 self.audio_server._active_speakers.discard(ws)
         self.broadcast_event("device_deleted", {"device_id": device_id})
         return ok
-
-
 
 def setup_logging():
     logging.basicConfig(

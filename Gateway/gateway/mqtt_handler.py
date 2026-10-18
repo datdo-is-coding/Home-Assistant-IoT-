@@ -23,7 +23,6 @@ import config
 
 logger = logging.getLogger("mqtt_handler")
 
-
 def topic_matches(pattern: str, topic: str) -> bool:
     """
     Check if an MQTT topic matches a subscription pattern.
@@ -43,7 +42,6 @@ def topic_matches(pattern: str, topic: str) -> bool:
         i += 1
     return i == len(topic_parts)
 
-
 class MQTTHandler:
     """Async MQTT Handler for DTV Smart Home Gateway."""
 
@@ -54,6 +52,7 @@ class MQTTHandler:
         self._running = False
         self.latest_telemetry: Dict[str, Dict[str, Any]] = {}
         self.latest_power: Dict[str, float] = {}
+        self.channel_powers: Dict[str, Dict[str, float]] = {}
         self.session_id = secrets.randbits(32)
         self.node_routes = {}
         self.command_acks = {}
@@ -84,9 +83,23 @@ class MQTTHandler:
         self.node_routes[node_id] = (topic.split("/")[2], time.monotonic())
         channels = payload.get("channels")
         if isinstance(channels, list):
+            node_ch_powers = self.channel_powers.setdefault(node_id, {})
+            for idx, c in enumerate(channels):
+                if isinstance(c, dict):
+                    pw = c.get('power_w', c.get('power', c.get('p')))
+                    if pw is not None:
+                        try:
+                            node_ch_powers[f"ch{idx+1}"] = float(pw)
+                        except (ValueError, TypeError):
+                            pass
             powers = [c.get('power_w', 0) for c in channels if isinstance(c, dict)]
             if all(type(p) in (int, float) and math.isfinite(p) for p in powers):
-                self.latest_power[node_id] = sum(powers)
+                p_sum = sum(powers)
+                self.latest_power[node_id] = p_sum
+                for nid, ident in self.node_identities.items():
+                    if ident.get("hw_node_id") == node_id and nid != node_id:
+                        self.latest_power[nid] = p_sum
+                        self.channel_powers[nid] = dict(node_ch_powers)
         request = payload.get("request_id")
         if type(request) is int and payload.get('session_id') == self.session_id:
             if payload.get('type') == 'LOAD_REPORT':
@@ -95,14 +108,17 @@ class MQTTHandler:
                 cache = self.command_acks
             else:
                 return
-            cache[(node_id, request)] = {**payload, '_received_at': time.monotonic()}
+            entry = {**payload, '_received_at': time.monotonic()}
+            cache[(node_id, request)] = entry
+            for nid, ident in self.node_identities.items():
+                if ident.get("hw_node_id") == node_id and nid != node_id:
+                    cache[(nid, request)] = entry
             while len(cache) > 128:
                 cache.pop(next(iter(cache)))
 
     def subbox_route(self, node_id):
         route = self.node_routes.get(node_id)
         return route[0] if node_id not in self.conflicting_nodes and route and time.monotonic() - route[1] < 30 else None
-
 
     def on_message(self, topic_pattern: str, callback: Callable):
         """Register an async or sync callback for a topic pattern."""
@@ -121,6 +137,11 @@ class MQTTHandler:
     def get_current_power(self, node_id: str) -> float:
         """Get the latest recorded power (watts) for a node."""
         return self.latest_power.get(node_id, 0.0)
+
+    def get_channel_power(self, node_id: str, channel: str) -> Optional[float]:
+        """Get the latest recorded power (watts) for a specific channel of a node."""
+        ch_key = channel if str(channel).startswith("ch") else f"ch{channel}"
+        return self.channel_powers.get(node_id, {}).get(ch_key)
 
     async def send_command(self, node_id: str, channel: str, action: str,
                            seq: int = None, settle_ms: int = 500) -> bool:
@@ -141,34 +162,37 @@ class MQTTHandler:
                        "turn_off": "TURN_OFF", "off": "TURN_OFF", "close": "TURN_OFF"}.get(action)
             if not channel_number or not command:
                 return False
+            identity = self.node_identities[node_id]
+            hw_node_id = identity.get("hw_node_id", node_id)
             return await self.publish(f"home/subbox/{route}/command", {
-                "version": 3, **self.node_identities[node_id], "node_id": node_id, "channel": channel_number,
+                "version": 3,
+                **{k: v for k, v in identity.items() if k != "hw_node_id"},
+                "node_id": hw_node_id,
+                "channel": channel_number,
                 "settle_ms": settle_ms,
                 "cmd": command, "request_id": seq or secrets.randbelow(0x7ffffffe) + 1, "session_id": self.session_id,
             }, qos=1)
-        # A known three-tier device must never fall back to unrelated legacy topics.
+
         if node_id in self.node_identities:
             return False
-        # Map channel names -> channel number
-        ch_number = {"ch1": 1, "ch2": 2, "1": 1, "2": 2, 1: 1, 2: 2}.get(channel, 0)
-        if ch_number in (1, 2):
+
+        ch_number = {"ch1": 1, "ch2": 2, "ch3": 3, "1": 1, "2": 2, "3": 3, 1: 1, 2: 2, 3: 3}.get(channel, 0)
+        if ch_number in (1, 2, 3):
             s = 1 if action in ("turn_on", "open", "on", "1", 1) else 0
             payload = {"t": "rl", "ch": ch_number, "s": s, "seq": seq or 0}
             topic = config.TOPIC_CMD_SHORT.format(node_id=node_id)
             ok = await self.publish(topic, payload)
 
-            # Đồng thời gửi industrial topic (home/devices/{node_id}/relay/{ch}/set)
             ind_topic = f"home/devices/{node_id}/relay/{ch_number}/set"
             await self.publish(ind_topic, {"state": s})
 
-            # 3-Tier Zone routing topic (picked up by T2 Zone Controller for T1 nodes)
             zone_node_topic = f"home/nodes/{node_id}/relay/{ch_number}/set"
             await self.publish(zone_node_topic, {"state": s})
 
             if ok:
                 logger.info(f"📤 CMD[compact+ind+zone] {node_id} ch{ch_number}={s} seq={seq}")
             return ok
-        # legacy
+
         topic = config.TOPIC_COMMAND.format(node_id=node_id)
         payload = {"channel": channel, "action": action}
         return await self.publish(topic, payload)
@@ -200,21 +224,6 @@ class MQTTHandler:
         if channel not in (1, 2, 3) or state not in (0, 1):
             return False
         return await self.send_command(device_id, channel, 'turn_on' if state else 'turn_off')
-        # Legacy fan-out removed: one selected route owns each command.
-        topic = getattr(config, "TOPIC_DEV_RELAY_SET", "home/devices/{device_id}/relay/{channel}/set").format(
-            device_id=device_id, channel=channel
-        )
-        payload = {"state": 1 if state else 0}
-        ok = await self.publish(topic, payload, qos=1)
-
-        # 3-Tier Zone routing topic (picked up by T2 Zone Controller for T1 nodes)
-        zone_node_topic = f"home/nodes/{device_id}/relay/{channel}/set"
-        await self.publish(zone_node_topic, payload, qos=1)
-
-        # Compact backward-compat
-        compact_topic = config.TOPIC_CMD_SHORT.format(node_id=device_id)
-        await self.publish(compact_topic, {"t": "rl", "ch": channel, "s": 1 if state else 0, "seq": 0})
-        return ok
 
     async def send_compact_status(self, node_id: str) -> bool:
         """Yêu cầu node echo trạng thái relay hiện tại."""
@@ -279,12 +288,10 @@ class MQTTHandler:
                     self._connected.set()
                     logger.info("✅ Connected to MQTT broker (EMQX)")
 
-                    # Subscribe to all registered topic patterns
                     for pattern in self.callbacks.keys():
                         await client.subscribe(pattern)
                         logger.info(f"📥 Subscribed to: {pattern}")
 
-                    # Message listening loop
                     async for message in client.messages:
                         if not self._running:
                             break
@@ -324,8 +331,6 @@ class MQTTHandler:
             logger.warning(f"Failed to decode payload on {topic}: {e}")
             return
 
-        # Update telemetry & power cache
-        # e.g. topic: smarthome/telemetry/node_xxx, smarthome/tele/node_xxx, home/devices/node_xxx/telemetry
         node_id = None
         if topic.startswith("smarthome/telemetry/") or topic.startswith("smarthome/tele/"):
             node_id = topic.split("/")[-1]
@@ -347,11 +352,9 @@ class MQTTHandler:
                 except (ValueError, TypeError):
                     pass
 
-        # Compact relay ack: {"t":"ack","id":"...","rl":[1,0],"seq":n} on smarthome/status/{id}
         if topic.startswith("smarthome/status/") and isinstance(payload, dict) and payload.get("t") in ("ack","hello"):
             payload["_compact"] = True
 
-        # Dispatch to matching callbacks
         matched = False
         for pattern, cbs in list(self.callbacks.items()):
             if topic_matches(pattern, topic):

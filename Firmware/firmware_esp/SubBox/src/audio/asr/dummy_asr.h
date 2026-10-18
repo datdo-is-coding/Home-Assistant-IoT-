@@ -1,8 +1,3 @@
-/**
- * @file dummy_asr.h
- * @brief Development & Simulation ASR Implementation for Vietnamese Smart-Home
- */
-
 #pragma once
 
 #include "asr_engine.h"
@@ -23,14 +18,8 @@ public:
     const char* getFinalResult() const override;
     void reset() override;
 
-    /**
-     * @brief Set custom phrase to decode upon receiving next audio stream
-     */
     void setNextRecognitionResult(const char* phrase);
 
-    /**
-     * @brief Instantly inject simulated recognition result (e.g. from SAY CLI)
-     */
     void injectInstantResult(const char* phrase);
 
 private:

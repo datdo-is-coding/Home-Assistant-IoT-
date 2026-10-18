@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Vietnamese Smart Home NLU Training Dataset Generator
 =====================================================
@@ -47,7 +46,6 @@ Quy tắc quan trọng:
 {"voice_reply":"<câu xác nhận ngắn gọn tiếng Việt có dấu>","command":{"action":"turn_on|turn_off","device":"den|quat|...|null","location":"phong_ngu|phong_khach|...|null","value":null}}
 Chỉ xuất DUY NHẤT một chuỗi JSON hợp lệ, không giải thích thêm."""
 
-
 def make_sample(user_text: str, output: dict) -> dict:
     """Create one training sample in OpenAI messages format."""
     return {
@@ -58,15 +56,11 @@ def make_sample(user_text: str, output: dict) -> dict:
         ]
     }
 
-
 def generate_dataset():
     samples = []
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 1: Basic ON/OFF — Đèn (Light)
-    # ════════════════════════════════════════════════════════════
     light_on_variations = [
-        # Standard
+
         ("bật đèn phòng khách", "phong_khach", "light"),
         ("bật đèn phòng ngủ", "phong_ngu", "light"),
         ("bật đèn phòng bếp", "phong_bep", "light"),
@@ -79,7 +73,7 @@ def generate_dataset():
         ("bật đèn gara", "gara", "light"),
         ("bật đèn phòng làm việc", "phong_lam_viec", "light"),
         ("bật đèn phòng ngủ master", "phong_ngu_master", "light"),
-        # Specific light types
+
         ("bật đèn ngủ phòng ngủ", "phong_ngu", "den_ngu"),
         ("bật đèn trần phòng khách", "phong_khach", "den_tran"),
         ("bật đèn chùm phòng khách", "phong_khach", "den_chum"),
@@ -89,7 +83,7 @@ def generate_dataset():
         ("bật đèn cổng", "san_vuon", "den_cong"),
         ("bật đèn gương phòng tắm", "phong_tam", "den_guong"),
         ("bật đèn hắt", "phong_khach", "den_hat"),
-        # Natural language variations
+
         ("mở đèn phòng khách đi", "phong_khach", "light"),
         ("cho bật đèn phòng ngủ", "phong_ngu", "light"),
         ("bật đèn lên đi", None, "light"),
@@ -100,7 +94,7 @@ def generate_dataset():
         ("mở sáng phòng khách", "phong_khach", "light"),
         ("bật ánh sáng phòng ngủ", "phong_ngu", "light"),
         ("mở bóng đèn phòng bếp", "phong_bep", "light"),
-        # Informal / slang
+
         ("bật đèn phòng khách cái", "phong_khach", "light"),
         ("bật đèn đi bạn", None, "light"),
         ("ê bật đèn phòng khách", "phong_khach", "light"),
@@ -133,7 +127,6 @@ def generate_dataset():
             "command": {"action": "turn_on", "device": device, "location": location, "value": None}
         }))
 
-    # ─── Light OFF ───
     light_off_variations = [
         ("tắt đèn phòng khách", "phong_khach", "light"),
         ("tắt đèn phòng ngủ", "phong_ngu", "light"),
@@ -172,9 +165,6 @@ def generate_dataset():
             "command": {"action": "turn_off", "device": device, "location": location, "value": None}
         }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 1b: Basic ON/OFF — Quạt (Fan)
-    # ════════════════════════════════════════════════════════════
     fan_variations = [
         ("bật quạt phòng khách", "turn_on", "phong_khach", "fan"),
         ("bật quạt phòng ngủ", "turn_on", "phong_ngu", "fan"),
@@ -216,9 +206,6 @@ def generate_dataset():
             "command": {"action": action, "device": device, "location": location, "value": None}
         }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 1c: Basic ON/OFF — Other devices
-    # ════════════════════════════════════════════════════════════
     other_devices = [
         ("bật điều hòa phòng khách", "turn_on", "phong_khach", "air_conditioner", "Đã bật điều hòa ở phòng khách ạ."),
         ("tắt điều hòa phòng ngủ", "turn_off", "phong_ngu", "air_conditioner", "Đã tắt điều hòa ở phòng ngủ ạ."),
@@ -256,9 +243,6 @@ def generate_dataset():
             "command": {"action": action, "device": device, "location": location, "value": None}
         }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 2: Temperature / Value Commands
-    # ════════════════════════════════════════════════════════════
     temp_commands = [
         ("bật điều hòa 26 độ phòng ngủ", "phong_ngu", 26),
         ("cài điều hòa 24 độ phòng khách", "phong_khach", 24),
@@ -292,9 +276,6 @@ def generate_dataset():
             "command": {"action": "turn_on", "device": "air_conditioner", "location": location, "value": value}
         }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 3: Ambiguous Commands
-    # ════════════════════════════════════════════════════════════
     ambiguous = [
         ("bật đèn", {"voice_reply": "Đã bật đèn ạ.", "command": {"action": "turn_on", "device": "light", "location": None, "value": None}}),
         ("tắt đèn", {"voice_reply": "Đã tắt đèn ạ.", "command": {"action": "turn_off", "device": "light", "location": None, "value": None}}),
@@ -311,9 +292,6 @@ def generate_dataset():
     for text, output in ambiguous:
         samples.append(make_sample(text, output))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 4: ASR-Error Resilient
-    # ════════════════════════════════════════════════════════════
     asr_errors = [
         ("bạn bè phòng khách", {"voice_reply": "Đã bật đèn ở phòng khách ạ.", "command": {"action": "turn_on", "device": "light", "location": "phong_khach", "value": None}}),
         ("bạn bè phòng ngủ", {"voice_reply": "Đã bật đèn ở phòng ngủ ạ.", "command": {"action": "turn_on", "device": "light", "location": "phong_ngu", "value": None}}),
@@ -342,9 +320,6 @@ def generate_dataset():
     for text, output in asr_errors:
         samples.append(make_sample(text, output))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 5: Regional + Casual + Polite + Natural
-    # ════════════════════════════════════════════════════════════
     mixed = [
         ("bật đèn phòng khách dùm", {"voice_reply": "Đã bật đèn ở phòng khách ạ.", "command": {"action": "turn_on", "device": "light", "location": "phong_khach", "value": None}}),
         ("tắt đèn dùm tui", {"voice_reply": "Đã tắt đèn ạ.", "command": {"action": "turn_off", "device": "light", "location": None, "value": None}}),
@@ -381,9 +356,6 @@ def generate_dataset():
     for text, output in mixed:
         samples.append(make_sample(text, output))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 6: Synonyms & Inverted Word Order
-    # ════════════════════════════════════════════════════════════
     synonyms_inverted = [
         ("mở đèn phòng khách", "turn_on", "light", "phong_khach"),
         ("đóng đèn phòng khách", "turn_off", "light", "phong_khach"),
@@ -414,9 +386,6 @@ def generate_dataset():
             "command": {"action": action, "device": device, "location": location, "value": None}
         }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 7: Edge Cases
-    # ════════════════════════════════════════════════════════════
     edge_cases = [
         ("ừm bật đèn phòng khách", {"voice_reply": "Đã bật đèn ở phòng khách ạ.", "command": {"action": "turn_on", "device": "light", "location": "phong_khach", "value": None}}),
         ("à tắt quạt phòng ngủ", {"voice_reply": "Đã tắt quạt ở phòng ngủ ạ.", "command": {"action": "turn_off", "device": "fan", "location": "phong_ngu", "value": None}}),
@@ -431,9 +400,6 @@ def generate_dataset():
     for text, output in edge_cases:
         samples.append(make_sample(text, output))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 8: Room × Device Matrix (systematic)
-    # ════════════════════════════════════════════════════════════
     rooms = [
         ("phong_khach", "phòng khách"), ("phong_ngu", "phòng ngủ"),
         ("phong_bep", "phòng bếp"), ("phong_tam", "phòng tắm"),
@@ -450,9 +416,6 @@ def generate_dataset():
                     "command": {"action": action, "device": dev_id, "location": room_id, "value": None}
                 }))
 
-    # ════════════════════════════════════════════════════════════
-    # CATEGORY 9: Vietnamese Number Words for Temperature
-    # ════════════════════════════════════════════════════════════
     number_words = [
         ("bật điều hòa mười sáu độ", None, 16),
         ("cài điều hòa mười bảy độ phòng ngủ", "phong_ngu", 17),
@@ -480,7 +443,6 @@ def generate_dataset():
         }))
 
     return samples
-
 
 def main():
     import sys
@@ -559,7 +521,6 @@ def main():
     print("=" * 70)
     print("  DATASET GENERATION COMPLETE")
     print("=" * 70)
-
 
 if __name__ == "__main__":
     main()

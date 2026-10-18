@@ -1,9 +1,5 @@
-/**
- * @file espnow_transport.cpp
- * @brief Reliable ESP-NOW Network Transport Layer Implementation
- */
-
 #include "espnow_transport.h"
+#include "hc_runtime.h"
 #include "app_config.h"
 #include "nvs_storage.h"
 #include "safety_supervisor.h"
@@ -32,6 +28,14 @@ static bool s_initialized = false;
 static void on_espnow_recv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
     if (!recv_info || !data || len <= 0) return;
 
+    if (hc_runtime_enabled()) {
+        if (!hc_runtime_trusted_peer(recv_info->src_addr)) return;
+        if (len >= 2 && data[0] == 'H' && data[1] == 'C') {
+            hc_runtime_receive_radio(recv_info->src_addr,data,(size_t)len); return;
+        }
+
+        return;
+    }
     if (s_rx_callback) {
         s_rx_callback(recv_info->src_addr, data, len);
     }
@@ -89,9 +93,8 @@ esp_err_t espnow_transport_init(void) {
     err = esp_wifi_start();
     if (err != ESP_OK) return err;
 
-    /* Disable power saving for instant relay actuation response */
     esp_wifi_set_ps(WIFI_PS_NONE);
-    /* Must match the SubBox AP channel; peers follow the active radio channel. */
+
     ESP_ERROR_CHECK(esp_wifi_set_channel(APP_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
 
     uint8_t local_mac[6];
@@ -108,7 +111,6 @@ esp_err_t espnow_transport_init(void) {
     esp_now_register_recv_cb(on_espnow_recv);
     esp_now_register_send_cb(on_espnow_send);
 
-    /* Register Broadcast Peer */
     esp_now_peer_info_t bcast_peer = {};
     memcpy(bcast_peer.peer_addr, s_broadcast_mac, 6);
     bcast_peer.channel = 0;
@@ -120,7 +122,6 @@ esp_err_t espnow_transport_init(void) {
         return err;
     }
 
-    /* Check if paired SubBox MAC is saved in NVS */
     const ActionBoxPersistentConfig *stored_cfg = nvs_storage_get_cached_config();
     if (stored_cfg->has_assigned_subbox) {
         espnow_transport_pair_subbox(stored_cfg->assigned_subbox_mac);
@@ -137,6 +138,7 @@ void espnow_transport_register_rx_callback(espnow_rx_cb_t cb) {
 
 esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
     if (!subbox_mac) return ESP_ERR_INVALID_ARG;
+    if (hc_runtime_enabled()) return ESP_ERR_INVALID_STATE;
 
     if (xSemaphoreTake(s_transport_mutex, portMAX_DELAY) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -170,6 +172,11 @@ esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
 esp_err_t espnow_transport_send(const uint8_t *payload, size_t len) {
     if (!payload || len == 0 || len > ESP_NOW_MAX_DATA_LEN_V2) return ESP_ERR_INVALID_ARG;
 
+    uint8_t core_parent[6];
+    if (hc_runtime_enabled()) {
+        if (!hc_runtime_parent_mac(core_parent)) return ESP_ERR_INVALID_STATE;
+        return espnow_transport_send_to(core_parent,payload,len);
+    }
     const uint8_t *target_mac = s_has_paired_subbox ? s_subbox_mac : s_broadcast_mac;
     return espnow_transport_send_to(target_mac, payload, len);
 }
@@ -181,7 +188,10 @@ esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *paylo
         return ESP_ERR_TIMEOUT;
     }
 
-    /* Auto-register peer if not already in table */
+    if (hc_runtime_enabled() && !hc_runtime_trusted_peer(dest_mac)) {
+        xSemaphoreGive(s_transport_mutex); return ESP_ERR_INVALID_STATE;
+    }
+
     if (!esp_now_is_peer_exist(dest_mac)) {
         esp_now_peer_info_t peer = {};
         memcpy(peer.peer_addr, dest_mac, 6);
@@ -196,8 +206,30 @@ esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *paylo
     return err;
 }
 
+static bool s_pairing_mode = false;
+
+void espnow_transport_set_pairing_mode(bool enable) {
+    s_pairing_mode = enable;
+    ESP_LOGI(TAG, "ESP-NOW pairing mode %s", enable ? "ENABLED" : "DISABLED");
+}
+
+bool espnow_transport_is_pairing_mode(void) {
+    return s_pairing_mode;
+}
+
 bool espnow_transport_is_paired(void) {
     return s_has_paired_subbox;
+}
+
+bool espnow_transport_get_subbox_mac(uint8_t *out_mac) {
+    if (!out_mac || !s_has_paired_subbox) return false;
+    memcpy(out_mac, s_subbox_mac, 6);
+    return true;
+}
+
+bool espnow_transport_is_paired_subbox(const uint8_t *mac) {
+    if (!mac || !s_has_paired_subbox) return false;
+    return memcmp(s_subbox_mac, mac, 6) == 0;
 }
 
 void espnow_transport_get_local_mac(uint8_t *out_mac) {

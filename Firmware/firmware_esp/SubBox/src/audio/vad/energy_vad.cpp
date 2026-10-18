@@ -1,8 +1,3 @@
-/**
- * @file energy_vad.cpp
- * @brief Energy-Based Adaptive Voice Activity Detector Implementation
- */
-
 #include "energy_vad.h"
 #include <cmath>
 #include <algorithm>
@@ -41,7 +36,6 @@ bool EnergyVAD::process(const int16_t* pcm, size_t count) {
 
     if (!pcm || count == 0) return m_is_speaking;
 
-    // Calculate Mean Square Energy
     int64_t sum_sq = 0;
     for (size_t i = 0; i < count; ++i) {
         int32_t val = pcm[i];
@@ -49,20 +43,17 @@ bool EnergyVAD::process(const int16_t* pcm, size_t count) {
     }
     m_latest_energy = sum_sq / (int64_t)count;
 
-    // Duration of this audio chunk in milliseconds (assuming 16kHz)
     uint32_t chunk_ms = (uint32_t)(count * 1000 / SUBBOX_AUDIO_SAMPLE_RATE);
     if (chunk_ms == 0) chunk_ms = 10;
 
-    // Dynamic threshold based on adaptive noise floor
     int64_t active_threshold = std::max(m_threshold, (int64_t)(m_noise_floor * 3.5f));
 
     if (!m_is_speaking) {
-        // Track background noise floor when not speaking (exponential moving average)
+
         if (m_latest_energy < active_threshold) {
             m_noise_floor = m_noise_floor * 0.95f + (float)m_latest_energy * 0.05f;
         }
 
-        // Check for speech onset
         if (m_latest_energy >= active_threshold) {
             m_consecutive_speech_frames++;
             if (m_consecutive_speech_frames >= m_onset_frames) {
@@ -79,7 +70,7 @@ bool EnergyVAD::process(const int16_t* pcm, size_t count) {
             }
         }
     } else {
-        // Actively speaking
+
         m_total_speech_duration_ms += chunk_ms;
 
         if (m_latest_energy < (active_threshold * 4 / 10)) {

@@ -1,8 +1,3 @@
-/**
- * @file actionbox_network_protocol.h
- * @brief Idempotent JSON & Binary Protocol Formatter for SubBox -> ActionBox
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -14,13 +9,7 @@
 
 class ActionBoxNetworkProtocol {
 public:
-    /**
-     * @brief Build JSON command payload for ActionBox
-     * @param request_id Unique monotonic request identifier
-     * @param cmd_str Command string: "TURN_ON", "TURN_OFF", "TOGGLE", "GET_STATE", "GET_POWER"
-     * @param channel Relay channel (1 or 2)
-     * @return Formatted JSON string
-     */
+
     static std::string buildCommandJson(uint32_t request_id, const char* cmd_str, uint8_t channel, const char* node_id, const char* hardware_uid, uint32_t config_version) {
         if (!node_id || !*node_id || !cmd_str || strcmp(cmd_str, "TOGGLE") == 0 || !hardware_uid || strlen(hardware_uid) != 12 || !config_version) return "";
         cJSON *root = cJSON_CreateObject();

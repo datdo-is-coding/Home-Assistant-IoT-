@@ -1,8 +1,3 @@
-/*
- * ESP-NOW Master — Implementation
- * DTV Smart Home — T2 Zone Controller
- */
-
 #include "espnow_master.h"
 #include "zone_manager.h"
 #include "audio_proxy.h"
@@ -24,8 +19,6 @@ static const char *TAG = "ESPNOW_MASTER";
 static uint8_t s_broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 static volatile uint8_t s_relay_cmd_seq = 0;
 
-/* ─── Forward Declarations ───────────────────────────────────────────── */
-
 static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
                            const uint8_t *data, int len);
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
@@ -36,18 +29,14 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
 static void ensure_peer_exists(const uint8_t *mac);
 static void zone_watchdog_task(void *arg);
 
-/* ─── Public API ─────────────────────────────────────────────────────── */
-
 esp_err_t espnow_master_init(void)
 {
     ESP_LOGI(TAG, "Initializing ESP-NOW Master Mode...");
 
-    /* ESP-NOW core init (Wi-Fi must already be started in STA or AP+STA) */
     ESP_ERROR_CHECK(esp_now_init());
     ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
     ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
 
-    /* Add broadcast peer */
     ensure_peer_exists(s_broadcast_mac);
 
     uint8_t my_mac[6];
@@ -56,7 +45,6 @@ esp_err_t espnow_master_init(void)
              my_mac[0], my_mac[1], my_mac[2], my_mac[3], my_mac[4], my_mac[5],
              ESPNOW_WIFI_CHANNEL);
 
-    /* Start background watchdog to monitor T1 node heartbeats */
     xTaskCreate(zone_watchdog_task, "zone_watchdog", 3072, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "ESP-NOW Master active. Listening for T1 node discovery & telemetry...");
@@ -98,8 +86,6 @@ esp_err_t espnow_master_send_node_cfg(const uint8_t *target_mac, const espnow_no
     return esp_now_send(target_mac, (const uint8_t *)cfg, sizeof(espnow_node_cfg_t));
 }
 
-/* ─── Internal Helper: Peer Management ───────────────────────────────── */
-
 static void ensure_peer_exists(const uint8_t *mac)
 {
     if (!esp_now_is_peer_exist(mac)) {
@@ -115,8 +101,6 @@ static void ensure_peer_exists(const uint8_t *mac)
         }
     }
 }
-
-/* ─── ESP-NOW Callbacks ──────────────────────────────────────────────── */
 
 static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
                            const uint8_t *data, int len)
@@ -134,7 +118,6 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
 
             zone_node_entry_t *node = zone_manager_register_hello(hello, src_mac);
 
-            /* Send NODE_HELLO_ACK back to T1 */
             espnow_node_hello_ack_t ack = {0};
             ack.msg_type = MSG_TYPE_NODE_HELLO_ACK;
             ack.seq = hello->seq;
@@ -145,7 +128,6 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info,
 
             esp_now_send(src_mac, (const uint8_t *)&ack, sizeof(ack));
 
-            /* Publish discovery / status to MQTT */
             if (node) {
                 mqtt_zone_publish_node_status(node);
             }
@@ -231,8 +213,6 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     }
 }
 #endif
-
-/* ─── Watchdog Task ──────────────────────────────────────────────────── */
 
 static void zone_watchdog_task(void *arg)
 {

@@ -13,6 +13,7 @@ import os
 import re
 import sqlite3
 import logging
+import asyncio
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List, Tuple
@@ -22,7 +23,6 @@ import config
 logger = logging.getLogger("registry")
 TZ_VN = timezone(timedelta(hours=7))
 
-# ── Chuẩn hoá ────────────────────────────────────────────────────────────────
 _slug_re = re.compile(r"[^a-z0-9]+")
 _slug_translation = str.maketrans(
     "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđ",
@@ -30,7 +30,7 @@ _slug_translation = str.maketrans(
 )
 def slug(s: str) -> str:
     s = (s or "").lower().strip()
-    # bỏ dấu tiếng Việt cơ bản
+
     s = s.translate(_slug_translation)
     s = _slug_re.sub("_", s).strip("_")
     return s or "unknown"
@@ -40,6 +40,10 @@ DEVICE_CANON = {
     "quat": "fan", "fan": "fan",
     "bom": "pump", "may_bom": "pump", "pump": "pump",
     "rem": "curtain", "man": "curtain",
+    "o_cam": "socket", "socket": "socket", "outlet": "socket",
+    "cong_tac": "switch", "switch": "switch",
+    "dieu_hoa": "air_conditioner", "air_conditioner": "air_conditioner",
+    "nong_lanh": "water_heater", "binh_nong_lanh": "water_heater",
 }
 def canon_device(s: str) -> str:
     s = slug(s)
@@ -63,12 +67,12 @@ class RegistryManager:
         except Exception:
             pass
         self.data: Dict[str, Any] = {"nodes": {}, "pending": {}, "rooms": {}}
-        self._seq: Dict[str, int] = {}  # node_id -> last seq
+        self._seq: Dict[str, int] = {}
         self._persisted = {}
+        self._telemetry_write_count = 0
         self._init_sqlite()
         self.load()
 
-    # ── SQLite Database Storage Engine (Spec Section 8) ──────────────────
     @contextmanager
     def _get_db(self):
         conn = sqlite3.connect(self.db_path, timeout=10.0)
@@ -170,7 +174,7 @@ class RegistryManager:
                 );
                 CREATE INDEX IF NOT EXISTS idx_telemetry_dev_time ON telemetry_records(device_id, recorded_at);
                 """)
-                # Safe migration for existing databases
+
                 try:
                     conn.execute("ALTER TABLE devices ADD COLUMN zone_id VARCHAR(32);")
                 except Exception:
@@ -241,6 +245,22 @@ class RegistryManager:
 
                 has_voice = "voice_wake" in caps or "microphone" in caps
                 has_spk = "audio_speaker" in caps
+
+                num_relays = 2
+                channels_dict = n.get("channels")
+                cfg_relays = n.get("configuration", {}).get("relays") if isinstance(n.get("configuration"), dict) else None
+                relay_state = n.get("relay_state")
+                hardware = str(n.get("hardware") or n.get("firmware", {}).get("hardware") or "")
+                serial = str(n.get("serial") or n.get("firmware", {}).get("serial") or "")
+                if "relay_3ch" in caps or "ch3" in (channels_dict or {}) or "AB2" in serial or hardware == "ActionBox":
+                    num_relays = max(num_relays, 3)
+                if isinstance(channels_dict, dict) and len(channels_dict) > 0:
+                    num_relays = max(num_relays, len(channels_dict))
+                if isinstance(cfg_relays, dict) and len(cfg_relays) > 0:
+                    num_relays = max(num_relays, len(cfg_relays))
+                if isinstance(relay_state, list) and len(relay_state) > 0:
+                    num_relays = max(num_relays, len(relay_state))
+
                 conn.execute("""
                     INSERT INTO device_capabilities (
                         device_id, has_voice, has_speaker, has_opus, has_wake_word,
@@ -253,13 +273,12 @@ class RegistryManager:
                         raw_capabilities_json = excluded.raw_capabilities_json
                 """, (
                     nid, has_voice, has_spk, True, has_voice,
-                    True, 2, json.dumps(caps, ensure_ascii=False)
+                    True, num_relays, json.dumps(caps, ensure_ascii=False)
                 ))
         except Exception as e:
             logger.warning(f"_sync_node_to_sqlite error for {nid}: {e}")
             raise
 
-    # ── Persistence ─────────────────────────────────────────────────────
     def load(self):
         with self._get_db() as conn:
             initialized = conn.execute("SELECT 1 FROM registry_meta WHERE key='initialized'").fetchone()
@@ -270,8 +289,7 @@ class RegistryManager:
                 self._rebuild_rooms()
                 return
             old_devices = list(conn.execute("SELECT * FROM devices"))
-            # One-time upgrade of the old dual store: JSON contains channel metadata
-            # absent from old SQL tables. Preserve it, then overlay authoritative SQL fields.
+
             if os.path.exists(self.path):
                 with open(self.path, encoding='utf-8') as source:
                     legacy = json.load(source)
@@ -342,7 +360,6 @@ class RegistryManager:
             json.dump(self.data, target, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
 
-    # ── HELLO / Pending flow ────────────────────────────────────────────
     def on_hello(self, payload: dict, ws_available: bool = False) -> dict:
         """
         Xử lý gói tin hello thương mại từ ESP32:
@@ -359,7 +376,6 @@ class RegistryManager:
         ip = payload.get("ip")
         now = datetime.now(TZ_VN).isoformat()
 
-        # 1. Check if this MAC or ID already belongs to an existing provisioned node
         existing_node_id = None
         if node_id and node_id in self.data["nodes"]:
             existing_node_id = node_id
@@ -370,11 +386,9 @@ class RegistryManager:
                     existing_node_id = nid
                     break
 
-        # If the device was re-flashed (e.g. FACTORY_NEW or cfg is None), but its MAC is already registered:
-        # Auto-relink to the existing registered node instead of creating an annoying duplicate pending device!
         if existing_node_id and (state == "FACTORY_NEW" or cfg is None or node_id != existing_node_id):
             logger.info(f"🔄 [Registry] Re-flashed device detected (MAC={mac}) -> Auto-relinking to existing node '{existing_node_id}'")
-            # Clean up any stale pending entries with this MAC or ID
+
             if mac:
                 for k, v in list(self.data["pending"].items()):
                     if k.upper() == mac.upper() or (v.get("mac") and v.get("mac").upper() == mac.upper()) or k == existing_node_id:
@@ -396,13 +410,11 @@ class RegistryManager:
             self.save()
             return {"action": "cfg_mismatch", "node_id": existing_node_id, "mac": mac}
 
-        # Check if node is unprovisioned or in FACTORY_NEW state:
         is_factory = (state == "FACTORY_NEW" or cfg is None or not existing_node_id)
         if is_factory:
             clean_mac = mac.replace(":", "").lower()
             pending_key = node_id or (f"node_{clean_mac[-8:]}" if clean_mac else "unknown")
 
-            # Khử trùng lặp triệt để: Xóa bất kỳ entry pending cũ nào có cùng MAC hoặc cùng ID
             if mac:
                 for k, v in list(self.data["pending"].items()):
                     if k == pending_key:
@@ -427,9 +439,8 @@ class RegistryManager:
             logger.info(f"📦 [Registry] Pending device: ID={pending_key}, MAC={mac}, Serial={serial}, State={state}")
             return {"action": "pending", "node_id": pending_key, "mac": mac}
 
-        # Đã provision và có trong registry → update heartbeat & address block
         if existing_node_id:
-            # Đảm bảo dọn sạch bất kỳ pending entry nào còn sót lại của node này
+
             if mac:
                 for k, v in list(self.data["pending"].items()):
                     if k.upper() == mac.upper() or (v.get("mac") and v.get("mac").upper() == mac.upper()) or k == existing_node_id:
@@ -444,7 +455,6 @@ class RegistryManager:
             if ip: n["ip"] = ip
             n["relay_state"] = rl
 
-            # Đồng bộ cấu trúc Image 1
             if "address" not in n:
                 n["address"] = {}
             n["address"]["ip"] = ip or n["address"].get("ip")
@@ -460,7 +470,7 @@ class RegistryManager:
             expected = n.get("configuration", {}).get("cfg_version") or n.get("cfg_version", 1)
             if cfg is not None and cfg != expected:
                 if cfg > expected:
-                    # Node đã được cập nhật hoặc apply Desired Twin thành công -> Gateway đồng bộ theo node
+
                     if "configuration" not in n:
                         n["configuration"] = {}
                     n["configuration"]["cfg_version"] = cfg
@@ -477,7 +487,6 @@ class RegistryManager:
             self.save()
             return {"action": "known", "node_id": existing_node_id}
 
-        # Chưa biết → lưu vào pending
         pending_key = node_id or (f"node_{mac.replace(':', '').lower()[-8:]}" if mac else "unknown_node")
         if mac:
             for k, v in list(self.data["pending"].items()):
@@ -495,9 +504,15 @@ class RegistryManager:
     def update_relay_state(self, node_id: str, rl: list) -> bool:
         """Cập nhật trạng thái relay thực tế vào registry và lưu tức thì."""
         if node_id in self.data["nodes"]:
-            if self.data["nodes"][node_id].get("relay_state") == list(rl):
+            target_rl = list(rl)
+            node = self.data["nodes"][node_id]
+            caps = node.get("capabilities", [])
+            min_relays = 3 if ("relay_3ch" in caps or len(node.get("channels") or {}) >= 3) else 2
+            while len(target_rl) < max(min_relays, len(node.get("relay_state", []))):
+                target_rl.append(0)
+            if self.data["nodes"][node_id].get("relay_state") == target_rl:
                 return True
-            self.data["nodes"][node_id]["relay_state"] = list(rl)
+            self.data["nodes"][node_id]["relay_state"] = target_rl
             self.save(changed_node=node_id)
             return True
         return False
@@ -538,6 +553,7 @@ class RegistryManager:
         return deleted
 
     def provision_node(self, mac_or_id: str, room: str, rl1: str = "light", rl2: str = "fan",
+                       rl3: Optional[str] = None,
                        node_short: str = None, description: str = None,
                        name: str = None, location: str = None) -> Optional[dict]:
         """
@@ -557,7 +573,6 @@ class RegistryManager:
                     target_key = k
                 matched_keys.append(k)
 
-        # Xóa tất cả các entry pending trùng lặp
         for k in matched_keys:
             self.data["pending"].pop(k, None)
 
@@ -565,31 +580,34 @@ class RegistryManager:
             pending = self.data["nodes"][mac_or_id]
 
         if not pending:
-            # Fallback for manual addition: create minimal pending descriptor
+
             actual_id = mac_or_id if mac_or_id.startswith("node_") else (f"node_{mac_or_id.replace(':', '').lower()[-8:]}" if ":" in mac_or_id else f"node_{mac_or_id.lower()}")
             mac = mac_or_id.upper() if ":" in mac_or_id else ""
             pending = {
                 "device_id": actual_id,
                 "mac": mac,
-                "hardware": "esp32s3",
+                "hardware": "esp32s3" if rl3 else "esp32",
                 "serial": "S3-2026-000001",
                 "state": "READY",
                 "ip": None,
                 "rssi": None,
-                "rl": [0, 0]
+                "rl": [0, 0, 0] if rl3 else [0, 0]
             }
 
-        # Dọn sạch thêm nếu còn entry nào có cùng MAC
         if pending.get("mac"):
             pmac = pending["mac"].upper()
             for k, p in list(self.data["pending"].items()):
                 if (p.get("mac") and p.get("mac").upper() == pmac) or k.upper() == pmac:
                     self.data["pending"].pop(k, None)
 
+        if rl3 is None:
+            is_3ch = len(pending.get("rl", [])) >= 3 or "ActionBox" in pending.get("hardware", "") or pending.get("hardware") == "esp32s3"
+            if is_3ch:
+                rl3 = "switch"
+
         actual_id = pending.get("device_id") or mac_or_id
         mac = (pending.get("mac") or "").upper()
 
-        # Xóa node cũ trong nodes nếu đã từng đăng ký dưới ID khác nhưng cùng MAC
         if mac:
             for old_id, old_node in list(self.data["nodes"].items()):
                 if old_id != actual_id and old_node.get("address", {}).get("mac", "").upper() == mac:
@@ -599,11 +617,9 @@ class RegistryManager:
         serial = pending.get("serial", "S3-2026-000000")
         ip = pending.get("ip")
         rssi = pending.get("rssi")
-        rl = pending.get("rl", [0, 0])
 
         room_s = slug(room)
-        
-        # Enforce 4-ActionBox limit per room
+
         room_nodes = [n for n in self.data["nodes"].values() if n.get("room") == room_s]
         if len(room_nodes) >= 4 and actual_id not in self.data["nodes"]:
             logger.warning(f"Provision rejected: Room '{room_s}' already has {len(room_nodes)} nodes (limit 4).")
@@ -611,6 +627,7 @@ class RegistryManager:
 
         rl1_c = canon_device(rl1) if rl1 else "light"
         rl2_c = canon_device(rl2) if rl2 else "fan"
+        rl3_c = canon_device(rl3) if rl3 else "switch"
 
         dev_name = name or f"Loa {room_s.replace('_', ' ').title()}"
         dev_loc = location or f"Phòng {room_s.replace('_', ' ').title()}"
@@ -629,8 +646,33 @@ class RegistryManager:
                 "description": rl2_c
             }
         }
+        if rl3:
+            channels["ch3"] = {
+                "device_type": rl3_c, "fullname": f"{actual_id}-{rl3_c}",
+                "name": rl3 or "Công tắc", "aliases": [rl3_c], "gpio": 5, "rated_watts": 100,
+                "description": rl3_c
+            }
 
-        # Commercial Node Schema (Image 1)
+        relay_cap = "relay_3ch" if len(channels) >= 3 else "relay_2ch"
+        capabilities = [
+            "voice_wake", "audio_speaker", "microphone", relay_cap, "energy_monitor", "ota"
+        ]
+
+        cfg_relays = {
+            "ch1": {"device_type": rl1_c, "fullname": f"{actual_id}-{rl1_c}", "name": rl1 or "Đèn", "gpio": 4},
+            "ch2": {"device_type": rl2_c, "fullname": f"{actual_id}-{rl2_c}", "name": rl2 or "Quạt", "gpio": 5}
+        }
+        if "ch3" in channels:
+            cfg_relays["ch3"] = {
+                "device_type": rl3_c, "fullname": f"{actual_id}-{rl3_c}", "name": rl3 or "Công tắc", "gpio": 5
+            }
+
+        rl = pending.get("rl")
+        if not rl:
+            rl = [0, 0, 0] if len(channels) >= 3 else [0, 0]
+        elif len(rl) < len(channels):
+            rl = list(rl) + [0] * (len(channels) - len(rl))
+
         self.data["nodes"][actual_id] = {
             "device_id": actual_id,
             "name": dev_name,
@@ -643,9 +685,7 @@ class RegistryManager:
                 "rssi": rssi,
                 "last_seen": now
             },
-            "capabilities": [
-                "voice_wake", "audio_speaker", "microphone", "relay_2ch", "energy_monitor", "ota"
-            ],
+            "capabilities": capabilities,
             "firmware": {
                 "version": "2.1.0",
                 "hardware": hardware,
@@ -653,10 +693,7 @@ class RegistryManager:
                 "build_date": "2026-09-19"
             },
             "configuration": {
-                "relays": {
-                    "ch1": {"device_type": rl1_c, "fullname": f"{actual_id}-{rl1_c}", "name": rl1 or "Đèn", "gpio": 4},
-                    "ch2": {"device_type": rl2_c, "fullname": f"{actual_id}-{rl2_c}", "name": rl2 or "Quạt", "gpio": 5}
-                },
+                "relays": cfg_relays,
                 "audio": {"sample_rate": 16000, "volume": 85},
                 "cfg_version": 1
             },
@@ -664,7 +701,7 @@ class RegistryManager:
                 "state": "READY",
                 "claimed_at": now
             },
-            # Flat backwards compatibility fields:
+
             "node_id": actual_id,
             "mac": mac,
             "ip": ip,
@@ -679,7 +716,10 @@ class RegistryManager:
 
         self.save()
         logger.info(f"✨ Commercial Provisioned: {actual_id} -> Name='{dev_name}', Room='{room_s}', Serial='{serial}'")
-        return self.data["nodes"][actual_id] | {"node_id": actual_id, "room_s": room_s, "rl1": rl1_c, "rl2": rl2_c}
+        res = self.data["nodes"][actual_id] | {"node_id": actual_id, "room_s": room_s, "rl1": rl1_c, "rl2": rl2_c}
+        if "ch3" in channels:
+            res["rl3"] = rl3_c
+        return res
 
     def update_device(self, device_id: str, d: dict) -> dict:
         """Cập nhật thông tin thân thiện (name, room, location, channels) của node."""
@@ -698,13 +738,15 @@ class RegistryManager:
         if "description" in d and d["description"] is not None:
             n["description"] = str(d["description"]).strip()
 
-        # Update channels if provided
         ch1_type = d.get("ch1_type") or d.get("rl1")
         ch1_name = d.get("ch1_name")
         ch1_aliases = d.get("ch1_aliases")
         ch2_type = d.get("ch2_type") or d.get("rl2")
         ch2_name = d.get("ch2_name")
         ch2_aliases = d.get("ch2_aliases")
+        ch3_type = d.get("ch3_type") or d.get("rl3")
+        ch3_name = d.get("ch3_name")
+        ch3_aliases = d.get("ch3_aliases")
 
         if "channels" not in n:
             n["channels"] = {}
@@ -739,31 +781,71 @@ class RegistryManager:
             if isinstance(ch2_aliases, list):
                 ch2["aliases"] = [str(a).strip().lower() for a in ch2_aliases if str(a).strip()]
 
-        # Increment configuration version for Twin Sync
+        if ch3_type or ch3_name or ch3_aliases is not None:
+            ch3 = (n.get("channels") or {}).setdefault("ch3", {
+                "device_type": "switch",
+                "fullname": f"{device_id}-switch",
+                "name": "Công tắc",
+                "gpio": 5,
+                "rated_watts": 100,
+                "aliases": ["switch"]
+            })
+            if ch3_type:
+                dt = canon_device(ch3_type)
+                ch3["device_type"] = dt
+                ch3["fullname"] = f"{device_id}-{dt}"
+                if "aliases" not in ch3:
+                    ch3["aliases"] = [dt]
+                elif dt not in ch3["aliases"]:
+                    ch3["aliases"].append(dt)
+            if ch3_name:
+                ch3["name"] = ch3_name
+            if isinstance(ch3_aliases, list):
+                ch3["aliases"] = [str(a).strip().lower() for a in ch3_aliases if str(a).strip()]
+
+            caps = n.get("capabilities", [])
+            if "relay_2ch" in caps:
+                n["capabilities"] = [c if c != "relay_2ch" else "relay_3ch" for c in caps]
+            elif "relay_3ch" not in caps:
+                caps.append("relay_3ch")
+                n["capabilities"] = caps
+
+        cur_rl = list(n.get("relay_state") or [0, 0])
+        while len(cur_rl) < len(n.get("channels") or {}):
+            cur_rl.append(0)
+        n["relay_state"] = cur_rl
+
         cur_v = n.get("cfg_version", 1) + 1
         n["cfg_version"] = cur_v
         n["desired_config_version"] = cur_v
         n["sync_status"] = "SYNCING"
         n["last_seen"] = datetime.now(TZ_VN).isoformat()
 
-        # Update configuration dictionary
         if "configuration" not in n:
             n["configuration"] = {"relays": {}, "audio": {"sample_rate": 16000, "volume": 85}}
         n["configuration"]["cfg_version"] = cur_v
         relays = n["configuration"].setdefault("relays", {})
-        if "ch1" in n["channels"]:
+        channels = n.get("channels") or {}
+        if "ch1" in channels:
             relays["ch1"] = {
-                "device_type": n["channels"]["ch1"].get("device_type", "light"),
-                "fullname": n["channels"]["ch1"].get("fullname", f"{device_id}-light"),
-                "name": n["channels"]["ch1"].get("name", "Đèn"),
-                "gpio": n["channels"]["ch1"].get("gpio", 4)
+                "device_type": channels["ch1"].get("device_type", "light"),
+                "fullname": channels["ch1"].get("fullname", f"{device_id}-light"),
+                "name": channels["ch1"].get("name", "Đèn"),
+                "gpio": channels["ch1"].get("gpio", 4)
             }
-        if "ch2" in n["channels"]:
+        if "ch2" in channels:
             relays["ch2"] = {
-                "device_type": n["channels"]["ch2"].get("device_type", "fan"),
-                "fullname": n["channels"]["ch2"].get("fullname", f"{device_id}-fan"),
-                "name": n["channels"]["ch2"].get("name", "Quạt"),
-                "gpio": n["channels"]["ch2"].get("gpio", 5)
+                "device_type": channels["ch2"].get("device_type", "fan"),
+                "fullname": channels["ch2"].get("fullname", f"{device_id}-fan"),
+                "name": channels["ch2"].get("name", "Quạt"),
+                "gpio": channels["ch2"].get("gpio", 5)
+            }
+        if "ch3" in channels:
+            relays["ch3"] = {
+                "device_type": channels["ch3"].get("device_type", "switch"),
+                "fullname": channels["ch3"].get("fullname", f"{device_id}-switch"),
+                "name": channels["ch3"].get("name", "Công tắc"),
+                "gpio": channels["ch3"].get("gpio", 5)
             }
 
         self.save()
@@ -846,7 +928,7 @@ class RegistryManager:
         relays = cfg.get("relays", {})
         ch1 = relays.get("ch1", {})
         ch2 = relays.get("ch2", {})
-        return {
+        payload = {
             "t": "cfg",
             "id": node_id,
             "name": n.get("name", "Voice Node"),
@@ -857,6 +939,9 @@ class RegistryManager:
             "rl2": ch2.get("device_type", "fan"),
             "v": cfg.get("cfg_version", n.get("cfg_version", 1))
         }
+        if "ch3" in relays:
+            payload["rl3"] = relays["ch3"].get("device_type", "switch")
+        return payload
 
     def bump_cfg_version(self, node_id: str) -> int:
         n = self.data["nodes"].get(node_id)
@@ -871,7 +956,6 @@ class RegistryManager:
         self.save()
         return new_v
 
-    # ── Device OS Twin: Desired / Reported Config (Spec Section 4 & 8) ─
     def update_desired_config(self, device_id: str, desired_dict: dict) -> Tuple[int, dict]:
         """
         Cập nhật Desired Configuration từ Gateway/User.
@@ -883,7 +967,7 @@ class RegistryManager:
         now = datetime.now(TZ_VN).isoformat()
         n = self.data["nodes"].get(device_id)
         if not n:
-            # Tạo node tối thiểu nếu chưa có
+
             n = {
                 "device_id": device_id,
                 "name": desired_dict.get("name", f"Node {device_id}"),
@@ -902,7 +986,6 @@ class RegistryManager:
         n["sync_status"] = "SYNCING"
         n["updated_at"] = now
 
-        # Cập nhật identity fields nếu có trong desired_dict
         if "name" in desired_dict: n["name"] = desired_dict["name"]
         if "room" in desired_dict:
             n["room"] = slug(desired_dict["room"])
@@ -910,12 +993,13 @@ class RegistryManager:
         if "location" in desired_dict: n["location"] = desired_dict["location"]
         if "description" in desired_dict: n["description"] = desired_dict["description"]
 
-        # Cập nhật relays configuration
         rl1 = desired_dict.get("rl1", desired_dict.get("relay1"))
         rl2 = desired_dict.get("rl2", desired_dict.get("relay2"))
-        if rl1 or rl2:
+        rl3 = desired_dict.get("rl3", desired_dict.get("relay3"))
+        if rl1 or rl2 or rl3:
             rl1_c = canon_device(rl1) if rl1 else "light"
             rl2_c = canon_device(rl2) if rl2 else "fan"
+            rl3_c = canon_device(rl3) if rl3 else "switch"
             n.setdefault("channels", {})
             n["channels"]["ch1"] = {
                 "device_type": rl1_c, "fullname": f"{device_id}-{rl1_c}",
@@ -925,15 +1009,40 @@ class RegistryManager:
                 "device_type": rl2_c, "fullname": f"{device_id}-{rl2_c}",
                 "name": rl2 or "Quạt", "aliases": [rl2_c], "gpio": 5, "rated_watts": 55
             }
-            n.setdefault("configuration", {})["relays"] = {
+            cfg_relays = {
                 "ch1": {"device_type": rl1_c, "fullname": f"{device_id}-{rl1_c}", "name": rl1 or "Đèn", "gpio": 4},
                 "ch2": {"device_type": rl2_c, "fullname": f"{device_id}-{rl2_c}", "name": rl2 or "Quạt", "gpio": 5}
             }
+            if rl3:
+                n["channels"]["ch3"] = {
+                    "device_type": rl3_c, "fullname": f"{device_id}-{rl3_c}",
+                    "name": rl3 or "Công tắc", "aliases": [rl3_c], "gpio": 5, "rated_watts": 100
+                }
+                cfg_relays["ch3"] = {
+                    "device_type": rl3_c, "fullname": f"{device_id}-{rl3_c}", "name": rl3 or "Công tắc", "gpio": 5
+                }
+            elif "ch3" in (n.get("channels") or {}):
+                cfg_relays["ch3"] = {
+                    "device_type": (n.get("channels") or {}).get("ch3", {}).get("device_type", "switch"),
+                    "fullname": (n.get("channels") or {}).get("ch3", {}).get("fullname", f"{device_id}-switch"),
+                    "name": (n.get("channels") or {}).get("ch3", {}).get("name", "Công tắc"),
+                    "gpio": (n.get("channels") or {}).get("ch3", {}).get("gpio", 5)
+                }
+            n.setdefault("configuration", {})["relays"] = cfg_relays
+            if "ch3" in (n.get("channels") or {}):
+                caps = n.setdefault("capabilities", [])
+                if "relay_2ch" in caps:
+                    n["capabilities"] = [c if c != "relay_2ch" else "relay_3ch" for c in caps]
+                elif "relay_3ch" not in caps:
+                    caps.append("relay_3ch")
 
-        # Đảm bảo node tồn tại trong bảng devices của SQLite
+        cur_rl = list(n.get("relay_state") or [0, 0])
+        while len(cur_rl) < len(n.get("channels") or {}):
+            cur_rl.append(0)
+        n["relay_state"] = cur_rl
+
         self._sync_node_to_sqlite(device_id, n)
 
-        # Lưu vào SQLite
         try:
             with self._get_db() as conn:
                 conn.execute("""
@@ -960,7 +1069,6 @@ class RegistryManager:
 
         self.save()
 
-        # Tạo payload đẩy sang MQTT theo chuẩn Spec Section 4
         desired_payload = {
             "device_id": device_id,
             "version": new_v,
@@ -973,6 +1081,8 @@ class RegistryManager:
             "volume": desired_dict.get("volume", n.get("configuration", {}).get("audio", {}).get("volume", 85)),
             "timestamp": int(datetime.now(timezone.utc).timestamp())
         }
+        if "ch3" in n.get("channels", {}) or rl3:
+            desired_payload["rl3"] = n.get("channels", {}).get("ch3", {}).get("device_type", "switch")
         return new_v, desired_payload
 
     def on_reported_config(self, device_id: str, reported_dict: dict) -> str:
@@ -984,7 +1094,7 @@ class RegistryManager:
         """
         now = datetime.now(TZ_VN).isoformat()
         rep_v = int(reported_dict.get("version", reported_dict.get("cfg_version", reported_dict.get("v", 0))))
-        
+
         n = self.data["nodes"].get(device_id)
         des_v = int(n.get("desired_config_version", n.get("cfg_version", 1))) if n else rep_v
         sync_status = "SYNCED" if rep_v >= des_v else "SYNCING"
@@ -995,7 +1105,6 @@ class RegistryManager:
             n["last_seen"] = now
             if "status" in n: n["status"] = "online"
 
-            # Đảm bảo node đã được ghi vào bảng devices trước khi ghi device_configs (tránh lỗi FK)
             self._sync_node_to_sqlite(device_id, n)
 
             try:
@@ -1023,8 +1132,7 @@ class RegistryManager:
             logger.info(f"🔄 Device Twin sync [{device_id}]: rep_v={rep_v}, des_v={des_v} -> Status={sync_status}")
             return sync_status
         else:
-            # Thiết bị chưa được Claim / Provision vào hệ thống!
-            # KHÔNG tự động thêm vào self.data["nodes"].
+
             if device_id in self.data["pending"]:
                 p = self.data["pending"][device_id]
                 p["cfg"] = rep_v
@@ -1034,7 +1142,7 @@ class RegistryManager:
             return "UNPROVISIONED"
 
     def record_telemetry(self, device_id: str, telemetry_dict: dict):
-        """Lưu bản ghi telemetry từ ESP32 vào SQLite và cập nhật node"""
+        """Lưu bản ghi telemetry từ ESP32 vào SQLite và cập nhật node không chặn event loop"""
         try:
             v = float(telemetry_dict.get("voltage", telemetry_dict.get("v", 0.0)))
             c = float(telemetry_dict.get("current", telemetry_dict.get("c", 0.0)))
@@ -1042,13 +1150,6 @@ class RegistryManager:
             e = float(telemetry_dict.get("energy", telemetry_dict.get("e", 0.0)))
             heap = int(telemetry_dict.get("free_heap", telemetry_dict.get("heap", 0)))
             rssi = int(telemetry_dict.get("wifi_rssi", telemetry_dict.get("rssi", 0)))
-
-            with self._get_db() as conn:
-                conn.execute("""
-                    INSERT INTO telemetry_records (
-                        device_id, voltage, current, power, energy, free_heap, wifi_rssi
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (device_id, v, c, p, e, heap, rssi))
 
             if device_id in self.data["nodes"]:
                 n = self.data["nodes"][device_id]
@@ -1058,9 +1159,81 @@ class RegistryManager:
                     "recorded_at": datetime.now(TZ_VN).isoformat()
                 }
                 if rssi: n["rssi"] = rssi
-                self.update_heartbeat(device_id)
+                if n.get("status") != "NEEDS_REPROVISION":
+                    n["last_seen"] = datetime.now(TZ_VN).isoformat()
+                    n["status"] = "online"
+
+            node_snapshot = copy.deepcopy(self.data["nodes"][device_id]) if device_id in self.data["nodes"] else None
+
+            def _db_work(snapshot=node_snapshot):
+                try:
+                    with self._get_db() as conn:
+                        conn.execute("""
+                            INSERT INTO telemetry_records (
+                                device_id, voltage, current, power, energy, free_heap, wifi_rssi
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (device_id, v, c, p, e, heap, rssi))
+
+                        if snapshot is not None:
+                            self._sync_node_to_sqlite(device_id, snapshot, connection=conn)
+
+                    self._telemetry_write_count += 1
+                    if self._telemetry_write_count % 500 == 0:
+                        self.prune_telemetry()
+                except Exception as ex:
+                    logger.warning(f"Async DB telemetry write failed for {device_id}: {ex}")
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(asyncio.to_thread(_db_work))
+            except RuntimeError:
+                _db_work()
+
         except Exception as err:
             logger.warning(f"record_telemetry error for {device_id}: {err}")
+
+    async def record_telemetry_async(self, device_id: str, telemetry_dict: dict):
+        """Asynchronously record telemetry without blocking the asyncio loop."""
+        await asyncio.to_thread(self.record_telemetry, device_id, telemetry_dict)
+
+    def prune_telemetry(self, max_records: int = 50000, retention_days: int = 7) -> int:
+        """
+        Dọn dẹp (pruning/retention) dữ liệu telemetry:
+        - Xóa bản ghi cũ hơn retention_days (mặc định 7 ngày).
+        - Nếu vượt quá max_records (mặc định 50.000), xóa bản ghi cũ nhất vượt hạn mức.
+        """
+        deleted = 0
+        try:
+            with self._get_db() as conn:
+                # 1. Prune by retention days
+                res1 = conn.execute(
+                    "DELETE FROM telemetry_records WHERE recorded_at < datetime('now', ?)",
+                    (f"-{int(retention_days)} days",)
+                )
+                if res1.rowcount and res1.rowcount > 0:
+                    deleted += res1.rowcount
+
+                # 2. Prune by max records cap
+                cnt_row = conn.execute("SELECT COUNT(*) FROM telemetry_records").fetchone()
+                total_cnt = cnt_row[0] if cnt_row else 0
+                if total_cnt > max_records:
+                    overflow = total_cnt - max_records
+                    res2 = conn.execute("""
+                        DELETE FROM telemetry_records WHERE id IN (
+                            SELECT id FROM telemetry_records ORDER BY id ASC LIMIT ?
+                        )
+                    """, (overflow,))
+                    if res2.rowcount and res2.rowcount > 0:
+                        deleted += res2.rowcount
+
+            if deleted > 0:
+                logger.info(f"🧹 [Telemetry Prune] Cleaned {deleted} records (retention={retention_days}d, max={max_records})")
+        except Exception as e:
+            logger.error(f"prune_telemetry error: {e}")
+        return deleted
+
+    async def prune_telemetry_async(self, max_records: int = 50000, retention_days: int = 7) -> int:
+        return await asyncio.to_thread(self.prune_telemetry, max_records=max_records, retention_days=retention_days)
 
     def record_ota_history(self, device_id: str, firmware_file: str, status: str,
                            file_sha256: str = "", error_message: str = "",
@@ -1081,24 +1254,6 @@ class RegistryManager:
             logger.info(f"📜 OTA history recorded: {device_id} -> {status}")
         except Exception as err:
             logger.error(f"record_ota_history error: {err}")
-
-    def get_ota_history(self, device_id: Optional[str] = None) -> list:
-        """Truy vấn danh sách lịch sử OTA từ SQLite"""
-        try:
-            with self._get_db() as conn:
-                if device_id:
-                    rows = conn.execute(
-                        "SELECT * FROM ota_history WHERE device_id = ? ORDER BY started_at DESC LIMIT 50",
-                        (device_id,)
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        "SELECT * FROM ota_history ORDER BY started_at DESC LIMIT 50"
-                    ).fetchall()
-                return [dict(r) for r in rows]
-        except Exception as err:
-            logger.error(f"get_ota_history error: {err}")
-            return []
 
     def get_device_twin(self, device_id: str) -> Optional[dict]:
         """Truy vấn toàn bộ Device OS Twin từ SQLite"""
@@ -1156,8 +1311,6 @@ class RegistryManager:
             logger.error(f"get_ota_history error: {e}")
             return []
 
-
-    # ── Legacy shim: register_node (để firmware cũ vẫn chạy) ───────────
     def register_node(self, node_id: str, mac: str, channels: dict = None,
                       area: str = None, description: str = None) -> dict:
         room = slug(area) if area else "unknown"
@@ -1170,7 +1323,7 @@ class RegistryManager:
             if channels: n["channels"].update(channels)
             self.save()
             return n
-        # node mới dạng legacy → tạo luôn (coi như đã provision)
+
         now = datetime.now(TZ_VN).isoformat()
         self.data["nodes"][node_id] = {
             "mac": mac, "room": room, "aliases": ROOM_ALIASES.get(room, [room]),
@@ -1192,7 +1345,6 @@ class RegistryManager:
         self.save()
         return True
 
-    # ── Resolver 2 lớp (chống ảo giác) ──────────────────────────────────
     def find_device_candidates(self, device_type: str, area: str = None) -> List[Tuple[str, str]]:
         """
         Từ intent (device, location) → (node_id, channel).
@@ -1203,15 +1355,18 @@ class RegistryManager:
         area_s = slug(area) if area else ""
 
         def matches_channel(ch_id: str, ch: dict) -> bool:
-            if not dev: return True  # không nói thiết bị → chấp nhận mọi channel
+            if not dev: return True
             cid_s = slug(ch_id)
             if dev in (cid_s, f"relay_{cid_s[-1]}", f"cong_tac_{cid_s[-1]}", f"ch{cid_s[-1]}", f"relay{cid_s[-1]}", f"kenh_{cid_s[-1]}"):
                 return True
             ct = slug(ch.get("device_type", ""))
             aliases = [slug(a) for a in ch.get("aliases", [])]
+            dev_c = canon_device(dev)
+            ct_c = canon_device(ct)
+            if dev_c == ct_c or any(dev_c == canon_device(a) for a in aliases): return True
             if dev == slug(ch.get('name', '')) or dev == slug(ch.get('fullname', '')): return True
             if dev == ct or dev in aliases or (ct and ct in dev): return True
-            # substring
+
             if ct and (dev in ct or ct in dev): return True
             if any(dev in a or a in dev for a in aliases): return True
             return False
@@ -1222,7 +1377,7 @@ class RegistryManager:
             aliases = [slug(a) for a in node.get("aliases", [])]
             if area_s == nr or area_s in nr or nr in area_s: return True
             if any(area_s in a or a in area_s for a in aliases): return True
-            # ROOM_ALIASES mở rộng
+
             for canon, alist in ROOM_ALIASES.items():
                 if area_s in [slug(x) for x in alist] and nr == canon: return True
                 if nr in [slug(x) for x in alist] and area_s == canon: return True
@@ -1232,7 +1387,7 @@ class RegistryManager:
         candidates = []
         for nid, node in self.data["nodes"].items():
             if node.get("status") != "online": continue
-            # Check last_seen freshness for mock nodes without physical MAC
+
             last_seen_str = node.get("last_seen")
             if last_seen_str and not node.get("mac"):
                 try:
@@ -1253,7 +1408,7 @@ class RegistryManager:
         if len(candidates) == 1:
             return candidates[0]
         if len(candidates) > 1:
-            # 1. Prioritize nodes with physical MAC and fresh heartbeat (< 120s)
+
             now_utc = datetime.now(timezone.utc)
             fresh_candidates = []
             for nid, ch_id in candidates:
@@ -1270,7 +1425,7 @@ class RegistryManager:
                         pass
             if len(fresh_candidates) == 1:
                 return fresh_candidates[0]
-            # 2. If room was unspecified and all fresh candidates belong to the same physical node
+
             if not area and len(fresh_candidates) > 1:
                 unique_nodes = {nid for nid, ch in fresh_candidates}
                 if len(unique_nodes) == 1:
@@ -1285,7 +1440,6 @@ class RegistryManager:
         self._seq[node_id] = (self._seq.get(node_id, 0) + 1) & 0xFFFF
         return self._seq[node_id]
 
-    # ── Helpers cho LLM prompt & grammar ─────────────────────────────────
     def allowed_rooms(self) -> List[str]:
         rooms = set()
         for n in self.data["nodes"].values():
@@ -1296,7 +1450,7 @@ class RegistryManager:
                 sa = slug(a)
                 if sa and sa != "unknown":
                     rooms.add(sa)
-        # Phòng cơ bản luôn hợp lệ
+
         rooms.update(["phong_khach", "phong_ngu", "phong_bep", "phong_tam", "ban_cong"])
         return sorted(rooms)
 
@@ -1309,8 +1463,8 @@ class RegistryManager:
                 for a in ch.get("aliases", []):
                     sa = slug(a)
                     if sa: devs.add(sa)
-        # luôn cho phép các thiết bị cơ bản và các kênh relay / all
-        devs.update(["den", "quat", "tivi", "dieu_hoa", "binh_nong_lanh", "den_ngu", "den_tran", "light", "fan", "ch1", "ch2", "relay_1", "relay_2", "all"])
+
+        devs.update(["den", "quat", "tivi", "dieu_hoa", "binh_nong_lanh", "den_ngu", "den_tran", "light", "fan", "socket", "switch", "o_cam", "ch1", "ch2", "ch3", "relay_1", "relay_2", "relay_3", "all"])
         return sorted(devs)
 
     def inventory_for_prompt(self) -> str:
@@ -1329,21 +1483,34 @@ class RegistryManager:
         devs = self.allowed_devices()
         room_alt = " | ".join(f'"\\"{r}\\""' for r in rooms)
         dev_alt = " | ".join(f'"\\"{d}\\""' for d in devs)
-        # GBNF cho llama.cpp: https://github.com/ggerganov/llama.cpp/blob/master/grammars/README.md
+
         return f'''
-root ::= "{{" ws "\\"voice_reply\\"" ws ":" ws string ws "," ws "\\"command\\"" ws ":" ws command ws "}}" 
+root ::= "{{" ws "\\"voice_reply\\"" ws ":" ws string ws "," ws "\\"command\\"" ws ":" ws command ws "}}"
 command ::= "{{" ws "\\"action\\"" ws ":" ws action ws "," ws "\\"device\\"" ws ":" ws device ws "," ws "\\"location\\"" ws ":" ws location ws "," ws "\\"value\\"" ws ":" ws value ws "}}"
 action ::= "\\"turn_on\\"" | "\\"turn_off\\"" | "\\"unknown\\""
 device ::= {dev_alt} | "null"
 location ::= {room_alt} | "null"
 value ::= [0-9]+ | "null"
 string ::= "\\"" chars "\\""
-chars ::= [^"\\\\]* 
+chars ::= [^"\\\\]*
 ws ::= [ \\t\\n]*
 '''.strip()
 
-    # ── Getters ──────────────────────────────────────────────────────────
     def get_all_nodes(self) -> dict: return self.data.get("nodes", {})
+
+    def get_user_accessible_nodes(self, user: Optional[dict] = None) -> dict:
+        """Trả về danh sách nodes mà user được phép truy cập theo phân quyền."""
+        all_nodes = self.get_all_nodes()
+        if not user or user.get("role") == "admin":
+            return all_nodes
+        gw = getattr(self, "gateway", None)
+        auth = getattr(gw, "auth", None) if gw else getattr(self, "auth", None)
+        if auth and hasattr(auth, "filter_nodes"):
+            return auth.filter_nodes(user, all_nodes)
+        if "device_ids" in user:
+            allowed = set(user["device_ids"])
+            return {k: v for k, v in all_nodes.items() if k in allowed}
+        return {}
     def get_pending(self) -> dict: return self.data.get("pending", {})
     def get_rooms(self) -> dict: return self.data.get("rooms", {})
     def get_online_nodes(self) -> dict:
@@ -1365,14 +1532,25 @@ ws ::= [ \\t\\n]*
                 return
             self.data["nodes"][node_id]["last_seen"] = datetime.now(TZ_VN).isoformat()
             self.data["nodes"][node_id]["status"] = "online"
-            self.save(changed_node=node_id)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(asyncio.to_thread(self.save, node_id))
+            except RuntimeError:
+                self.save(changed_node=node_id)
+
+    async def update_heartbeat_async(self, node_id: str):
+        """Execute heartbeat persistence in worker thread."""
+        await asyncio.to_thread(self.update_heartbeat, node_id)
+
+    async def save_async(self, changed_node=None):
+        """Execute SQLite registry persistence in worker thread."""
+        await asyncio.to_thread(self.save, changed_node)
     def mark_offline(self, node_id: str):
         if node_id in self.data["nodes"]:
             self.data["nodes"][node_id]["status"] = "offline"
             self.save(changed_node=node_id)
             logger.warning(f"Node offline: {node_id}")
 
-    # ── 3-Tier Zone Management ──────────────────────────────────────────
     def register_zone(self, zone_id: str, display_name: str, controller_id: Optional[str] = None):
         """Đăng ký Zone (Tầng 2) quản lý một cụm các node chấp hành T1."""
         try:

@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gateway"))
 from verify_engine import CommandVerifier, VerifyResult
 from web_server import WebServer
 
-
 class RelayHTTP(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.auth = Mock()
@@ -94,7 +93,7 @@ class RelayHTTP(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(status, 200)
                 self.assertEqual(body["verify"], result.value)
                 self.assertIs(body["success"], result in (
-                    VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD,
+                    VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE,
                 ))
                 self.verify.assert_awaited_once_with("AB1", "ch1", "turn_on")
 
@@ -151,7 +150,6 @@ class RelayHTTP(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(body["error"], "Insufficient permissions")
                     self.verify.assert_not_called()
 
-
 class NodeConnectionStatus(unittest.TestCase):
     def test_stale_online_records_are_not_advertised_as_connected(self):
         from datetime import datetime, timezone
@@ -165,8 +163,7 @@ class NodeConnectionStatus(unittest.TestCase):
         self.assertEqual(result['nodes']['old']['status'], 'offline')
         self.assertEqual(result['nodes']['broken']['status'], 'offline')
         self.assertEqual(result['nodes']['fresh']['status'], 'online')
-        self.assertEqual(records['old']['status'], 'online')  # snapshot doesn't mutate storage
-
+        self.assertEqual(records['old']['status'], 'online')
 
 if __name__ == "__main__":
     unittest.main()

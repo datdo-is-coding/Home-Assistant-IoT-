@@ -1,8 +1,3 @@
-/**
- * @file entity_extractor.cpp
- * @brief Vietnamese Entity Extractor Implementation
- */
-
 #include "entity_extractor.h"
 #include "nlu/normalizer/vietnamese_normalizer.h"
 #include <cstdlib>
@@ -79,7 +74,7 @@ RoomType EntityExtractor::extractRoom(const std::string& text) {
 }
 
 bool EntityExtractor::extractNumericValue(const std::string& text, float& out_val) {
-    // 1. Scan for explicit digit sequences (e.g. "25", "26.5", "100")
+
     for (size_t i = 0; i < text.length(); ++i) {
         if (std::isdigit(static_cast<unsigned char>(text[i]))) {
             char* end_ptr = nullptr;
@@ -91,7 +86,6 @@ bool EntityExtractor::extractNumericValue(const std::string& text, float& out_va
         }
     }
 
-    // 2. Scan for common Vietnamese spoken numbers (16 - 32 for temperatures)
     static const struct {
         const char* word;
         float val;

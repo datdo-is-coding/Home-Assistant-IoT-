@@ -1,0 +1,13 @@
+case_id,level,topology,seed,repetitions,status,observed,expected,evidence,issue_id
+BASE-01,HOST,T0,N/A,1,PASS,Full inventory captured in manifest.json with SHA-256 hashes,Traceable binary and toolchain inventory,manifest.json,None
+BASE-02,HOST,T0,N/A,1,PASS,Core service mode verified; legacy / pure voice flags mapped,Explicit responsibility table for all services,manifest.json,None
+BASE-03,HOST,T0,N/A,1,PASS,"Monotonic clock, boot_id, sequence, and latency bounds verified",Observability metrics present for test points,test_hc_protocol.py,None
+BASE-04,HOST,T0,N/A,1,PASS,Clean bootstrap via `init` -> `integrity` ok; file perms 0600,"DB integrity ok, no manual intervention needed",test_hc_service_integration.py,None
+BASE-05,STATIC,T0,N/A,1,PASS,"Dart analysis: 0 errors, 0 warnings, 106 info; compiler warnings triaged",No compiler errors ignored; style debt isolated,evidence/dart_analyze.txt,None
+LOG-01,STATIC,T0,N/A,1,PASS,Call graph audited; single path via registry.command outbox with TTL & idempotency,No secondary command paths bypassing permissions/TTL/safety,docs/architecture/core_v1_design.md,None
+LOG-02,STATIC,T0,N/A,1,PASS,Registration state machine audited; transitions require cryptographically verified proof,No auto-transition from invalid to success,Gateway/gateway/core_v1/provisioning.py,None
+LOG-03,STATIC,T0,N/A,1,PASS,Arbitrage matrix verified: Safety OFF has absolute priority; local actuation overrides remote,"Reproducible precedence, stale commands cannot override",Gateway/gateway/core_v1/registry.py,None
+LOG-04,STATIC,T0,N/A,1,PASS,"Concurrency verified: asyncio.shield on ASR, asr_lock, queue decoupling in radio",Radio callbacks do not block on flash/inference,Gateway/gateway/core_v1/voice.py,None
+LOG-05,HOST,T0,N/A,1,PASS,"All 138 test targets executed with 0 errors (103 GW, 7 FW, 24 Flutter, 1 Simulator)",All test suites pass with exact execution counts,metrics.json,None
+INT-01,HOST,T1,N/A,1,PASS,Implemented /api/v1/voice/ws; E2E WebSocket PCM speech-to-command verified,"Route exists, requests reach registry and command queue",test_hc_service_integration.py,None
+INT-02,HOST,T1,N/A,1,PASS,Cross-home token & device access rejected; legacy commands fail closed,"Strict tenant separation, no cross-home mutation",test_hc_service_integration.py,None

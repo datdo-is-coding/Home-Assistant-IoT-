@@ -4,7 +4,6 @@ import time
 import paho.mqtt.client as mqtt
 import psycopg2
 
-# Lấy thông số cấu hình từ biến môi trường
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "esp32/sensor/data")
@@ -54,7 +53,7 @@ def save_to_database(data):
     try:
         if db_conn.closed:
             db_conn = get_db_connection()
-            
+
         device_id = data.get("device_id") or data.get("device", "esp32_unknown")
         voltage = data.get("voltage")
         current = data.get("current")
@@ -65,8 +64,8 @@ def save_to_database(data):
 
         with db_conn.cursor() as cur:
             sql = """
-                INSERT INTO sensor_logs 
-                (device_id, voltage, current, power, energy, power_factor, frequency) 
+                INSERT INTO sensor_logs
+                (device_id, voltage, current, power, energy, power_factor, frequency)
                 VALUES (%s, %s, %s, %s, %s, %s, %s);
             """
             cur.execute(sql, (device_id, voltage, current, power, energy, power_factor, frequency))

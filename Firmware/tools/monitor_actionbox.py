@@ -5,7 +5,6 @@ import json
 import time
 import serial
 
-# Enable ANSI escape sequences on Windows console
 if sys.platform == 'win32':
     os.system('')
     try:
@@ -25,18 +24,16 @@ def render_dashboard(data, last_log="", port="COM10"):
     ch1 = data["ch"][1]
     ch2 = data["ch"][2]
 
-    # Current formatting
     c1_ma = ch1.get("current_ma", 0)
     c1_a = c1_ma / 1000.0
     c1_raw = ch1.get("raw_i", 0)
-    c1_power = int(c1_a * 220.0) # Estimated active power at 220V
+    c1_power = int(c1_a * 220.0)
 
     c2_ma = ch2.get("current_ma", 0)
     c2_a = c2_ma / 1000.0
     c2_raw = ch2.get("raw_i", 0)
     c2_power = int(c2_a * 220.0)
 
-    # Status indicators with colors
     if c1_ma > 100:
         c1_status = "\033[1;32m● LOAD ACTIVE  \033[0m"
         c1_color = "\033[1;33m"
@@ -54,7 +51,7 @@ def render_dashboard(data, last_log="", port="COM10"):
     pkt_count = data.get("packets", 0)
 
     out = []
-    # Position cursor at row 1, col 1 (in-place rewrite)
+
     out.append("\033[H")
     out.append("╔══════════════════════════════════════════════════════════════════════════════╗\n")
     out.append(f"║\033[1;36m                     AETHERIA ACTIONBOX — REALTIME MONITOR                    \033[0m║\n")
@@ -96,7 +93,6 @@ def main():
         print(f"\033[1;31mError opening {port}: {e}\033[0m")
         return
 
-    # Clear screen and hide cursor
     sys.stdout.write("\033[2J\033[?25l")
     sys.stdout.flush()
 
@@ -113,7 +109,7 @@ def main():
                     text = ""
 
                 if text:
-                    # Match BL0942 driver log: Ch1: I_RMS=5369 mA (raw_i=5369645, 0x51EF2D), V_RMS=2 V, P=15 W
+
                     m_bl = re.search(r'Ch([12]):\s*I_RMS=(\d+)\s*mA\s*\(raw_i=(\d+)', text)
                     if m_bl:
                         ch_num = int(m_bl.group(1))
@@ -125,7 +121,6 @@ def main():
                             data["packets"] += 1
                             last_log = f"Ch{ch_num} update: {i_ma} mA (ADC: {raw})"
 
-                    # Match Telemetry JSON
                     m_json = re.search(r'Telemetry:\s*(\{.*\})', text)
                     if m_json:
                         try:
@@ -140,7 +135,7 @@ def main():
                             pass
 
             now = time.time()
-            if now - last_render >= 0.15:  # ~7 fps refresh
+            if now - last_render >= 0.15:
                 render_dashboard(data, last_log=last_log, port=port)
                 last_render = now
 
@@ -151,7 +146,7 @@ def main():
         render_dashboard(data, last_log=last_log, port=port)
     finally:
         ser.close()
-        # Restore cursor and clear below
+
         sys.stdout.write("\033[?25h\n\n\033[1;32mMonitor stopped.\033[0m\n")
         sys.stdout.flush()
 

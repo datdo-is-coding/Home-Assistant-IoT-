@@ -15,7 +15,6 @@ class OTAUpdateScreen extends StatefulWidget {
 class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
   final EnergyService _service = EnergyService();
 
-  // Hardware OTA state
   String _s3Ip = "192.168.11.181";
   String _wroomIp = "192.168.11.182";
   int _selectedTargetIndex = 0;
@@ -26,7 +25,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
   String _statusMessage = "Vui lòng chọn file firmware (.bin) từ bộ nhớ để nạp OTA.";
   bool _isSuccess = false;
 
-  // Android App OTA state
   String _currentAppVersion = "1.0.10";
   String _serverAppVersion = "1.0.0";
   String _serverApkUrl = "";
@@ -55,8 +53,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
       });
     }
   }
-
-  // ── HARDWARE OTA LOGIC ────────────────────────────────
 
   String get _targetIp {
     if (_selectedTargetIndex == 0) return _s3Ip;
@@ -128,8 +124,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
       }
     });
   }
-
-  // ── APP SELF-OTA LOGIC ────────────────────────────────
 
   Future<void> _checkAppVersion() async {
     setState(() => _isCheckingApp = true);
@@ -253,7 +247,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-          // ── SECTION 1: ANDROID APP SELF-OTA ──────────
           _section("📱 1. CẬP NHẬT APP ANDROID (APP SELF-OTA)", child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -331,12 +324,10 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
           )),
           const SizedBox(height: 16),
 
-          // ── SECTION 2: HARDWARE FIRMWARE OTA ──────────
           _section("⚡ 2. NẠP FIRMWARE OTA PHẦN CỨNG (ESP32)", child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
 
-              // Target Node selector
               const Text("CHỌN THIẾT BỊ NẠP:",
                   style: TextStyle(color: Color(0xFF94A3B8), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
               const SizedBox(height: 6),
@@ -346,7 +337,7 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
                 _targetChip(1, "⚡ WROOM Slave", _wroomIp),
               ]),
               const SizedBox(height: 8),
-              // Pick file button & selected file info
+
               Row(children: [
                 ElevatedButton.icon(
                   onPressed: _isUploading ? null : _pickFirmwareFile,
@@ -374,7 +365,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
               ]),
               const SizedBox(height: 12),
 
-              // Progress bar
               if (_isUploading) ...[
                 LinearProgressIndicator(
                   value: _uploadProgress,
@@ -385,7 +375,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
                 const SizedBox(height: 8),
               ],
 
-              // Status message box
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
@@ -408,7 +397,6 @@ class _OTAUpdateScreenState extends State<OTAUpdateScreen> {
               ),
               const SizedBox(height: 14),
 
-              // Start Upload Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(

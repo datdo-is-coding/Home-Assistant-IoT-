@@ -1,8 +1,3 @@
-/**
- * @file audio_output_router.cpp
- * @brief Downlink Audio / TTS Router Implementation
- */
-
 #include "audio_output_router.h"
 #include <cstring>
 #include <algorithm>

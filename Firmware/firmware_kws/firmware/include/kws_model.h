@@ -1,5 +1,3 @@
-// Tự động tạo bởi export_fused_model_header.py cho ESP32-S3
-// Mô hình DSCNN KWS đã hợp nhất BatchNorm (Fused BatchNorm)
 #ifndef KWS_MODEL_H
 #define KWS_MODEL_H
 
@@ -537,21 +535,13 @@ static const float b_fc[10] = {
     -0.29976672f, -0.06963301f
 };
 
-
-// Hàm suy luận mạng nơ-ron TinyKWS trực tiếp trên ESP32-S3
-// Đầu vào: ma trận MFCC [99 frames x 13 coeffs] = 1,287 float
-// Đầu ra: mảng xác suất 10 lớp [NUM_CLASSES]
 inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
-    // Kích thước các lớp trung gian
-    // pool1: 16 x 49 x 6
-    // pool2: 32 x 24 x 3
-    // pool3: 64 x 12 x 1
+
     static float pool1[16 * 49 * 6];
-    float* pool2 = pool1; // Tái sử dụng bộ nhớ pool1 (2304 floats <= 4704 floats)
-    float* pool3 = pool1; // Tái sử dụng bộ nhớ pool1 (768 floats <= 4704 floats)
+    float* pool2 = pool1;
+    float* pool3 = pool1;
     static float dw_buf[32 * 49 * 6];
 
-    // 1. Conv1 (1 -> 16, 3x3 pad 1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 16; oc++) {
         const float* w_k = &w_c1[oc * 9];
         float bias = b_c1[oc];
@@ -577,7 +567,7 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
                                 }
                             }
                         }
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -586,7 +576,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         }
     }
 
-    // 2. Block 2: DW2 (16 ch, 3x3 pad 1)
     for (int c = 0; c < 16; c++) {
         const float* w_k = &w_dw2[c * 9];
         float bias = b_dw2[c];
@@ -609,7 +598,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         }
     }
 
-    // PW2 (16 -> 32, 1x1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 32; oc++) {
         float bias = b_pw2[oc];
         const float* pw_weights = &w_pw2[oc * 16];
@@ -626,7 +614,7 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
                         for (int ic = 0; ic < 16; ic++) {
                             sum += dw_buf[(ic * 49 + r) * 6 + c] * pw_weights[ic];
                         }
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -635,7 +623,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         }
     }
 
-    // 3. Block 3: DW3 (32 ch, 3x3 pad 1)
     for (int c = 0; c < 32; c++) {
         const float* w_k = &w_dw3[c * 9];
         float bias = b_dw3[c];
@@ -658,7 +645,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         }
     }
 
-    // PW3 (32 -> 64, 1x1) + ReLU + MaxPool(2,2)
     for (int oc = 0; oc < 64; oc++) {
         float bias = b_pw3[oc];
         const float* pw_weights = &w_pw3[oc * 32];
@@ -676,7 +662,7 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
                         for (int ic = 0; ic < 32; ic++) {
                             sum += dw_buf[(ic * 24 + r) * 3 + c] * pw_weights[ic];
                         }
-                        if (sum < 0.0f) sum = 0.0f; // ReLU
+                        if (sum < 0.0f) sum = 0.0f;
                         if (sum > max_val) max_val = sum;
                     }
                 }
@@ -685,7 +671,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         }
     }
 
-    // 4. Global Average Pooling (64 ch x 12 -> 64)
     float gap[64];
     for (int c = 0; c < 64; c++) {
         float sum = 0.0f;
@@ -695,7 +680,6 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
         gap[c] = sum / 12.0f;
     }
 
-    // 5. Fully Connected (64 -> NUM_CLASSES) + Softmax
     float logits[NUM_CLASSES];
     float max_logit = -1e9f;
     for (int k = 0; k < NUM_CLASSES; k++) {
@@ -718,4 +702,4 @@ inline void kws_run_inference(const float* mfcc_in, float* out_probs) {
     }
 }
 
-#endif // KWS_MODEL_H
+#endif

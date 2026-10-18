@@ -34,11 +34,9 @@ def main():
     class_names = meta["classes"]
     num_classes = len(class_names)
 
-    # Normalize test input
     X_test_norm = (X_test - mean) / std
     X_test_norm = np.expand_dims(X_test_norm, 1).astype(np.float32)
 
-    # Run FP32 inference
     print("Evaluating FP32 model...")
     sess_fp32 = ort.InferenceSession(FP32_PATH)
     t0 = time.perf_counter()
@@ -50,7 +48,6 @@ def main():
     probs_fp32 = np.array(probs_fp32)
     preds_fp32 = np.argmax(probs_fp32, axis=1)
 
-    # Run INT8 inference
     print("Evaluating INT8 model...")
     sess_int8 = ort.InferenceSession(INT8_PATH)
     t0 = time.perf_counter()
@@ -68,7 +65,6 @@ def main():
     size_fp32 = os.path.getsize(FP32_PATH) / 1024
     size_int8 = os.path.getsize(INT8_PATH) / 1024
 
-    # Per-class accuracy
     per_class_fp32 = []
     per_class_int8 = []
     for c in range(num_classes):
@@ -80,31 +76,27 @@ def main():
             per_class_fp32.append(0.0)
             per_class_int8.append(0.0)
 
-    # Confusion matrices
     cm_fp32 = confusion_matrix(y_test, preds_fp32, labels=range(num_classes))
     cm_int8 = confusion_matrix(y_test, preds_int8, labels=range(num_classes))
     cm_fp32_norm = cm_fp32.astype('float') / cm_fp32.sum(axis=1)[:, np.newaxis] * 100
     cm_int8_norm = cm_int8.astype('float') / cm_int8.sum(axis=1)[:, np.newaxis] * 100
 
-    # Probability difference
     prob_diff = np.abs(probs_fp32 - probs_int8)
     max_prob_diff = np.max(prob_diff, axis=1)
 
     print(f"FP32 Acc: {acc_fp32:.2f}%, INT8 Acc: {acc_int8:.2f}%")
     print(f"FP32 Size: {size_fp32:.2f} KB, INT8 Size: {size_int8:.2f} KB")
 
-    # Generate 4-panel Comparison Figure
     fig = plt.figure(figsize=(18, 12), facecolor='#0f172a')
-    fig.suptitle('SO SÁNH ĐÁNH GIÁ MÔ HÌNH: FLOAT32 (GỐC) vs INT8 (QUANTIZED QDQ)', 
+    fig.suptitle('SO SÁNH ĐÁNH GIÁ MÔ HÌNH: FLOAT32 (GỐC) vs INT8 (QUANTIZED QDQ)',
                  fontsize=20, fontweight='bold', color='#f8fafc', y=0.97)
 
-    # 1. Bar Chart: Per-Class Accuracy Comparison (Top Left)
     ax1 = plt.subplot(2, 2, 1, facecolor='#1e293b')
     x = np.arange(num_classes)
     width = 0.38
-    rects1 = ax1.bar(x - width/2, per_class_fp32, width, label=f'FP32 ({acc_fp32:.2f}%)', 
+    rects1 = ax1.bar(x - width/2, per_class_fp32, width, label=f'FP32 ({acc_fp32:.2f}%)',
                      color='#38bdf8', edgecolor='#0284c7', alpha=0.9, zorder=3)
-    rects2 = ax1.bar(x + width/2, per_class_int8, width, label=f'INT8 ({acc_int8:.2f}%)', 
+    rects2 = ax1.bar(x + width/2, per_class_int8, width, label=f'INT8 ({acc_int8:.2f}%)',
                      color='#f43f5e', edgecolor='#be123c', alpha=0.9, zorder=3)
 
     ax1.set_title('1. Độ chính xác theo từng từ khóa (Per-class Accuracy %)', fontsize=13, fontweight='bold', color='#e2e8f0', pad=12)
@@ -118,7 +110,6 @@ def main():
     for text in legend1.get_texts():
         text.set_color('#f1f5f9')
 
-    # Add labels on top of bars
     for rect in rects1:
         h = rect.get_height()
         ax1.annotate(f'{h:.1f}', xy=(rect.get_x() + rect.get_width() / 2, h),
@@ -130,7 +121,6 @@ def main():
                      xytext=(0, 2), textcoords="offset points", ha='center', va='bottom',
                      fontsize=8, color='#fda4af', fontweight='semibold')
 
-    # 2. Key Metrics Summary Cards / Bar (Top Right)
     ax2 = plt.subplot(2, 2, 2, facecolor='#1e293b')
     metrics_names = ['Accuracy (%)', 'Latency (ms x100)', 'Model Size (KB)', 'Class Error Drop (%)']
     fp32_vals = [acc_fp32, latency_fp32 * 100, size_fp32, 0.0]
@@ -161,7 +151,6 @@ def main():
                      xytext=(0, 2), textcoords="offset points", ha='center', va='bottom',
                      fontsize=9, color='#d8b4fe', fontweight='bold')
 
-    # Info box on ax2
     summary_text = (
         f"- ĐỘ LỆCH CHÍNH XÁC: -{acc_fp32 - acc_int8:.2f}%\n"
         f"- SAI SỐ XÁC SUẤT TB (Max Δ): {np.mean(max_prob_diff)*100:.2f}%\n"
@@ -172,7 +161,6 @@ def main():
              fontsize=10, color='#fef08a', fontweight='semibold',
              bbox=dict(boxstyle='round,pad=0.6', facecolor='#0f172a', edgecolor='#eab308', alpha=0.9))
 
-    # 3. Confusion Matrix: FP32 (Bottom Left)
     ax3 = plt.subplot(2, 2, 3, facecolor='#1e293b')
     im3 = ax3.imshow(cm_fp32_norm, cmap='Blues', vmin=0, vmax=100)
     ax3.set_title(f'3. Ma trận nhầm lẫn FP32 (Tổng Acc: {acc_fp32:.2f}%)', fontsize=13, fontweight='bold', color='#e2e8f0', pad=12)
@@ -189,7 +177,6 @@ def main():
             ax3.text(j, i, f'{val:.0f}%' if val >= 1 else '', ha='center', va='center',
                      color=color, fontsize=8, fontweight='semibold')
 
-    # 4. Confusion Matrix: INT8 (Bottom Right)
     ax4 = plt.subplot(2, 2, 4, facecolor='#1e293b')
     im4 = ax4.imshow(cm_int8_norm, cmap='Purples', vmin=0, vmax=100)
     ax4.set_title(f'4. Ma trận nhầm lẫn INT8 (Tổng Acc: {acc_int8:.2f}%)', fontsize=13, fontweight='bold', color='#e2e8f0', pad=12)

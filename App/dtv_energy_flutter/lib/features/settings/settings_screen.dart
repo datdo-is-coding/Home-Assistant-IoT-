@@ -40,7 +40,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Header
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -70,7 +70,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // APPEARANCE SECTION
             _buildSectionHeader('Giao diện & Hiển thị'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -124,7 +123,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // HOME MANAGEMENT
             _buildSectionHeader('Quản lý ngôi nhà'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -163,7 +161,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // HARDWARE & NETWORK
             _buildSectionHeader('Phần cứng & Trợ lý ảo'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -221,7 +218,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // NOTIFICATIONS
             _buildSectionHeader('Thông báo'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -274,7 +270,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // ENGINEERING / ADVANCED
             _buildSectionHeader('Kỹ thuật & Cấu hình nâng cao'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -347,7 +342,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
             ),
 
-            // ABOUT
             _buildSectionHeader('Thông tin ứng dụng'),
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

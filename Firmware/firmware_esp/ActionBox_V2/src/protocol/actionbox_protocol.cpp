@@ -1,8 +1,3 @@
-/**
- * @file actionbox_protocol.cpp
- * @brief Idempotent JSON Protocol Implementation using cJSON
- */
-
 #include "actionbox_protocol.h"
 #include "app_config.h"
 #include "nvs_storage.h"
@@ -108,7 +103,7 @@ esp_err_t protocol_parse_command(const char *json_str, ActionBoxCommand *out_cmd
 
     out_cmd->version = (uint32_t)item_ver->valueint;
     if (out_cmd->version != APP_PROTOCOL_VERSION) {
-        ESP_LOGW(TAG, "Unsupported protocol version: %lu (Expected: %d)", 
+        ESP_LOGW(TAG, "Unsupported protocol version: %lu (Expected: %d)",
                  out_cmd->version, APP_PROTOCOL_VERSION);
         cJSON_Delete(root);
         return ESP_ERR_INVALID_VERSION;
@@ -123,7 +118,7 @@ esp_err_t protocol_parse_command(const char *json_str, ActionBoxCommand *out_cmd
     cJSON* revision = cJSON_GetObjectItem(root, "config_version");
     if (!cJSON_IsString(uid) || strcmp(uid->valuestring, s_hardware_uid) != 0 ||
         strcmp(out_cmd->node_id, cfg->node_id) != 0) {
-        ESP_LOGD(TAG, "Packet node_id '%s' does not match local node_id '%s'", 
+        ESP_LOGD(TAG, "Packet node_id '%s' does not match local node_id '%s'",
                  out_cmd->node_id, cfg->node_id);
         cJSON_Delete(root);
         return ESP_ERR_NOT_FOUND;
@@ -150,7 +145,6 @@ esp_err_t protocol_parse_command(const char *json_str, ActionBoxCommand *out_cmd
     out_cmd->channel = item_ch ? (uint8_t)item_ch->valueint : 0;
     out_cmd->timestamp = item_ts ? (uint32_t)item_ts->valueint : 0;
 
-    /* Parse optional configuration payloads */
     if (out_cmd->cmd == CMD_TYPE_SET_CONFIG) {
         cJSON *item_new_nid = cJSON_GetObjectItem(root, "new_node_id");
         cJSON *item_new_rid = cJSON_GetObjectItem(root, "new_room_id");
@@ -260,7 +254,6 @@ esp_err_t protocol_serialize_response(const ActionBoxResponse *resp, char *out_j
     cJSON_free(rendered);
     cJSON_Delete(root);
 
-    /* Record into idempotency cache */
     cache_response(resp->request_id, resp->session_id, out_json);
     return ESP_OK;
 }
@@ -335,7 +328,7 @@ esp_err_t protocol_serialize_fault_alert(uint8_t channel, RelayFault fault_type,
     cJSON_AddStringToObject(root, "node_id", cfg->node_id);
     cJSON_AddNumberToObject(root, "channel", channel);
     cJSON_AddNumberToObject(root, "fault_code", (int)fault_type);
-    cJSON_AddStringToObject(root, "fault_name", 
+    cJSON_AddStringToObject(root, "fault_name",
         (fault_type == RELAY_FAULT_OVERCURRENT) ? "OVERCURRENT_CUTOFF" : "HARDWARE_FAULT");
     cJSON_AddNumberToObject(root, "measured_current_ma", current_ma);
     cJSON_AddNumberToObject(root, "timestamp_ms", (uint32_t)(esp_timer_get_time() / 1000));
@@ -358,7 +351,6 @@ esp_err_t protocol_serialize_fault_alert(uint8_t channel, RelayFault fault_type,
     cJSON_Delete(root);
     return ESP_OK;
 }
-
 
 esp_err_t protocol_serialize_load_report(const ActionBoxResponse *ack, uint32_t command_ms,
         const CurrentMeasurement *sample, char *out_json, size_t max_len) {

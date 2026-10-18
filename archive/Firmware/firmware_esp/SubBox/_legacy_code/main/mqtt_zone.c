@@ -1,8 +1,3 @@
-/*
- * MQTT Zone Gateway — Implementation
- * DTV Smart Home — T2 Zone Controller
- */
-
 #include "mqtt_zone.h"
 #include "zone_manager.h"
 #include "espnow_master.h"
@@ -20,13 +15,9 @@ static const char *TAG = "MQTT_ZONE";
 static esp_mqtt_client_handle_t s_client = NULL;
 static bool s_connected = false;
 
-/* ─── Forward Declarations ───────────────────────────────────────────── */
-
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data);
 static void handle_relay_set_topic(const char *topic, const char *data, int data_len);
-
-/* ─── Public API ─────────────────────────────────────────────────────── */
 
 bool mqtt_zone_is_connected(void)
 {
@@ -95,7 +86,7 @@ void mqtt_zone_publish_relay_state(const char *device_id, uint8_t channel, uint8
              zone_manager_get_zone_name(), device_id, channel);
 
     const char *payload = (state != 0) ? "ON" : "OFF";
-    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1 /* retain */);
+    esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 1  );
 }
 
 void mqtt_zone_publish_telemetry(const char *device_id, const esp_now_packet_t *tele)
@@ -157,8 +148,6 @@ void mqtt_zone_publish_zone_summary(void)
     cJSON_Delete(root);
 }
 
-/* ─── MQTT Event Handler ─────────────────────────────────────────────── */
-
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
@@ -169,16 +158,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         ESP_LOGI(TAG, "✅ MQTT Connected to Gateway Broker!");
         s_connected = true;
 
-        /* Subscribe to relay commands for all nodes in this zone: home/<zone>/+/relay/+/set */
         char sub_topic[128];
         snprintf(sub_topic, sizeof(sub_topic), "home/%s/+/relay/+/set", zone_manager_get_zone_name());
         esp_mqtt_client_subscribe(s_client, sub_topic, 1);
         ESP_LOGI(TAG, "Subscribed to '%s'", sub_topic);
 
-        /* Also subscribe to universal node topic: home/nodes/+/relay/+/set */
         esp_mqtt_client_subscribe(s_client, "home/nodes/+/relay/+/set", 1);
 
-        /* Subscribe to IR commands: home/<zone>/ir/# and home/ir/# */
         char ir_topic[128];
         snprintf(ir_topic, sizeof(ir_topic), "home/%s/ir/#", zone_manager_get_zone_name());
         esp_mqtt_client_subscribe(s_client, ir_topic, 1);
@@ -217,26 +203,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
-/* ─── Handle Incoming MQTT Relay Commands ────────────────────────────── */
-
 static void handle_relay_set_topic(const char *topic, const char *data, int data_len)
 {
-    /* Supported formats:
-     *   home/<zone>/<device_id>/relay/<channel>/set
-     *   home/nodes/<device_id>/relay/<channel>/set
-     */
+
     char dev_id[32] = {0};
     int channel = 0;
 
     char *relay_pos = strstr(topic, "/relay/");
     if (!relay_pos) return;
 
-    /* Parse channel */
     if (sscanf(relay_pos, "/relay/%d/set", &channel) != 1 || channel < 1 || channel > 2) {
         return;
     }
 
-    /* Extract device_id preceding /relay/ */
     const char *p = relay_pos - 1;
     while (p > topic && *p != '/') {
         p--;
@@ -251,7 +230,6 @@ static void handle_relay_set_topic(const char *topic, const char *data, int data
 
     if (strlen(dev_id) == 0) return;
 
-    /* Determine desired state: ON/1/true vs OFF/0/false */
     uint8_t state = 0;
     if (strcasecmp(data, "ON") == 0 || strcmp(data, "1") == 0 || strcasecmp(data, "true") == 0) {
         state = 1;
@@ -259,13 +237,11 @@ static void handle_relay_set_topic(const char *topic, const char *data, int data
 
     ESP_LOGI(TAG, "⚡ Routing Relay Cmd: Node '%s' CH%d -> %s", dev_id, channel, state ? "ON" : "OFF");
 
-    /* Lookup node in zone table */
     zone_node_entry_t *node = zone_manager_find_by_id(dev_id);
     if (!node) {
         ESP_LOGW(TAG, "Node '%s' not found in zone '%s'", dev_id, zone_manager_get_zone_name());
         return;
     }
 
-    /* Send ESP-NOW command to T1 node */
     espnow_master_send_relay_cmd(node->mac, (uint8_t)channel, state);
 }

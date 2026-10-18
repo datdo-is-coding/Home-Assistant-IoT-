@@ -1,18 +1,3 @@
-/*
- * WebSocket Audio Client — Implementation
- * DTV Smart Home — ESP32-S3 Voice Node
- *
- * Handles:
- *   1. WebSocket connection to Pi 4 (ws://pi_ip:8765)
- *   2. Mic PCM streaming after WakeNet detection
- *   3. Silence detection (VAD) to end recording
- *   4. Receiving TTS PCM audio from Pi
- *   5. Playing TTS on I2S speaker (MAX98357A)
- *
- * State Machine:
- *   IDLE → (WakeNet) → STREAMING → (silence) → PROCESSING → (audio_start) → PLAYING → (audio_end) → IDLE
- */
-
 #include "ws_audio_client.h"
 #include "audio_feedback.h"
 #include "mqtt_relay.h"
@@ -30,20 +15,15 @@
 
 static const char *TAG = "WS_AUDIO";
 
-/* ─── Configuration ──────────────────────────────────────────────────── */
+#define MIC_STREAM_BUF_SIZE    (16000)
+#define SPK_STREAM_BUF_SIZE    (512000)
+#define WS_SEND_BUF_SIZE       (640)
+#define SPK_PLAY_BUF_SIZE      (1024)
 
-#define MIC_STREAM_BUF_SIZE    (16000)    /* 500ms of 16kHz/16-bit PCM in PSRAM */
-#define SPK_STREAM_BUF_SIZE    (512000)   /* 16 seconds of 16kHz/16-bit PCM in Octal PSRAM */
-#define WS_SEND_BUF_SIZE       (640)      /* 20ms frame: 320 samples × 2 bytes */
-#define SPK_PLAY_BUF_SIZE      (1024)     /* Speaker write chunk */
-
-/* VAD (Voice Activity Detection) configuration — Optimized for low latency (<0.6s) */
-#define VAD_SILENCE_ENERGY     (40000)    /* Mean-square threshold (~RMS 200) */
-#define VAD_SILENCE_FRAMES     (30)       /* 30 × 20ms = 600ms of silence to end recording */
-#define VAD_IGNORE_FRAMES      (15)       /* Ignore first 0.3s for speech onset */
-#define MAX_STREAM_FRAMES      (500)      /* 500 × 20ms = 10 seconds max recording */
-
-/* ─── State ──────────────────────────────────────────────────────────── */
+#define VAD_SILENCE_ENERGY     (40000)
+#define VAD_SILENCE_FRAMES     (30)
+#define VAD_IGNORE_FRAMES      (15)
+#define MAX_STREAM_FRAMES      (500)
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static volatile ws_audio_state_t ws_state = WS_STATE_IDLE;
@@ -52,27 +32,20 @@ static volatile bool s_speaker_busy = false;
 static volatile bool spk_audio_complete = false;
 static volatile bool pending_followup = false;
 
-/* FreeRTOS stream buffers */
-static StreamBufferHandle_t mic_stream_buf = NULL;   /* audio_feed_task → stream_task */
-static StreamBufferHandle_t spk_stream_buf = NULL;   /* ws_event → speaker_task */
+static StreamBufferHandle_t mic_stream_buf = NULL;
+static StreamBufferHandle_t spk_stream_buf = NULL;
 
-/* Task handles */
 static TaskHandle_t stream_task_handle = NULL;
 static TaskHandle_t speaker_task_handle = NULL;
 
-/* 16-bit PCM byte alignment & WebSocket continuation frame tracking */
 static uint8_t s_residual_byte = 0;
 static bool s_has_residual = false;
 static uint8_t s_last_op_code = 0;
 
-/* Speaker I2S handle (passed from main) */
 static i2s_chan_handle_t spk_i2s_handle = NULL;
 
-/* Hardware Discrete LED control (GPIO48 LED1, GPIO47 LED2) */
 extern void led1_set(bool on);
 extern void led2_set(bool on);
-
-/* ─── Forward Declarations ───────────────────────────────────────────── */
 
 static void ws_event_handler(void *arg, esp_event_base_t event_base,
                              int32_t event_id, void *event_data);
@@ -80,14 +53,11 @@ static void audio_stream_task(void *arg);
 static void speaker_playback_task(void *arg);
 static void handle_ws_text_message(const char *data, int len);
 
-/* ─── Public API ─────────────────────────────────────────────────────── */
-
 esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
 {
     ESP_LOGI(TAG, "Initializing WebSocket audio client → %s", uri);
     spk_i2s_handle = spk_handle;
 
-    /* Allocate buffer storage in Octal PSRAM (8MB available) to preserve internal SRAM */
     static uint8_t *mic_buf_storage = NULL;
     static StaticStreamBuffer_t mic_buf_struct;
     static uint8_t *spk_buf_storage = NULL;
@@ -116,7 +86,6 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Configure WebSocket client */
     esp_websocket_client_config_t ws_cfg = {
         .uri = uri,
         .buffer_size = 4096,
@@ -133,11 +102,9 @@ esp_err_t ws_audio_client_init(const char *uri, i2s_chan_handle_t spk_handle)
         return ESP_FAIL;
     }
 
-    /* Register event handler */
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY,
                                   ws_event_handler, NULL);
 
-    /* Create background tasks: 6KB for audio stream, 8KB for speaker playback to prevent stack overflow */
     BaseType_t ret;
     ret = xTaskCreatePinnedToCore(audio_stream_task, "audio_stream",
                                   6 * 1024, NULL, 4, &stream_task_handle, 1);
@@ -178,7 +145,7 @@ esp_err_t ws_audio_start_stream(void)
 {
     if (!ws_connected) {
         ESP_LOGW(TAG, "Cannot stream: WebSocket not connected to Pi");
-        led2_set(true);   /* LED2 alert flash */
+        led2_set(true);
         vTaskDelay(pdMS_TO_TICKS(200));
         led2_set(false);
         return ESP_ERR_INVALID_STATE;
@@ -189,12 +156,10 @@ esp_err_t ws_audio_start_stream(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Clear stream buffers */
     xStreamBufferReset(mic_stream_buf);
     xStreamBufferReset(spk_stream_buf);
     spk_audio_complete = false;
 
-    /* Send START message to Pi with node_id */
     char start_msg[160];
     snprintf(start_msg, sizeof(start_msg),
              "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"node_id\":\"%s\"}",
@@ -210,7 +175,6 @@ esp_err_t ws_audio_start_stream(void)
     ws_state = WS_STATE_STREAMING;
     ESP_LOGI(TAG, "🎙️ Audio streaming STARTED — recording voice command...");
 
-    /* Notify stream task to begin reading from mic buffer */
     xTaskNotifyGive(stream_task_handle);
 
     return ESP_OK;
@@ -221,7 +185,7 @@ void ws_audio_feed_pcm(const int16_t *pcm_data, int num_samples)
     if (ws_state != WS_STATE_STREAMING || !mic_stream_buf) return;
 
     size_t bytes = num_samples * sizeof(int16_t);
-    /* Non-blocking write — drop data if buffer full (better than blocking AFE) */
+
     xStreamBufferSend(mic_stream_buf, pcm_data, bytes, 0);
 }
 
@@ -240,8 +204,6 @@ bool ws_audio_is_followup_pending(void)
     return pending_followup;
 }
 
-/* ─── WebSocket Event Handler ────────────────────────────────────────── */
-
 static void ws_event_handler(void *arg, esp_event_base_t event_base,
                              int32_t event_id, void *event_data)
 {
@@ -250,10 +212,9 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
     switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED:
         ws_connected = true;
-        led1_set(true);     /* LED1 ON = connected to Gateway */
+        led1_set(true);
         ESP_LOGI(TAG, "✅ WebSocket connected to Pi 4 Gateway");
 
-        /* Send Compact HELLO / handshake frame to Pi */
         char ws_hello[192];
         if (mqtt_relay_is_provisioned()) {
             snprintf(ws_hello, sizeof(ws_hello),
@@ -282,7 +243,7 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
                 xStreamBufferReset(spk_stream_buf);
             }
         }
-        led1_set(false);  /* LED1 OFF = disconnected */
+        led1_set(false);
         led2_set(false);
         ESP_LOGW(TAG, "⚠️ WebSocket disconnected from Pi");
         break;
@@ -293,16 +254,15 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
         }
 
         if (data->op_code == 0x01) {
-            /* Text frame — JSON control message from Pi */
+
             handle_ws_text_message(data->data_ptr, data->data_len);
         }
         else if (data->op_code == 0x02 || (data->op_code == 0x00 && s_last_op_code == 0x02)) {
-            /* Binary frame (or continuation) — PCM audio data for speaker */
+
             if (ws_state == WS_STATE_PLAYING && spk_stream_buf && data->data_len > 0) {
                 const uint8_t *p_data = (const uint8_t *)data->data_ptr;
                 int len = data->data_len;
 
-                /* 1. Nếu có 1 byte lẻ từ packet trước, ghép với byte đầu packet này thành 1 sample 16-bit hoàn chỉnh */
                 if (s_has_residual && len > 0) {
                     uint8_t pair[2] = { s_residual_byte, *p_data };
                     xStreamBufferSend(spk_stream_buf, pair, 2, pdMS_TO_TICKS(50));
@@ -311,14 +271,12 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
                     s_has_residual = false;
                 }
 
-                /* 2. Nếu độ dài còn lại là lẻ, lưu byte cuối làm residual để không bao giờ lệch phase 16-bit */
                 if (len & 1) {
                     s_residual_byte = p_data[len - 1];
                     s_has_residual = true;
                     len--;
                 }
 
-                /* 3. Gửi khối chẵn còn lại vào stream buffer */
                 if (len > 0) {
                     xStreamBufferSend(spk_stream_buf, p_data, len, pdMS_TO_TICKS(50));
                 }
@@ -335,11 +293,9 @@ static void ws_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-/* ─── JSON Message Handler ───────────────────────────────────────────── */
-
 static void handle_ws_text_message(const char *data, int len)
 {
-    /* Null-terminate the JSON string */
+
     char *json_str = malloc(len + 1);
     if (!json_str) return;
     memcpy(json_str, data, len);
@@ -352,12 +308,11 @@ static void handle_ws_text_message(const char *data, int len)
         return;
     }
 
-    /* ── 1. Check Compact Protocol ("t" key) ── */
     const cJSON *t_item = cJSON_GetObjectItem(root, "t");
     if (cJSON_IsString(t_item)) {
         const char *t_str = t_item->valuestring;
         if (strcmp(t_str, "rl") == 0) {
-            /* Compact relay command over WebSocket text frame */
+
             const cJSON *ch_item = cJSON_GetObjectItem(root, "ch");
             const cJSON *s_item = cJSON_GetObjectItem(root, "s");
             const cJSON *seq_item = cJSON_GetObjectItem(root, "seq");
@@ -388,7 +343,7 @@ static void handle_ws_text_message(const char *data, int len)
             free(json_str);
             return;
         } else if (strcmp(t_str, "ota") == 0) {
-            /* Compact OTA trigger over WebSocket */
+
             const cJSON *url_item = cJSON_GetObjectItem(root, "url");
             const cJSON *size_item = cJSON_GetObjectItem(root, "size");
             const cJSON *md5_item = cJSON_GetObjectItem(root, "md5");
@@ -405,7 +360,6 @@ static void handle_ws_text_message(const char *data, int len)
         }
     }
 
-    /* ── 2. Legacy / Audio Control Protocol ("type" key) ── */
     const cJSON *type = cJSON_GetObjectItem(root, "type");
     if (!cJSON_IsString(type)) {
         cJSON_Delete(root);
@@ -420,8 +374,8 @@ static void handle_ws_text_message(const char *data, int len)
         if (cJSON_IsString(state)) {
             ESP_LOGI(TAG, "Pi status: %s", state->valuestring);
             if (strcmp(state->valuestring, "processing") == 0) {
-                /* Pi acknowledged recording, now processing ASR+LLM */
-                led2_set(true);  /* LED2 ON = processing */
+
+                led2_set(true);
             }
         }
     }
@@ -444,7 +398,6 @@ static void handle_ws_text_message(const char *data, int len)
                  cJSON_IsString(reply) ? reply->valuestring : "null",
                  pending_followup ? "true" : "false");
 
-        /* If no voice reply is expected, reset state to IDLE immediately */
         if (!cJSON_IsString(reply) || strlen(reply->valuestring) == 0) {
             ESP_LOGI(TAG, "No voice reply expected, resetting state to IDLE");
             ws_state = WS_STATE_IDLE;
@@ -456,7 +409,7 @@ static void handle_ws_text_message(const char *data, int len)
         ws_audio_reset_state();
     }
     else if (strcmp(type_str, "audio_start") == 0) {
-        /* Pi is about to send TTS audio for speaker playback */
+
         const cJSON *size = cJSON_GetObjectItem(root, "size");
         int audio_size = cJSON_IsNumber(size) ? size->valueint : 0;
         ESP_LOGI(TAG, "🔊 Receiving TTS audio (%d bytes) for speaker playback", audio_size);
@@ -467,14 +420,13 @@ static void handle_ws_text_message(const char *data, int len)
         spk_audio_complete = false;
         ws_state = WS_STATE_PLAYING;
 
-        /* Notify speaker task to start playing */
         xTaskNotifyGive(speaker_task_handle);
 
-        led2_set(true);  /* LED2 ON = speaker playing */
+        led2_set(true);
     }
     else if (strcmp(type_str, "audio_end") == 0) {
         ESP_LOGI(TAG, "🔊 TTS audio transmission complete");
-        /* Flush residual byte if present */
+
         if (s_has_residual && spk_stream_buf) {
             uint8_t pair[2] = { s_residual_byte, 0 };
             xStreamBufferSend(spk_stream_buf, pair, 2, pdMS_TO_TICKS(50));
@@ -486,10 +438,10 @@ static void handle_ws_text_message(const char *data, int len)
             ESP_LOGI(TAG, "Follow-up required from audio_end: %s", pending_followup ? "YES" : "NO");
         }
         spk_audio_complete = true;
-        /* Speaker task will drain remaining buffer and check follow_up */
+
     }
     else if (strcmp(type_str, "pong") == 0) {
-        /* Heartbeat response, ignore */
+
     }
     else if (strcmp(type_str, "speaker_busy") == 0) {
         const cJSON *busy_item = cJSON_GetObjectItem(root, "busy");
@@ -511,12 +463,6 @@ static void handle_ws_text_message(const char *data, int len)
     free(json_str);
 }
 
-/* ─── Audio Stream Task ──────────────────────────────────────────────── */
-/*
- * Reads PCM data from mic_stream_buf (fed by audio_feed_task in main.c),
- * sends it to Pi via WebSocket, and monitors for silence to end recording.
- */
-
 static void audio_stream_task(void *arg)
 {
     uint8_t send_buf[WS_SEND_BUF_SIZE];
@@ -524,7 +470,7 @@ static void audio_stream_task(void *arg)
     ESP_LOGI(TAG, "Audio stream task ready, waiting for WakeNet trigger...");
 
     while (1) {
-        /* Block until WakeNet triggers ws_audio_start_stream() */
+
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         ESP_LOGI(TAG, "Stream task activated — sending mic PCM to Pi...");
@@ -534,17 +480,16 @@ static void audio_stream_task(void *arg)
         int speech_detected = 0;
 
         while (ws_state == WS_STATE_STREAMING && frame_count < MAX_STREAM_FRAMES) {
-            /* Read PCM data from mic stream buffer */
+
             size_t received = xStreamBufferReceive(mic_stream_buf, send_buf,
                                                     sizeof(send_buf),
                                                     pdMS_TO_TICKS(100));
             if (received == 0) {
-                /* Timeout — no data from mic. Check if we should abort. */
+
                 if (!ws_connected) break;
                 continue;
             }
 
-            /* Send PCM binary frame to Pi via WebSocket */
             int sent = esp_websocket_client_send_bin(ws_client,
                                                       (const char *)send_buf,
                                                       received,
@@ -556,7 +501,6 @@ static void audio_stream_task(void *arg)
 
             frame_count++;
 
-            /* ─── Simple Energy-Based VAD ─── */
             int16_t *samples = (int16_t *)send_buf;
             int num_samples = received / sizeof(int16_t);
             int64_t energy = 0;
@@ -565,10 +509,9 @@ static void audio_stream_task(void *arg)
                 energy += (int64_t)samples[i] * samples[i];
             }
             if (num_samples > 0) {
-                energy /= num_samples;  /* Mean square energy */
+                energy /= num_samples;
             }
 
-            /* Skip VAD for the first 0.5 seconds (let speech start) */
             if (frame_count < VAD_IGNORE_FRAMES) {
                 if (energy > VAD_SILENCE_ENERGY) {
                     speech_detected = 1;
@@ -576,7 +519,6 @@ static void audio_stream_task(void *arg)
                 continue;
             }
 
-            /* Track speech presence */
             if (energy > VAD_SILENCE_ENERGY) {
                 speech_detected = 1;
                 silence_count = 0;
@@ -584,55 +526,42 @@ static void audio_stream_task(void *arg)
                 silence_count++;
             }
 
-            /* End recording if silence > 0.6 seconds (after speech was detected) */
             if (speech_detected && silence_count >= VAD_SILENCE_FRAMES) {
                 ESP_LOGI(TAG, "VAD: Silence detected for 0.6s — ending recording");
                 break;
             }
 
-            /* End recording if no speech detected after 5 seconds */
             if (!speech_detected && frame_count >= 250) {
                 ESP_LOGI(TAG, "VAD: No speech detected for 5s — ending recording");
                 break;
             }
 
-            /* Log streaming progress every ~1 second */
             if (frame_count % 50 == 0) {
                 ESP_LOGI(TAG, "Streaming: %d frames sent (%.1fs), energy=%lld",
                          frame_count, frame_count * 0.02f, (long long)energy);
             }
         }
 
-        /* ─── End of Recording ─── */
         if (ws_state == WS_STATE_STREAMING) {
             ESP_LOGI(TAG, "🛑 Recording ended after %d frames (%.1fs).",
                      frame_count, frame_count * 0.02f);
 
-            /* Send STOP message to Pi immediately so ASR processes with zero latency */
             const char *stop_msg = "{\"type\":\"stop\"}";
             esp_websocket_client_send_text(ws_client, stop_msg,
                                            strlen(stop_msg),
                                            pdMS_TO_TICKS(2000));
             ws_state = WS_STATE_PROCESSING;
 
-            led2_set(true);  /* LED2 ON = processing on Pi */
+            led2_set(true);
             ESP_LOGI(TAG, "Waiting for Pi response...");
         }
 
-        /* If we broke out due to error, reset to idle */
         if (ws_state == WS_STATE_STREAMING) {
             ws_state = WS_STATE_IDLE;
             led2_set(false);
         }
     }
 }
-
-/* ─── Speaker Playback Task ──────────────────────────────────────────── */
-/*
- * Reads PCM data from spk_stream_buf (fed by WebSocket event handler),
- * writes it to I2S speaker for playback.
- * Runs continuously once activated, stops when all TTS audio is played.
- */
 
 extern void speaker_enable(bool enable);
 
@@ -643,12 +572,12 @@ static void speaker_playback_task(void *arg)
     ESP_LOGI(TAG, "Speaker playback task ready, waiting for TTS audio...");
 
     while (1) {
-        /* Block until TTS audio_start is received */
+
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
         if (!spk_i2s_handle) {
             ESP_LOGW(TAG, "Speaker I2S handle not available, discarding audio");
-            /* Drain the buffer without playing */
+
             while (ws_state == WS_STATE_PLAYING) {
                 size_t n = xStreamBufferReceive(spk_stream_buf, play_buf,
                                                 sizeof(play_buf),
@@ -669,21 +598,17 @@ static void speaker_playback_task(void *arg)
 
         ESP_LOGI(TAG, "🔊 Preparing speaker playback...");
 
-        /* ── Pre-fill Wait: let stream buffer accumulate ≥4KB before enabling amp ── */
-        /* This prevents pop/click/hum from amp powering up with empty DMA buffer.   */
-        /* Pi sends 8 chunks (16KB) in ~40ms burst, so 250ms is very safe.           */
         {
             int prefill_wait = 0;
             while (xStreamBufferBytesAvailable(spk_stream_buf) < 4096 && prefill_wait < 25) {
-                vTaskDelay(pdMS_TO_TICKS(10));  /* 10ms × 25 = 250ms max wait */
+                vTaskDelay(pdMS_TO_TICKS(10));
                 prefill_wait++;
-                if (spk_audio_complete) break;  /* Edge case: very short audio */
+                if (spk_audio_complete) break;
             }
             ESP_LOGI(TAG, "Pre-fill: %d bytes buffered in %dms",
                      (int)xStreamBufferBytesAvailable(spk_stream_buf), prefill_wait * 10);
         }
 
-        /* ── Prime I2S DMA with 2 chunks of silence to avoid residual noise ── */
         {
             uint8_t silence[SPK_PLAY_BUF_SIZE];
             memset(silence, 0, sizeof(silence));
@@ -693,9 +618,8 @@ static void speaker_playback_task(void *arg)
             }
         }
 
-        /* Unmute / Enable MAX98357A amplifier via SP_SD GPIO 2 */
         speaker_enable(true);
-        vTaskDelay(pdMS_TO_TICKS(15)); /* Short stabilization — DMA already has silence */
+        vTaskDelay(pdMS_TO_TICKS(15));
 
         int total_played = 0;
         int empty_wait_count = 0;
@@ -718,44 +642,41 @@ static void speaker_playback_task(void *arg)
                     total_played += bytes_written;
                 }
             } else {
-                /* Timeout — no more data in buffer */
+
                 if (spk_audio_complete) {
                     ESP_LOGI(TAG, "Speaker playback complete. Played %d bytes (%.2fs)",
                              total_played, (float)total_played / (16000 * 2));
                     break;
                 }
                 empty_wait_count++;
-                if (empty_wait_count >= 15) { // 3 seconds timeout
+                if (empty_wait_count >= 15) {
                     ESP_LOGW(TAG, "Speaker playback timed out waiting for audio data");
                     break;
                 }
             }
         }
 
-        /* ── Drain I2S DMA with silence (zeros) so no residual buffer buzz remains ── */
         memset(play_buf, 0, sizeof(play_buf));
         for (int i = 0; i < 4; i++) {
             size_t dummy = 0;
             i2s_channel_write(spk_i2s_handle, play_buf, sizeof(play_buf), &dummy, pdMS_TO_TICKS(50));
         }
-        vTaskDelay(pdMS_TO_TICKS(50)); /* Let zero-samples output completely */
+        vTaskDelay(pdMS_TO_TICKS(50));
 
-        /* ── Put MAX98357A into hardware SHUTDOWN (mute) to eliminate idle hum/hiss ── */
         speaker_enable(false);
         audio_feedback_unlock();
 
-        /* Return to idle state */
         ws_state = WS_STATE_IDLE;
 
         if (pending_followup) {
             pending_followup = false;
             ESP_LOGW(TAG, "🔄 Follow-Up Active: Continuous listening without 'Hi ESP'...");
-            led2_set(true);  /* LED2 ON = active listening */
+            led2_set(true);
             audio_feedback_play(AUDIO_FB_WAKEUP);
             vTaskDelay(pdMS_TO_TICKS(100));
             ws_audio_start_stream();
         } else {
-            led2_set(false);  /* LED2 OFF = idle */
+            led2_set(false);
             ESP_LOGI(TAG, "🎙️ Ready for next voice command. Say 'Hi ESP'...");
         }
     }
@@ -796,4 +717,3 @@ bool ws_audio_is_speaker_busy(void)
 {
     return s_speaker_busy;
 }
-

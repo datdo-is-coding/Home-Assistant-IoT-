@@ -21,7 +21,6 @@ import time
 import json
 from typing import List, Dict, Any
 
-# Thêm đường dẫn Gateway/gateway vào sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "gateway"))
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -33,7 +32,6 @@ if hasattr(sys.stdout, "reconfigure"):
 from intent_engine import IntentEngine, Target, IntentResult, ASRNormalizer, StrictValidator, slug
 from registry_manager import RegistryManager
 
-
 class MockRegistry:
     """Mock Registry phục vụ kiểm thử cô lập."""
     def allowed_rooms(self) -> List[str]:
@@ -41,7 +39,6 @@ class MockRegistry:
 
     def allowed_devices(self) -> List[str]:
         return ["light", "fan", "air_conditioner", "pump", "curtain", "tivi", "binh_nong_lanh", "may_hut_mui"]
-
 
 async def run_all_tests():
     print("=" * 70)
@@ -72,14 +69,13 @@ async def run_all_tests():
         else:
             print(f"  ❌ [FAIL] {msg}")
 
-    # ── 1. BASIC COMMANDS ───────────────────────────────────────────────────
     print("\n--- 1. BASIC COMMANDS ---")
     r1 = await engine.extract("bật đèn phòng ngủ")
     assert_eq(r1.intent, "turn_on", "Bật đèn: intent=turn_on")
     assert_eq(r1.target.device_type, "light", "Bật đèn: device=light")
     assert_eq(r1.target.room, "phong_ngu", "Bật đèn: room=phong_ngu")
     assert_true(r1.confidence >= 0.95, "Bật đèn: confidence >= 0.95")
-    # Kiểm tra tương thích ngược dictionary
+
     assert_eq(r1["command"]["action"], "turn_on", "Compat dict: action=turn_on")
     assert_eq(r1["command"]["device"], "light", "Compat dict: device=light")
     assert_eq(r1["command"]["location"], "phong_ngu", "Compat dict: location=phong_ngu")
@@ -102,7 +98,6 @@ async def run_all_tests():
     assert_eq(r5.intent, "turn_on", "Bật điều hòa: intent=turn_on")
     assert_eq(r5.target.device_type, "air_conditioner", "Bật điều hòa: device=air_conditioner")
 
-    # ── 2. TEMPERATURE & NUMBERS (VIETNAMESE WORDS & DIGITS) ────────────────
     print("\n--- 2. TEMPERATURE & NUMBERS ---")
     t1 = await engine.extract("cài điều hòa 25 độ")
     assert_eq(t1.intent, "set_temperature", "Cài điều hòa 25 độ: intent=set_temperature")
@@ -127,16 +122,13 @@ async def run_all_tests():
     t6 = await engine.extract("hai mươi tám độ")
     assert_eq(t6.value, 28, "Số từ 'hai mươi tám độ': value=28")
 
-    # ── 3. CONTEXT RESOLUTION & MULTI-TURN (WITH TTL) ────────────────────────
     print("\n--- 3. MULTI-TURN CONTEXT RESOLUTION ---")
     engine.context_manager.clear()
 
-    # Turn 1: Thiết lập ngữ cảnh
     c1 = await engine.extract("Bật điều hòa phòng ngủ")
     assert_eq(c1.target.device_type, "air_conditioner", "Turn 1: device=air_conditioner")
     assert_eq(c1.target.room, "phong_ngu", "Turn 1: room=phong_ngu")
 
-    # Turn 2: Kế thừa slot từ Turn 1
     c2 = await engine.extract("Cài 25 độ")
     assert_eq(c2.intent, "set_temperature", "Turn 2: intent=set_temperature")
     assert_eq(c2.value, 25, "Turn 2: value=25")
@@ -144,34 +136,28 @@ async def run_all_tests():
     assert_eq(c2.target.room, "phong_ngu", "Turn 2: Kế thừa room=phong_ngu")
     assert_eq(c2.source, "context", "Turn 2: source=context")
 
-    # Turn 3: Tăng lên 26 độ
     c3 = await engine.extract("Tăng lên 26 độ")
     assert_eq(c3.value, 26, "Turn 3: value=26")
     assert_eq(c3.target.device_type, "air_conditioner", "Turn 3: device=air_conditioner")
     assert_eq(c3.target.room, "phong_ngu", "Turn 3: room=phong_ngu")
 
-    # Turn 4: Đại từ "nó"
     c4 = await engine.extract("Tắt nó đi")
     assert_eq(c4.intent, "turn_off", "Turn 4: intent=turn_off")
     assert_eq(c4.target.device_type, "air_conditioner", "Turn 4: Đại từ 'nó' -> device=air_conditioner")
     assert_eq(c4.target.room, "phong_ngu", "Turn 4: Đại từ 'nó' -> room=phong_ngu")
 
-    # Kiểm tra ranh giới kế thừa an toàn:
-    # "Bật đèn phòng ngủ" -> "Bật quạt" (quạt KHÔNG được tự ý gán vào phòng ngủ nếu không nói)
     engine.context_manager.clear()
     await engine.extract("Bật đèn phòng ngủ")
     c5 = await engine.extract("Bật quạt")
     assert_true(c5.target.room != "phong_ngu", "Safety: Thiết bị mới (quạt) KHÔNG tự kế thừa room từ đèn")
 
-    # Kiểm tra Context Expiry sau TTL
     engine.context_manager.clear()
     await engine.extract("Bật điều hòa phòng khách")
-    # Mô phỏng quá hạn TTL
-    engine.context_manager.updated_at = time.time() - 100.0  # > 60s
+
+    engine.context_manager.updated_at = time.time() - 100.0
     c6 = await engine.extract("Cài 25 độ")
     assert_true(c6.source != "context", "TTL Expired: Lệnh thiếu slot KHÔNG được kế thừa khi context hết hạn")
 
-    # ── 4. ASR PHONETIC NORMALIZATION ───────────────────────────────────────
     print("\n--- 4. ASR PHONETIC NORMALIZATION ---")
     a1 = await engine.extract("bạn bè phòng ngủ")
     assert_eq(a1.intent, "turn_on", "'bạn bè phòng ngủ' -> turn_on")
@@ -192,7 +178,6 @@ async def run_all_tests():
     a5 = await engine.extract("bật đèn phòng ngue")
     assert_eq(a5.target.room, "phong_ngu", "'phòng ngue' -> phong_ngu")
 
-    # ── 5. NEGATION DETECTION ───────────────────────────────────────────────
     print("\n--- 5. NEGATION DETECTION ---")
     n1 = await engine.extract("đừng bật đèn")
     assert_true(n1.negated, "'đừng bật đèn': negated=True")
@@ -210,7 +195,6 @@ async def run_all_tests():
     assert_true(n4.negated, "'trời nóng quá nhưng đừng bật điều hòa': negated=True")
     assert_true(n4.intent != "turn_on", "'nhưng đừng bật': KHÔNG được tự ý bật điều hòa")
 
-    # ── 6. QUERY VS COMMAND ─────────────────────────────────────────────────
     print("\n--- 6. QUERY VS COMMAND ---")
     q1 = await engine.extract("đèn phòng ngủ đang bật không")
     assert_eq(q1.intent, "query_state", "'đèn phòng ngủ đang bật không' -> query_state")
@@ -226,7 +210,6 @@ async def run_all_tests():
     assert_eq(q3.intent, "query_state", "'quạt phòng khách đang chạy không' -> query_state")
     assert_eq(q3.target.device_type, "fan", "query_state: device=fan")
 
-    # ── 7. AMBIGUOUS & INCOMPLETE PHRASES ───────────────────────────────────
     print("\n--- 7. AMBIGUOUS & INCOMPLETE PHRASES ---")
     engine.context_manager.clear()
     amb1 = await engine.extract("bật nó lên")
@@ -235,11 +218,9 @@ async def run_all_tests():
     amb2 = await engine.extract("cho mát một chút")
     assert_true(amb2.confidence < 0.95, "'cho mát một chút' -> confidence < 0.95 (MEDIUM)")
 
-    # ── 8. ANTI-HALLUCINATION & STRICT VALIDATION ───────────────────────────
     print("\n--- 8. ANTI-HALLUCINATION & STRICT VALIDATION ---")
     validator = StrictValidator(registry=registry)
 
-    # Thử nghiệm thiết bị và phòng bịa
     fake_intent = IntentResult(
         intent="turn_on",
         target=Target(device_type="robot_kitchen", room="phòng của ông ngoại"),
@@ -250,7 +231,6 @@ async def run_all_tests():
     assert_true(validated.target.room is None, "Anti-hallucination: room 'phòng của ông ngoại' -> None")
     assert_true(validated.needs_clarification, "Bị loại bỏ do hallucination -> needs_clarification=True")
 
-    # ── 9. MULTI-COMMAND (COMPOUND SENTENCES) ───────────────────────────────
     print("\n--- 9. MULTI-COMMAND HANDLING ---")
     multi = await engine.extract("tắt đèn phòng ngủ và bật quạt phòng khách")
     assert_eq(multi.intent, "multi_command", "Compound command: intent=multi_command")
@@ -262,7 +242,6 @@ async def run_all_tests():
     assert_eq(multi.commands[1]["command"]["device"], "fan", "Sub-command 2: fan")
     assert_eq(multi.commands[1]["command"]["location"], "phong_khach", "Sub-command 2: phong_khach")
 
-    # ── 10. LATENCY BENCHMARK ON FAST-PATH ──────────────────────────────────
     print("\n--- 10. LATENCY BENCHMARK ---")
     test_cases = [
         "bật đèn phòng ngủ",
@@ -272,7 +251,6 @@ async def run_all_tests():
         "đèn phòng ngủ đang bật không"
     ]
 
-    # Benchmark Fast Path
     n_runs = 200
     t_start = time.perf_counter()
     for _ in range(n_runs):
@@ -284,7 +262,6 @@ async def run_all_tests():
     print(f"  ⚡ Fast-Path Average Latency ({n_runs * len(test_cases)} iterations): {avg_fast_path_ms:.3f} ms")
     assert_true(avg_fast_path_ms < 5.0, f"Fast-Path Latency < 5ms Target (Actual: {avg_fast_path_ms:.3f} ms)")
 
-    # Benchmark Context Resolution (< 1ms target)
     engine.context_manager.clear()
     await engine.extract("Bật điều hòa phòng ngủ")
     sample_raw = IntentResult(
@@ -301,7 +278,6 @@ async def run_all_tests():
     print(f"  🧠 Pure Context Resolution Average Latency (1000 iterations): {avg_context_ms:.4f} ms")
     assert_true(avg_context_ms < 1.0, f"Context Resolution Latency < 1ms Target (Actual: {avg_context_ms:.4f} ms)")
 
-    # Benchmark Registry Resolution / Strict Validator (< 5ms target)
     sample_intent = IntentResult(
         intent="turn_on",
         target=Target(device_type="light", room="phong_ngu"),
@@ -314,12 +290,10 @@ async def run_all_tests():
     print(f"  🛡️ Strict Validator / Registry Latency (1000 iterations): {avg_registry_ms:.4f} ms")
     assert_true(avg_registry_ms < 5.0, f"Registry Resolution Latency < 5ms Target (Actual: {avg_registry_ms:.4f} ms)")
 
-    # ── TỔNG KẾT TEST ───────────────────────────────────────────────────────
     print("\n" + "=" * 70)
     print(f"📊 KẾT QUẢ TEST: {passed_tests}/{total_tests} PASSED ({passed_tests/total_tests*100:.1f}%)")
     print("=" * 70)
     return passed_tests == total_tests
-
 
 if __name__ == "__main__":
     success = asyncio.run(run_all_tests())

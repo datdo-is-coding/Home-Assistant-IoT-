@@ -51,7 +51,6 @@ final voiceRepositoryProvider = Provider<VoiceRepository>((ref) {
   return ref.watch(smartHomeRepositoryProvider);
 });
 
-// Stream Providers
 final devicesStreamProvider = StreamProvider<List<Device>>((ref) {
   return ref.watch(deviceRepositoryProvider).watchDevices();
 });
@@ -76,7 +75,6 @@ final voiceVocabularyStreamProvider = StreamProvider<List<VoiceVocabularyItem>>(
   return ref.watch(voiceRepositoryProvider).watchVocabulary();
 });
 
-// UI State Providers (Riverpod 3 NotifierProvider pattern)
 class SelectedRoomIdNotifier extends Notifier<String> {
   @override
   String build() => 'all';
@@ -119,7 +117,6 @@ class ThemeModeNotifier extends Notifier<ThemeMode> {
 }
 final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
 
-// Granular Family Provider for isolated DeviceCard rebuilds (Prevents Rebuild Storms)
 final deviceProvider = Provider.family<Device?, String>((ref, id) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   return devicesAsync.when(
@@ -134,7 +131,6 @@ final deviceProvider = Provider.family<Device?, String>((ref, id) {
   );
 });
 
-// Provides only the List of IDs matching filter, preventing CustomScrollView rebuild on power/watt changes
 final filteredDeviceIdsProvider = Provider<List<String>>((ref) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   final selectedRoomId = ref.watch(selectedRoomIdProvider);
@@ -153,7 +149,6 @@ final filteredDeviceIdsProvider = Provider<List<String>>((ref) {
   );
 });
 
-// Granular room device count family provider
 final roomDeviceCountProvider = Provider.family<int, String>((ref, roomId) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   return devicesAsync.when(
@@ -163,7 +158,6 @@ final roomDeviceCountProvider = Provider.family<int, String>((ref, roomId) {
   );
 });
 
-// Memoized grouping for DevicesScreen to prevent expensive calculations in build()
 final groupedFilteredDevicesProvider = Provider<Map<String, List<Device>>>((ref) {
   final devices = ref.watch(devicesStreamProvider).value ?? const [];
   final query = ref.watch(searchQueryProvider).trim().toLowerCase();
@@ -182,7 +176,6 @@ final groupedFilteredDevicesProvider = Provider<Map<String, List<Device>>>((ref)
   return grouped;
 });
 
-// Derived Filtered Providers
 final filteredDevicesProvider = Provider<List<Device>>((ref) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   final selectedRoomId = ref.watch(selectedRoomIdProvider);
@@ -228,7 +221,6 @@ final onlineDevicesCountProvider = Provider<int>((ref) {
   );
 });
 
-// Contextual Home Status Banners (shown only when relevant)
 final contextualHomeStatusProvider = Provider<List<String>>((ref) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   final actionBoxesAsync = ref.watch(actionBoxesStreamProvider);

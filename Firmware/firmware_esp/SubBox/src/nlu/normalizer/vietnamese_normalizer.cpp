@@ -1,8 +1,3 @@
-/**
- * @file vietnamese_normalizer.cpp
- * @brief Deterministic Vietnamese Text Normalizer Implementation
- */
-
 #include "vietnamese_normalizer.h"
 #include <algorithm>
 #include <cctype>
@@ -35,12 +30,10 @@ std::string VietnameseNormalizer::normalize(const std::string& input) {
 
     std::string text = input;
 
-    // 1. Lowercase standard ASCII
     std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) {
         return std::tolower(c);
     });
 
-    // 2. Map uppercase UTF-8 Vietnamese accented characters to lowercase equivalents
     static const struct {
         const char* upper;
         const char* lower;
@@ -64,16 +57,14 @@ std::string VietnameseNormalizer::normalize(const std::string& input) {
         text = replaceAll(std::move(text), pair.upper, pair.lower);
     }
 
-    // 3. Remove punctuation (.,!?:;'"~-()[]{}/*+\\)
     const std::string punctuation = ".,!?:;'\"~-()[]{}/=*+\\_#@$%^&";
     for (char p : punctuation) {
         std::replace(text.begin(), text.end(), p, ' ');
     }
 
-    // 4. Compress multiple consecutive spaces into single space and trim edges
     std::string cleaned;
     cleaned.reserve(text.size());
-    bool last_was_space = true; // Treats leading space as already encountered
+    bool last_was_space = true;
     for (char c : text) {
         if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
             if (!last_was_space) {
@@ -86,20 +77,17 @@ std::string VietnameseNormalizer::normalize(const std::string& input) {
         }
     }
 
-    // Trim trailing space
     if (!cleaned.empty() && cleaned.back() == ' ') {
         cleaned.pop_back();
     }
 
-    // 5. Canonicalize Vietnamese ASR dialect and verb variants
-    // "máy lạnh" -> "điều hòa"
     cleaned = replaceAll(std::move(cleaned), "máy lạnh", "điều hòa");
-    // "điều hoà" -> "điều hòa"
+
     cleaned = replaceAll(std::move(cleaned), "điều hoà", "điều hòa");
-    // "mở" -> "bật"
+
     cleaned = replaceAll(std::move(cleaned), " mở ", " bật ");
     if (cleaned.rfind("mở ", 0) == 0) cleaned.replace(0, std::string("mở ").size(), "bật ");
-    // "ngắt" -> "tắt"
+
     cleaned = replaceAll(std::move(cleaned), " ngắt ", " tắt ");
     if (cleaned.rfind("ngắt ", 0) == 0) cleaned.replace(0, std::string("ngắt ").size(), "tắt ");
 

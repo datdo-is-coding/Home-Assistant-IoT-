@@ -16,7 +16,6 @@ def monitor(duration=10):
         ser.rts = True
         time.sleep(0.5)
 
-        # Gửi ký tự newline để đánh thức Serial nếu cần
         ser.write(b"\n")
 
         print(f"--- BẮT ĐẦU THEO DÕI SERIAL TỪ ESP32-S3 ({PORT}) ---")

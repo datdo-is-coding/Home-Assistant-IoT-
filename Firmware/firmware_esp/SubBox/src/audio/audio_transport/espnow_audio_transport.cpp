@@ -1,9 +1,5 @@
-/**
- * @file espnow_audio_transport.cpp
- * @brief Reliable ESP-NOW Audio & Command Transport Implementation
- */
-
 #include "espnow_audio_transport.h"
+#include "hc_runtime.h"
 #include "esp_log.h"
 #include "system/subbox_led.h"
 #include "esp_wifi.h"
@@ -13,10 +9,9 @@
 #include <algorithm>
 #include "cJSON.h"
 #include "storage/nvs_manager.h"
+#include "network/espnow_receiver.h"
 
 static const char* TAG = "ESPNOW_TRANSPORT";
-
-
 
 EspNowAudioTransport* EspNowAudioTransport::s_instance = nullptr;
 
@@ -54,6 +49,9 @@ void EspNowAudioTransport::onEspNowSend(const uint8_t *mac_addr, esp_now_send_st
 void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
     if (!recv_info || !data || len <= 0) return;
     if (!s_instance) return;
+    if (hc_runtime_enabled() && len >= 2 && data[0] == 'H' && data[1] == 'C') {
+        hc_runtime_receive_radio(recv_info->src_addr,data,(size_t)len); return;
+    }
 
     bool is_broadcast = true;
     for (int i = 0; i < 6; i++) {
@@ -65,12 +63,18 @@ void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, co
     bool is_for_us = (memcmp(recv_info->des_addr, s_instance->m_local_mac, 6) == 0);
     if (!is_broadcast && !is_for_us) return;
 
-    bool trusted = s_instance->m_trusted_peers.empty();
+    bool is_kws_or_audio = (data[0] >= 0x20 && data[0] <= 0x22) || (data[0] == 0x25);
+    if (hc_runtime_enabled() && (is_broadcast || !hc_runtime_trusted_peer(recv_info->src_addr) || !is_kws_or_audio)) return;
+
+    bool trusted = hc_runtime_enabled();
     for (const auto& peer : s_instance->m_trusted_peers) {
         if (memcmp(peer.mac, recv_info->src_addr, 6) == 0) {
             trusted = true;
             break;
         }
+    }
+    if (!trusted && s_instance->isPairingDiscoveryActive()) {
+        trusted = true;
     }
     if (!trusted) return;
 
@@ -96,16 +100,28 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
     if (!m_running || len <= 0) return;
 
     uint8_t msg_type = data[0];
+    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == 0x25);
+    if (!is_known_type) return;
+
+    if (msg_type == MSG_TYPE_KEYWORD_EVENT) {
+        subbox_espnow_handle_keyword_event(data, len);
+        return;
+    }
+
     std::string source;
-    if (msg_type >= 0x20 && msg_type <= 0x22) {
+    if (msg_type >= 0x20 && msg_type <= 0x22 && hc_runtime_enabled()) {
+        const uint32_t source_id = hc_runtime_peer_node_id(mac);
+        if (!source_id || !hc_runtime_registered()) return;
+        source = std::to_string(source_id);
+    } else if (msg_type >= 0x20 && msg_type <= 0x22) {
         std::lock_guard<std::mutex> lock(m_macs_mutex);
         for (const auto& entry : m_node_macs)
             if (entry.second.size() == 6 && memcmp(entry.second.data(), mac, 6) == 0) source = entry.first;
         if (source.empty()) return;
     }
 
-    // Case 1: Audio START (0x20)
     if (msg_type == 0x20) {
+        if (len < 3) return;
         AudioPacket pkt = {};
         pkt.version = AUDIO_PROTOCOL_VERSION;
         pkt.msg_type = AUDIO_MSG_TYPE_STREAM_START;
@@ -120,7 +136,6 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         ESP_LOGI(TAG, "🎙️ [ESPNOW RX] Audio STREAM_START from %02X:%02X:%02X:%02X:%02X:%02X (Node: %s)",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], pkt.source_node_id);
 
-        // Store peer MAC for unicast reply
         {
             std::lock_guard<std::mutex> lock(m_macs_mutex);
             m_node_macs[pkt.source_node_id] = std::vector<uint8_t>(mac, mac + 6);
@@ -133,7 +148,6 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         return;
     }
 
-    // Case 2: Audio CHUNK (0x21)
     if (msg_type == 0x21 && len >= 4) {
         uint8_t seq = data[1];
         uint16_t pcm_len = (uint16_t)data[2] | ((uint16_t)data[3] << 8);
@@ -148,6 +162,8 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         pkt.sample_rate = SUBBOX_AUDIO_SAMPLE_RATE;
         pkt.channels = 1;
 
+        if (!pcm_len || (pcm_len & 1) || pcm_len != len - 4 ||
+            pcm_len > SUBBOX_AUDIO_MAX_PACKET_PAYLOAD) return;
         size_t available_bytes = (size_t)(len - 4);
         size_t copy_bytes = std::min((size_t)pcm_len, available_bytes);
         copy_bytes = std::min(copy_bytes, (size_t)SUBBOX_AUDIO_MAX_PACKET_PAYLOAD);
@@ -162,7 +178,6 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         return;
     }
 
-    // Case 3: Audio END (0x22)
     if (msg_type == 0x22) {
         AudioPacket pkt = {};
         pkt.version = AUDIO_PROTOCOL_VERSION;
@@ -181,8 +196,8 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         return;
     }
 
-    // JSON carries the physical board identity; audio packets inherit it by MAC.
     if (data[0] == '{') {
+        if (hc_runtime_enabled()) return;
         cJSON* root = cJSON_ParseWithLength(reinterpret_cast<const char*>(data), len);
         if (!root) return;
         const cJSON* node = cJSON_GetObjectItem(root, "node_id");
@@ -252,7 +267,6 @@ bool EspNowAudioTransport::init() {
 
     ESP_LOGI(TAG, "Initializing SubBox ESP-NOW Audio Transport (following Wi-Fi STA channel)...");
 
-    // Disable Wi-Fi power saving for minimal latency
     esp_wifi_set_ps(WIFI_PS_NONE);
 
     esp_err_t err = esp_now_init();
@@ -286,7 +300,6 @@ bool EspNowAudioTransport::init() {
         else ESP_LOGE(TAG, "Failed to load encrypted peer slot %u", slot);
     }
 
-    /* Register Broadcast Peer (FF:FF:FF:FF:FF:FF) */
     const uint8_t bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     if (!esp_now_is_peer_exist(bcast_mac)) {
         esp_now_peer_info_t bcast_peer = {};
@@ -316,7 +329,6 @@ void EspNowAudioTransport::heartbeatTask(void* arg) {
         char payload[192];
         int length = snprintf(payload, sizeof(payload), "{\"type\":\"heartbeat\",\"protocol_version\":3,\"subbox_id\":\"%s\",\"channel\":%u,\"wifi\":%s,\"mqtt\":%s}", cfg.subbox_id, channel, subbox_led_wifi_connected() ? "true" : "false", subbox_led_mqtt_connected() ? "true" : "false");
 
-        /* Broadcast heartbeat to all ActionBoxes */
         esp_now_send(bcast_mac, reinterpret_cast<const uint8_t*>(payload), length);
 
         for (const auto& peer : self->m_trusted_peers)
@@ -329,13 +341,12 @@ void EspNowAudioTransport::heartbeatTask(void* arg) {
 
 bool EspNowAudioTransport::sendAudio(const char* target_node_id, const AudioPacket& packet) {
     if (!m_running) return false;
-    // Note: ActionBoxes in this hardware revision do not have speakers enabled.
-    // Suppress heavy audio frame broadcast to prevent saturating ActionBox's RX queue.
+
     return true;
 }
 
 bool EspNowAudioTransport::sendCommand(const char* target_node_id, const std::string& json_cmd, std::string* response) {
-    if (!m_running || !m_ack_sem || !target_node_id || json_cmd.empty()) return false;
+    if (hc_runtime_enabled() || !m_running || !m_ack_sem || !target_node_id || json_cmd.empty()) return false;
     std::lock_guard<std::mutex> command_lock(m_command_mutex);
     uint8_t dest[6];
     {

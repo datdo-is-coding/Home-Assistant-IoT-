@@ -1,8 +1,3 @@
-/**
- * @file udp_audio_transport.cpp
- * @brief High-Speed UDP Implementation of AudioTransport
- */
-
 #include "udp_audio_transport.h"
 #include "esp_log.h"
 #include <cstring>
@@ -35,13 +30,11 @@ bool UdpAudioTransport::init() {
         return false;
     }
 
-    // Set receive timeout so loop can check m_running flag
     struct timeval timeout = {};
     timeout.tv_sec = 0;
-    timeout.tv_usec = 200000; // 200ms
+    timeout.tv_usec = 200000;
     setsockopt(m_rx_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    // Enable socket address reuse
     int opt = 1;
     setsockopt(m_rx_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
@@ -58,7 +51,6 @@ bool UdpAudioTransport::init() {
         return false;
     }
 
-    // Create TX socket
     m_tx_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (m_tx_socket < 0) {
         ESP_LOGE(TAG, "Unable to create TX socket: errno %d", errno);
@@ -67,7 +59,6 @@ bool UdpAudioTransport::init() {
         return false;
     }
 
-    // Enable broadcast on TX socket
     int bcast_opt = 1;
     setsockopt(m_tx_socket, SOL_SOCKET, SO_BROADCAST, &bcast_opt, sizeof(bcast_opt));
 
@@ -80,7 +71,7 @@ bool UdpAudioTransport::init() {
         this,
         TASK_PRIO_AUDIO_RX,
         &m_rx_task_handle,
-        0 // Pin to Core 0 for networking
+        0
     );
 
     if (res != pdPASS) {
@@ -138,7 +129,7 @@ bool UdpAudioTransport::sendAudio(const char* target_node_id, const AudioPacket&
     }
 
     if (!endpoint_found) {
-        // Fallback: Broadcast to subnet
+
         dest_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     }
 
@@ -165,7 +156,7 @@ void UdpAudioTransport::runRxLoop() {
 
         if (len < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Timeout, normal idle poll
+
                 continue;
             }
             if (m_running) {
@@ -186,13 +177,11 @@ void UdpAudioTransport::runRxLoop() {
             continue;
         }
 
-        // Cache ActionBox network endpoint for downlink audio responses
         if (strlen(pkt->source_node_id) > 0) {
             std::lock_guard<std::mutex> lock(m_endpoints_mutex);
             m_node_endpoints[pkt->source_node_id] = source_addr;
         }
 
-        // Deliver to audio pipeline
         std::function<void(const AudioPacket&)> cb_copy;
         {
             std::lock_guard<std::mutex> lock(m_callback_mutex);

@@ -20,7 +20,6 @@ import config
 
 logger = logging.getLogger("web_server")
 
-# ── SIC HOME WEB TEMPLATE ──────────────────────────────────────────────────
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "index.html")
 
 def get_html_page() -> str:
@@ -34,7 +33,6 @@ def get_html_page() -> str:
 
 HTML_PAGE = get_html_page()
 
-# ── WEB SERVER CLASS ─────────────────────────────────────────────────────────
 class WebServer:
     """Async HTTP + SSE dashboard & Aetheria OS manager."""
 
@@ -43,7 +41,7 @@ class WebServer:
         self.host = getattr(config, "WEB_HOST", "0.0.0.0")
         self.port = getattr(config, "WEB_PORT", 8000)
         self.server = None
-        self.sse_queues = {}  # queue -> authenticated user
+        self.sse_queues = {}
         self._running = False
 
     async def start(self):
@@ -84,8 +82,6 @@ class WebServer:
         if hasattr(self.gateway, "auth") and self.gateway.auth:
             all_nodes = self.gateway.auth.filter_nodes(user, all_nodes)
 
-        # A persisted "online" flag is not a live connection. Legacy telemetry
-        # reports every 30s; allow 90s before hiding controls in the app.
         all_nodes = {key: dict(value) for key, value in all_nodes.items()}
         now = datetime.now(timezone.utc)
         for node in all_nodes.values():
@@ -103,6 +99,16 @@ class WebServer:
                 node["status"] = "offline"
 
         disc = self.gateway.discovery.get_discovered_devices() if hasattr(self.gateway, "discovery") else {}
+        mqtt_obj = getattr(self.gateway, "mqtt", None)
+        mqtt_ch_powers = getattr(mqtt_obj, "channel_powers", {}) if mqtt_obj else {}
+        for node_id, node in all_nodes.items():
+            ch_powers = mqtt_ch_powers.get(node_id, {})
+            channels = node.get("channels", {})
+            if isinstance(channels, dict):
+                for ch_k, ch_info in channels.items():
+                    if isinstance(ch_info, dict) and ch_k in ch_powers and "power" not in ch_info:
+                        ch_info["power"] = ch_powers[ch_k]
+
         return {
             "nodes": all_nodes,
             "rooms": r.get_rooms() if user and user.get("role") == "admin" else sorted({n.get("room", "") for n in all_nodes.values()}),
@@ -170,9 +176,32 @@ class WebServer:
                     await self._respond(writer, 403, {"error": "Origin required for cookie authentication"}); return
             auth = getattr(self.gateway, "auth", None)
             current_user = auth.authenticate_token(token) if auth and token else None
+            extra_info = getattr(writer, "get_extra_info", None)
+            is_ssl = bool(extra_info("sslcontext")) if callable(extra_info) else False
+            is_https = headers.get("x-forwarded-proto", "").lower() == "https" or is_ssl
+            secure_attr = " Secure;" if is_https else ""
+
+            is_commissioning_wifi = (
+                method == "POST" and path == "/api/wifi/connect" and (
+                    (auth and hasattr(auth, "has_any_admin") and not auth.has_any_admin())
+                    or getattr(self.gateway, "is_commissioning", False)
+                )
+            )
+            is_ota_download_with_ticket = False
+            if method in ("GET", "HEAD") and path.startswith("/api/ota/download/"):
+                req_ticket = query.get("ticket", [None])[0]
+                req_device = query.get("device", [None])[0]
+                fn = os.path.basename(path)
+                ota_mgr = getattr(self.gateway, "ota", None)
+                if ota_mgr and req_ticket and hasattr(ota_mgr, "validate_download_ticket"):
+                    if ota_mgr.validate_download_ticket(req_ticket, req_device, fn):
+                        is_ota_download_with_ticket = True
+
             public = (
                 (method == "GET" and path in {"/", "/index.html", "/api/health", "/api/wifi/status", "/api/wifi/scan"})
-                or (method == "POST" and path in {"/api/auth/login", "/api/wifi/connect"})
+                or (method == "POST" and path == "/api/auth/login")
+                or is_commissioning_wifi
+                or is_ota_download_with_ticket
                 or (method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"))
             )
             if not current_user and not public:
@@ -201,14 +230,12 @@ class WebServer:
             if method == "GET" and path == "/api/health":
                 await self._respond(writer, 200, {"status": "ok"}); return
 
-            # ── SPA Main View ──
             if method == "GET" and path in ("/", "/index.html"):
                 body = get_html_page().encode("utf-8")
                 writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: text/html; charset=utf-8\r\n"
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Nodes Snapshot ──
             if method == "GET" and path == "/api/nodes":
                 data = self._nodes_snapshot(current_user)
                 body = json.dumps(data, ensure_ascii=False).encode()
@@ -217,7 +244,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: SSE Events ──
             if method == "GET" and path == "/api/events":
                 writer.write(("HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: text/event-stream\r\n"
                               "Cache-Control: no-cache\r\nConnection: keep-alive\r\n"
@@ -246,7 +272,6 @@ class WebServer:
                     except Exception: pass
                 return
 
-            # ── API: Relay Control ──
             if method == "POST" and path == "/api/relay":
                 body = await _read_body()
                 try:
@@ -254,23 +279,24 @@ class WebServer:
                     node_id = d.get("node_id")
                     channel = d.get("channel", d.get("ch"))
                     action = d.get("action", d.get("s"))
-                    
+
                     if action not in ("turn_on", "turn_off", "TURN_ON", "TURN_OFF", "on", "off", 0, 1, "0", "1") or channel not in ("ch1", "ch2", "ch3", 1, 2, 3, "1", "2", "3"):
                         await self._respond(writer, 400, {"error": "Use an explicit relay state and valid channel"}); return
                     action = "turn_on" if action in ("turn_on", "TURN_ON", "on", 1, "1") else "turn_off"
                     channel = {"ch1": "ch1", "ch2": "ch2", "ch3": "ch3", 1: "ch1", 2: "ch2", 3: "ch3", "1": "ch1", "2": "ch2", "3": "ch3"}[channel]
                     result, *_ = await self.gateway.verifier.verify_command(node_id, channel, action)
                     outcome = result.value
-                    is_ok = outcome in {"ack_only", "confirmed_load"}
+                    is_ok = outcome in {"ack_only", "confirmed_load", "already_in_state"}
 
-                    # Immediate registry state update so refresh() returns current state without waiting for telemetry
                     if is_ok and hasattr(self.gateway, "registry"):
                         node = self.gateway.registry.data.get("nodes", {}).get(node_id)
                         if node:
                             ch_idx = int(channel[2:]) - 1
                             new_val = 1 if action == "turn_on" else 0
                             cur_rl = list(node.get("relay_state", [0, 0]))
-                            while len(cur_rl) <= ch_idx:
+                            caps = node.get("capabilities", [])
+                            min_len = 3 if ("relay_3ch" in caps or len(node.get("channels", {})) >= 3) else 2
+                            while len(cur_rl) < max(ch_idx + 1, min_len):
                                 cur_rl.append(0)
                             cur_rl[ch_idx] = new_val
                             self.gateway.registry.update_relay_state(node_id, cur_rl)
@@ -278,6 +304,8 @@ class WebServer:
                                 self.gateway.broadcast_event("relay_state", {"node_id": node_id, "relay_state": cur_rl})
 
                     resp_data = {"success": is_ok, "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
+                    if not is_ok:
+                        resp_data["error"] = f"Relay command failed on gateway ({outcome})"
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data).encode()
@@ -286,7 +314,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Provisioning / Add Device / Claim ──
             if method == "POST" and (path in ("/api/provision", "/api/device/claim", "/api/device/add")):
                 body = await _read_body()
                 try:
@@ -307,12 +334,13 @@ class WebServer:
                         room=d.get("room", "livingroom"),
                         rl1=d.get("rl1", "light"),
                         rl2=d.get("rl2", "fan"),
+                        rl3=d.get("rl3"),
                         node_short=d.get("node_short"),
                         name=d.get("name"),
                         location=d.get("location"),
                         description=d.get("description")
                     )
-                    # Auto assign ownership to current user
+
                     if current_user and hasattr(self.gateway, "auth"):
                         nid = res.get("device_id") or res.get("node_id")
                         if nid:
@@ -326,7 +354,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Delete / Remove Device ──
             if method in ("POST", "DELETE") and (path == "/api/device/delete" or (path.startswith("/api/device/") and path.endswith("/delete"))):
                 body = await _read_body()
                 try:
@@ -353,7 +380,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Edit / Update Device Info ──
             if method == "POST" and (path == "/api/device/update" or path == "/api/device/edit"):
                 body = await _read_body()
                 try:
@@ -374,7 +400,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Device Voice Alias / Vocabulary ──
             if method == "POST" and (path == "/api/device/alias" or path == "/api/device/alias/delete"):
                 body = await _read_body()
                 try:
@@ -401,11 +426,10 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Voice Vocabulary Diagnostics ──
             if method == "GET" and path == "/api/voice/vocabulary":
                 try:
                     if hasattr(self.gateway, "get_voice_vocabulary_diagnostics"):
-                        resp_data = self.gateway.get_voice_vocabulary_diagnostics()
+                        resp_data = self.gateway.get_voice_vocabulary_diagnostics(user=current_user)
                     else:
                         resp_data = {"success": False, "error": "Voice vocabulary diagnostics not available"}
                 except Exception as e:
@@ -416,7 +440,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Device OS Desired Config Twin (Spec Section 4 & 8) ──
             if method == "POST" and (path == "/api/device/config" or (path.startswith("/api/device/") and path.endswith("/config"))):
                 body = await _read_body()
                 try:
@@ -438,7 +461,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Device OS Twin Query (Spec Section 8) ──
             if method == "GET" and (path == "/api/device/twin" or (path.startswith("/api/device/") and path.endswith("/twin"))):
                 dev_id = query.get("id", [None])[0] or query.get("device_id", [None])[0]
                 if not dev_id and path != "/api/device/twin":
@@ -453,7 +475,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Telemetry History ──
             if method == "GET" and (path == "/api/device/telemetry" or (path.startswith("/api/device/") and path.endswith("/telemetry"))):
                 dev_id = query.get("id", [None])[0] or query.get("device_id", [None])[0]
                 if not dev_id and path != "/api/device/telemetry":
@@ -469,7 +490,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: OTA History Records ──
             if method == "GET" and path == "/api/ota/history":
                 dev_id = query.get("device_id", [None])[0]
                 records = self.gateway.registry.get_ota_history(dev_id)
@@ -480,7 +500,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Proactive & Voice Status ──
             if method == "GET" and path == "/api/proactive/status":
                 has_gemini = bool(getattr(self.gateway, "persona", None) and self.gateway.persona.has_api_key)
                 proactive_en = bool(getattr(self.gateway, "proactive", None) and self.gateway.proactive.enabled)
@@ -498,7 +517,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Save Voice Settings ──
             if method == "POST" and path == "/api/settings/voice":
                 body = await _read_body()
                 try:
@@ -512,7 +530,6 @@ class WebServer:
                     if "pitch" in d:
                         config.TTS_PITCH = str(d["pitch"]).strip()
 
-                    # Save to local_config.json
                     cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
                     cfg_data = {}
                     if os.path.exists(cfg_path):
@@ -535,7 +552,6 @@ class WebServer:
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Sounds Catalog ──
             if method == "GET" and path == "/api/sounds":
                 data = self.gateway.sound.list_sounds() if hasattr(self.gateway, "sound") else {"sounds": []}
                 body = json.dumps(data, ensure_ascii=False).encode()
@@ -544,7 +560,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: Stream/Download Sound MP3 ──
             if method in ("GET", "HEAD") and path.startswith("/api/sound/"):
                 sound_name = path.replace("/api/sound/", "").strip()
                 audio_bytes = self.gateway.sound.get_mp3_data(sound_name) if hasattr(self.gateway, "sound") else None
@@ -557,7 +572,6 @@ class WebServer:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return
 
-            # ── API: Play Sound on Speaker ──
             if method == "POST" and path == "/api/sound/play":
                 body = await _read_body()
                 try:
@@ -576,7 +590,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: In-Browser Audio Preview ──
             if method in ("GET", "HEAD") and path.startswith("/api/tts/preview"):
                 test_text = query.get("text", ["Đã bật đèn phòng khách."])[0]
                 audio_bytes = None
@@ -592,7 +605,6 @@ class WebServer:
                     writer.write(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return
 
-            # ── API: Proactive Test Speak ──
             if method == "POST" and path == "/api/proactive/test_speak":
                 body = await _read_body()
                 try:
@@ -620,7 +632,6 @@ class WebServer:
             if method == "POST" and path == "/api/settings/gemini_key":
                 await self._respond(writer, 403, {"error": "Configure GEMINI_API_KEY in the service environment"}); return
 
-            # ── API: Proactive Toggle ──
             if method == "POST" and path == "/api/proactive/toggle":
                 body = await _read_body()
                 try:
@@ -637,7 +648,6 @@ class WebServer:
                               f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # ── API: OTA Firmware Management ──
             if method == "GET" and path == "/api/ota/list":
                 items = []
                 if hasattr(self.gateway, "ota") and self.gateway.ota:
@@ -653,7 +663,10 @@ class WebServer:
                 filename = headers.get("x-filename", f"firmware_{int(time.time())}.bin")
                 if hasattr(self.gateway, "ota") and self.gateway.ota:
                     res = self.gateway.ota.save_firmware(filename, raw_bytes)
-                    resp_data = {"success": True, **res}
+                    if not res.get("valid_esp", False):
+                        resp_data = {"success": False, "error": res.get("error", "Invalid ESP32 binary"), **res}
+                    else:
+                        resp_data = {"success": True, **res}
                 else:
                     resp_data = {"success": False, "error": "OTA manager not available"}
                 body = json.dumps(resp_data).encode()
@@ -682,13 +695,13 @@ class WebServer:
                     d = json.loads(body.decode() or "{}")
                     fn = d.get("filename")
                     node_id = d.get("node_id", "all")
-                    
+
                     if not fn:
                         resp_data = {"success": False, "error": "Thiếu tên file firmware (.bin)"}
                     elif not hasattr(self.gateway, "ota") or not self.gateway.ota:
                         resp_data = {"success": False, "error": "OTA manager không khả dụng trên Gateway"}
                     else:
-                        # Dynamic gateway IP detection reachable by ESP32
+
                         gw_ip = ""
                         req_host = headers.get("host", "").split(":")[0]
                         if req_host and req_host not in ("localhost", "127.0.0.1", "0.0.0.0"):
@@ -698,7 +711,6 @@ class WebServer:
                         else:
                             gw_ip = self.host if self.host != "0.0.0.0" else "127.0.0.1"
 
-                        # Trigger Pull OTA via dual channel (MQTT + WS)
                         res = await self.gateway.ota.trigger_via_mqtt(node_id, fn, gateway_ip=gw_ip)
                         resp_data = res
                 except Exception as e:
@@ -711,6 +723,20 @@ class WebServer:
 
             if method in ("GET", "HEAD") and path.startswith("/api/ota/download/"):
                 fn = os.path.basename(path)
+                req_ticket = query.get("ticket", [None])[0]
+                req_device = query.get("device", [None])[0]
+                ota_mgr = getattr(self.gateway, "ota", None)
+
+                is_authorized = False
+                if current_user and current_user.get("role") == "admin":
+                    is_authorized = True
+                elif ota_mgr and req_ticket and hasattr(ota_mgr, "validate_download_ticket"):
+                    if ota_mgr.validate_download_ticket(req_ticket, req_device, fn):
+                        is_authorized = True
+
+                if not is_authorized:
+                    await self._respond(writer, 401, {"error": "Authentication or valid download ticket required"}); return
+
                 data = self.gateway.ota.get_firmware_bytes(fn) if hasattr(self.gateway, "ota") else None
                 if data:
                     hdr = (f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n"
@@ -720,7 +746,6 @@ class WebServer:
                            f"Cache-Control: no-cache, no-store, must-revalidate\r\n"
                            f"Pragma: no-cache\r\n"
                            f"Expires: 0\r\n"
-                           f""
                            f"Connection: close\r\n\r\n").encode()
                     writer.write(hdr)
                     if method == "GET":
@@ -730,7 +755,6 @@ class WebServer:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return
 
-            # ── API: Auth & Multi-Tenant ──
             if method == "POST" and path == "/api/auth/login":
                 try:
                     d = json.loads(raw_body)
@@ -739,8 +763,8 @@ class WebServer:
                     await self._respond(writer, 400, {"error": "Invalid login request"}); return
                 cookie = ""
                 if res.get("success"):
-                    cookie = f"Set-Cookie: aetheria_session={res['token']}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={config.SESSION_TTL_SECONDS}\r\n"
-                    if origin:  # Browser keeps credentials only in the HttpOnly cookie.
+                    cookie = f"Set-Cookie: aetheria_session={res['token']}; Path=/;{secure_attr} HttpOnly; SameSite=Strict; Max-Age={config.SESSION_TTL_SECONDS}\r\n"
+                    if origin:
                         res = {k: v for k, v in res.items() if k not in {"token", "api_key"}}
                 status = 200 if res.get("success") else (429 if res.get("rate_limited") else 401)
                 await self._respond(writer, status, res, cookie); return
@@ -762,9 +786,8 @@ class WebServer:
             if method == "POST" and path == "/api/auth/logout":
                 if token and hasattr(self.gateway, "auth"):
                     self.gateway.auth.logout(token)
-                await self._respond(writer, 200, {"success": True}, "Set-Cookie: aetheria_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0\r\n"); return
+                await self._respond(writer, 200, {"success": True}, f"Set-Cookie: aetheria_session=; Path=/;{secure_attr} HttpOnly; SameSite=Strict; Max-Age=0\r\n"); return
 
-            # ── API: Download Mobile Android APK ──
             if method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"):
                 apk_paths = [
                     "/home/pi4/smarthome/apk/app-release.apk",
@@ -791,7 +814,6 @@ class WebServer:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return
 
-            # ── API: Wi-Fi Management & Provisioning (nmcli) ──
             if method == "GET" and path == "/api/wifi/status":
                 try:
                     proc = await asyncio.create_subprocess_exec(
@@ -844,6 +866,8 @@ class WebServer:
                 await writer.drain(); writer.close(); return
 
             if method == "POST" and path == "/api/wifi/connect":
+                if not is_commissioning_wifi and (not current_user or current_user.get("role") != "admin"):
+                    await self._respond(writer, 403, {"error": "Admin privileges required"}); return
                 body = await _read_body()
                 try:
                     d = json.loads(body.decode() or "{}")
@@ -864,7 +888,7 @@ class WebServer:
                             asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
                             resp_data = {"success": True, "message": f"Connected to {ssid}"}
                         else:
-                            # Fallback 1: Try bringing up existing profile if already saved
+
                             up_proc = await asyncio.create_subprocess_exec(
                                 "nmcli", "con", "up", ssid,
                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -874,7 +898,7 @@ class WebServer:
                                 asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
                                 resp_data = {"success": True, "message": f"Connected to {ssid}"}
                             else:
-                                # Fallback 2: Deactivate hotspot, retry connection
+
                                 down_proc = await asyncio.create_subprocess_exec(
                                     "nmcli", "con", "down", "Aetheria-Hotspot",
                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -899,7 +923,6 @@ class WebServer:
                               f"Connection: close\r\n\r\n").encode() + body)
                 await writer.drain(); writer.close(); return
 
-            # 404 Fallthrough
             writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
             await writer.drain(); writer.close()
         except Exception as e:

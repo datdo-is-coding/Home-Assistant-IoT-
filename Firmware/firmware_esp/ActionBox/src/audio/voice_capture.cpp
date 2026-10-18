@@ -1,11 +1,3 @@
-/**
- * @file voice_capture.cpp
- * @brief PCM microphone capture and transport; voice recognition runs on Pi4
- *
- * INMP441 -> DC removal -> WakeNet "Hi ESP" -> bandpassed PCM -> SubBox -> Pi4.
- * No local ASR/commands. Long-press button also triggers capture.
- */
-
 #include "voice_capture.h"
 #include "board_pins.h"
 #include "actionbox_protocol.h"
@@ -29,32 +21,27 @@
 #include "esp_wn_models.h"
 #include "model_path.h"
 
-
 static const char *TAG = "VOICE_CAP";
 
-/* ─── Audio Configuration Constants ───────────────────────────────────── */
 #define AUDIO_SAMPLE_RATE          16000
 #define AUDIO_BITS_PER_SAMPLE      16
 #define AUDIO_DMA_FRAME_SAMPLES    240
-#define CHUNK_SAMPLES              (ESPNOW_AUDIO_MAX_PCM_BYTES / sizeof(int16_t)) /* 120 samples = 7.5ms */
+#define CHUNK_SAMPLES              (ESPNOW_AUDIO_MAX_PCM_BYTES / sizeof(int16_t))
 
-/* ─── Streaming / VAD Timing Constants ───────────────────────────────── */
-#define VAD_SILENCE_END_CHUNKS     106     /* 106 chunks * 7.5ms = ~800ms silence to conclude utterance */
-#define VAD_MAX_STREAM_CHUNKS      666     /* 666 chunks * 7.5ms = ~5.0s maximum stream duration */
-#define VAD_MIN_SPEECH_CHUNKS      25      /* Speech chunks (~187ms) required before silence timeout armed */
-#define VAD_NO_SPEECH_CHUNKS       400     /* 400 chunks * 7.5ms = 3.0s: give up if no command after wake */
-#define VAD_COOLDOWN_CHUNKS        266     /* 266 chunks * 7.5ms = 2.0s cooldown deadzone after streaming */
-#define CAPTURE_VAD_SILENCE_ENERGY 500000LL  /* Below this mean-square energy a chunk counts as silence */
+#define VAD_SILENCE_END_CHUNKS     106
+#define VAD_MAX_STREAM_CHUNKS      666
+#define VAD_MIN_SPEECH_CHUNKS      25
+#define VAD_NO_SPEECH_CHUNKS       400
+#define VAD_COOLDOWN_CHUNKS        266
+#define CAPTURE_VAD_SILENCE_ENERGY 500000LL
 
-/* ─── WakeNet ─────────────────────────────────────────────────────────── */
-#define WAKE_TRIGGER_HIESP         0       /* AUDIO_START.wake_word_index for "Hi ESP" */
+#define WAKE_TRIGGER_HIESP         0
 #define WN_MODEL_PARTITION         "model"
 
 static const esp_wn_iface_t *s_wn = NULL;
 static model_iface_data_t   *s_wn_data = NULL;
-static int                   s_wn_chunk = 0;   /* samples per detect() call (512 for wn9) */
+static int                   s_wn_chunk = 0;
 
-/* ─── Driver State ────────────────────────────────────────────────────── */
 static i2s_chan_handle_t s_rx_handle = NULL;
 static volatile bool s_is_streaming = false;
 
@@ -69,7 +56,6 @@ static uint32_t s_cooldown_frames = 0;
 static float s_latest_rms = 0.0f;
 static bool  s_latest_speech = false;
 
-/* ─── DC Removal Filter ──────────────────────────────────────────────── */
 static int32_t s_dc_offset = 0;
 
 static inline int16_t remove_dc(int16_t in) {
@@ -80,7 +66,6 @@ static inline int16_t remove_dc(int16_t in) {
     return (int16_t)ac;
 }
 
-/* ─── Biquad Filter (used only in PCM capture mode) ─────────────────────── */
 typedef struct {
     float b0, b1, b2;
     float a1, a2;
@@ -106,29 +91,21 @@ static inline float biquad_step(biquad_t *f, float in) {
 static biquad_t s_hpf1, s_hpf2;
 static biquad_t s_lpf1, s_lpf2;
 
-/* ─── Forward Declarations ───────────────────────────────────────────── */
 static esp_err_t init_i2s_mic(void);
 static void init_wakenet(void);
 static void voice_capture_task(void *pvParameters);
 
-/* ========================================================================= */
-/*                         PUBLIC API IMPLEMENTATION                         */
-/* ========================================================================= */
-
 esp_err_t voice_capture_init(void) {
     ESP_LOGI(TAG, "Initializing voice capture (INMP441 + WakeNet + ESP-NOW)...");
 
-    /* 1. Initialize I2S peripheral for INMP441 */
     esp_err_t err = init_i2s_mic();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize I2S microphone: %s", esp_err_to_name(err));
         return err;
     }
 
-    /* 2. Load WakeNet from the "model" partition (non-fatal: push-to-talk still works) */
     init_wakenet();
 
-    /* Bandpass filter for streamed PCM + silence detection */
     biquad_init(&s_hpf1, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
     biquad_init(&s_hpf2, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
     biquad_init(&s_lpf1, 0.2271180f,  0.4542359f, 0.2271180f, -0.2766646f, 0.1851365f);
@@ -166,10 +143,8 @@ void voice_capture_start_streaming(uint8_t trigger_source) {
     s_speech_frames = 0;
     s_is_streaming = true;
 
-    /* Turn ON Voice Activity LED (LED2 / GPIO 47) */
     led_set_pattern(2, LED_PATTERN_ON);
 
-    /* Send MSG_TYPE_AUDIO_START over ESP-NOW to SubBox (burst for reliability) */
     ActionBoxAudioStartPacket start_pkt = {};
     start_pkt.msg_type = MSG_TYPE_AUDIO_START;
     start_pkt.seq = s_audio_seq;
@@ -196,13 +171,10 @@ void voice_capture_stop_streaming(void) {
 
     s_is_streaming = false;
 
-    /* Enforce 2.0s cooldown guard */
     s_cooldown_frames = VAD_COOLDOWN_CHUNKS;
 
-    /* Turn OFF Voice Activity LED (LED2 / GPIO 47) */
     led_set_pattern(2, LED_PATTERN_OFF);
 
-    /* Send MSG_TYPE_AUDIO_END over ESP-NOW to SubBox (burst 3x for reliability) */
     ActionBoxAudioEndPacket end_pkt = {};
     end_pkt.msg_type = MSG_TYPE_AUDIO_END;
     end_pkt.seq = s_audio_seq;
@@ -216,7 +188,7 @@ void voice_capture_stop_streaming(void) {
 }
 
 void voice_capture_set_vad_threshold(int64_t energy_threshold) {
-    /* Triggering is done by WakeNet; silence uses CAPTURE_VAD_SILENCE_ENERGY. */
+
     (void)energy_threshold;
 }
 
@@ -224,10 +196,6 @@ void voice_capture_get_diagnostics(float *out_rms, bool *out_is_speech) {
     if (out_rms) *out_rms = s_latest_rms;
     if (out_is_speech) *out_is_speech = s_latest_speech;
 }
-
-/* ========================================================================= */
-/*                         INTERNAL IMPLEMENTATIONS                          */
-/* ========================================================================= */
 
 static void init_wakenet(void) {
     srmodel_list_t *models = esp_srmodel_init(WN_MODEL_PARTITION);
@@ -281,7 +249,6 @@ static esp_err_t init_i2s_mic(void) {
     ret = i2s_channel_init_std_mode(s_rx_handle, &std_cfg);
     if (ret != ESP_OK) return ret;
 
-    /* Pull down DIN to prevent floating noise during slot transitions */
     gpio_set_pull_mode(BOARD_PIN_MIC_DIN, GPIO_PULLDOWN_ONLY);
 
     return i2s_channel_enable(s_rx_handle);
@@ -328,7 +295,6 @@ static void voice_capture_task(void *pvParameters) {
         int mono_samples = samples_read / 2;
         if (mono_samples > AUDIO_DMA_FRAME_SAMPLES) mono_samples = AUDIO_DMA_FRAME_SAMPLES;
 
-        /* Convert -> DC removal -> (WakeNet) -> bandpass filter */
         for (int i = 0; i < mono_samples; i++) {
             int32_t left_raw  = raw_buf[i * 2];
             int32_t right_raw = raw_buf[i * 2 + 1];
@@ -338,7 +304,6 @@ static void voice_capture_task(void *pvParameters) {
 
             int16_t dc_free = remove_dc(raw_s);
 
-            /* WakeNet wants unfiltered 16 kHz mono; skip while streaming to save CPU */
             if (wn_buf && !s_is_streaming) {
                 wn_buf[wn_idx++] = dc_free;
                 if (wn_idx >= s_wn_chunk) {
@@ -361,7 +326,6 @@ static void voice_capture_task(void *pvParameters) {
             clean_buf[i] = (int16_t)filtered;
         }
 
-        /* Process into chunks */
         for (int i = 0; i < mono_samples; i++) {
             chunk_buf[chunk_idx++] = clean_buf[i];
 
@@ -384,7 +348,7 @@ static void voice_capture_task(void *pvParameters) {
                 if (!s_is_streaming) {
                     if (s_cooldown_frames > 0) s_cooldown_frames--;
                 } else {
-                    /* Streaming — send chunk + check silence */
+
                     ActionBoxAudioChunkPacket chunk_pkt = {};
                     chunk_pkt.msg_type = MSG_TYPE_AUDIO_CHUNK;
                     chunk_pkt.seq = ++s_audio_seq;
@@ -402,7 +366,6 @@ static void voice_capture_task(void *pvParameters) {
                         s_silence_frames++;
                     }
 
-                    /* After the wake word the user may pause; arm silence end only once the command is heard */
                     bool silence_end = (s_speech_frames >= VAD_MIN_SPEECH_CHUNKS) &&
                                        (s_silence_frames >= VAD_SILENCE_END_CHUNKS);
                     bool no_speech = (s_speech_frames < VAD_MIN_SPEECH_CHUNKS) &&

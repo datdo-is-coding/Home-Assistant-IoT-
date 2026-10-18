@@ -25,7 +25,6 @@ SPONTANEOUS_PROMPTS = [
     "Nhiệt độ và các thông số khu vực đang được duy trì ở mức lý tưởng."
 ]
 
-
 class ProactiveAgent:
     """Tác vụ chạy ngầm quản lý hành vi tự chủ và tương tác chủ động của Gateway."""
 
@@ -39,7 +38,6 @@ class ProactiveAgent:
         self.today_evening_greeted: Optional[str] = None
         self.last_journal_time: float = 0.0
 
-        # Theo dõi thời gian bật của các thiết bị công suất cao: (node_id, channel) -> start_time
         self._active_device_timers: Dict[Tuple[str, str], float] = {}
 
     @property
@@ -71,16 +69,16 @@ class ProactiveAgent:
 
     def notify_user_activity(self, text: str = None):
         """Ghi nhận khi người dùng vừa ra lệnh hoặc tương tác để cập nhật trạng thái."""
-        # Nếu là buổi sáng sớm và chưa chào, có thể kích hoạt lời chào sớm
+
         now = datetime.now(TZ_VN)
         today_str = now.date().isoformat()
         if 7 <= now.hour < 9 and self.today_morning_greeted != today_str:
-            # Sẽ được xử lý trong vòng lặp tiếp theo
+
             pass
 
     async def _main_loop(self):
         """Vòng lặp định kỳ mỗi 30 giây để kiểm tra các điều kiện chủ động."""
-        # Chờ 15s sau khi khởi động để hệ thống ổn định kết nối
+
         await asyncio.sleep(15)
 
         while self._running:
@@ -88,15 +86,12 @@ class ProactiveAgent:
                 now = datetime.now(TZ_VN)
                 current_time = time.time()
 
-                # 1. Tác vụ Ghi nhớ SSD (Mỗi 15 phút ghi snapshot một lần)
                 if current_time - self.last_journal_time >= 900:
                     await self._record_ssd_snapshot(now)
                     self.last_journal_time = current_time
 
-                # 2. Canh gác an toàn (Safety Sentry)
                 await self._check_safety_sentry(current_time)
 
-                # 3. Kiểm tra tương tác chủ động (Chào hỏi, Hát, Tâm sự)
                 if getattr(config, "PROACTIVE_ENABLED", True):
                     await self._check_proactive_interaction(now, current_time)
 
@@ -123,7 +118,7 @@ class ProactiveAgent:
             for nid, node in online_nodes.items():
                 r_states = node.get("relay_state", [0, 0])
                 active_relays_count += sum(1 for s in r_states if s == 1)
-                # Tính công suất ước tính hoặc từ cảm biến
+
                 for cid, ch in node.get("channels", {}).items():
                     ch_idx = 0 if "1" in cid else 1
                     if ch_idx < len(r_states) and r_states[ch_idx] == 1:
@@ -159,7 +154,6 @@ class ProactiveAgent:
                 key = (nid, cid)
                 dev_type = str(ch.get("device_type", "")).lower()
 
-                # Kiểm tra thiết bị cần giám sát: bình nóng lạnh, máy bơm, sưởi
                 needs_watch = any(w in dev_type for w in ("binh_nong_lanh", "heater", "pump", "bom", "nuoc_nong"))
 
                 if is_on and needs_watch:
@@ -167,14 +161,14 @@ class ProactiveAgent:
                         self._active_device_timers[key] = current_time
                     else:
                         duration_mins = (current_time - self._active_device_timers[key]) / 60.0
-                        # Nếu bật quá 35 phút liên tục
+
                         if duration_mins >= 35.0:
                             dev_name = ch.get("fullname", dev_type)
                             alert_text = f"Cảnh báo: {dev_name} đã hoạt động hơn 35 phút liên tục. Vui lòng kiểm tra để đảm bảo an toàn điện."
                             logger.warning(f"⚠️ Safety Alert triggered: {alert_text}")
                             await self._speak_if_allowed(alert_text, event_type="safety_alert", node_id=nid)
-                            # Reset timer sau khi cảnh báo để không lặp lại liên tục
-                            self._active_device_timers[key] = current_time + 1800  # nhắc lại sau 30p nếu vẫn bật
+
+                            self._active_device_timers[key] = current_time + 1800
                 else:
                     self._active_device_timers.pop(key, None)
 
@@ -183,14 +177,12 @@ class ProactiveAgent:
         hour = now.hour
         today_str = now.date().isoformat()
 
-        # 1. Tuân thủ Quiet Hours: Không bao giờ nói chuyện bâng quơ lúc 22:30 - 07:00
         quiet_start = getattr(config, "PROACTIVE_QUIET_START", 22)
         quiet_end = getattr(config, "PROACTIVE_QUIET_END", 7)
         is_quiet = (hour >= quiet_start or hour < quiet_end)
         if is_quiet:
             return
 
-        # 2. Lời chào buổi sáng (07:15 - 08:30)
         if 7 <= hour < 9 and self.today_morning_greeted != today_str:
             text = "Xin chào buổi sáng. Chúc bạn một ngày làm việc hiệu quả và tốt lành."
             sent = await self._speak_if_allowed(text, event_type="morning_greeting", force=True)
@@ -198,7 +190,6 @@ class ProactiveAgent:
                 self.today_morning_greeted = today_str
                 return
 
-        # 3. Lời nhắc nghỉ ngơi buổi tối (21:45 - 22:25)
         if 21 <= hour < 23 and self.today_evening_greeted != today_str and now.minute >= 45:
             text = "Đã đến giờ nghỉ ngơi buổi tối. Chúc bạn một giấc ngủ ngon."
             sent = await self._speak_if_allowed(text, event_type="night_reminder", force=True)
@@ -206,10 +197,9 @@ class ProactiveAgent:
                 self.today_evening_greeted = today_str
                 return
 
-        # 4. Ngân nga hát hoặc trò chuyện ngẫu nhiên (Giữa 09:30 và 20:30)
         cooldown_sec = getattr(config, "PROACTIVE_COOLDOWN_HOURS", 2.0) * 3600
         if current_time - self.last_speech_time >= cooldown_sec:
-            # Tỷ lệ 40% mỗi lần kiểm tra nếu đã đủ cooldown
+
             if random.random() < 0.40:
                 speech = random.choice(SPONTANEOUS_PROMPTS)
                 await self._speak_if_allowed(speech, event_type="spontaneous_banter")
@@ -221,7 +211,7 @@ class ProactiveAgent:
             return False
 
         current_time = time.time()
-        # Cooldown tối thiểu giữa 2 lần phát bất kỳ là 15 phút (tránh nói liên tục)
+
         if not force and (current_time - self.last_speech_time < 900):
             return False
 
@@ -229,7 +219,6 @@ class ProactiveAgent:
         if not hasattr(audio_server, "speak_proactive"):
             return False
 
-        # 🎵 Acoustic Intro Sound Effects: morning_sound for morning, new_noti for safety alert
         if self.gateway and hasattr(self.gateway, "sound") and self.gateway.sound:
             if event_type == "morning_greeting":
                 logger.info("🌅 Playing morning_sound acoustic intro...")
@@ -244,7 +233,7 @@ class ProactiveAgent:
         success = await audio_server.speak_proactive(text, node_id=node_id)
         if success:
             self.last_speech_time = current_time
-            # Ghi vào nhật ký bộ nhớ SSD
+
             if hasattr(self.gateway, "memory") and self.gateway.memory:
                 self.gateway.memory.record_proactive_speech(event_type, text, node_id)
             if hasattr(self.gateway, "broadcast_event"):

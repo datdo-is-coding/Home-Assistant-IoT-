@@ -30,16 +30,16 @@ int uart_write_bytes(int port, const void* bytes, size_t len) {
 }
 esp_err_t uart_wait_tx_done(int port, TickType_t) { assert(port == 1); return ESP_OK; }
 int uart_read_bytes(int port, void* bytes, uint32_t len, TickType_t) {
-    assert(port == 1 && len == 23);
+    assert(port == 1 && len >= 23);
     if (timeout_rx) return 0;
     auto* frame = static_cast<uint8_t*>(bytes);
     memset(frame, 0, len);
     frame[0] = 0x55;
-    frame[1] = rx_pin; // distinguish each physical input after calibration
+    frame[1] = rx_pin;
     uint8_t sum = 0x58;
     for (int i = 0; i < 22; ++i) sum += frame[i];
     frame[22] = bad_crc ? 0 : uint8_t(~sum);
-    return len;
+    return 23;
 }
 int main() {
     assert(bl0942_driver_init() == ESP_OK);

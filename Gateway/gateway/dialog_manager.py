@@ -14,7 +14,6 @@ from display_names import get_room_name, get_device_name, clean_voice_text
 
 logger = logging.getLogger("dialog_manager")
 
-
 def _slug(s: str) -> str:
     if not s:
         return ""
@@ -25,29 +24,27 @@ def _slug(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
     return s
 
-
 @dataclass
 class DialogSession:
     """Lưu trữ trạng thái phiên hỏi đáp dở dang giữa Gateway và một Node."""
     node_id: str
     client_id: str
     pending_intent: Dict[str, Any]
-    missing_slot: str               # "location", "channel", "value"
+    missing_slot: str
     detected_room: Optional[str] = None
     created_at: float = field(default_factory=time.time)
-    timeout_seconds: float = 15.0   # Hết hạn sau 15 giây nếu người dùng bỏ dở
+    timeout_seconds: float = 15.0
 
     @property
     def is_expired(self) -> bool:
         return (time.time() - self.created_at) > self.timeout_seconds
-
 
 class DialogManager:
     """Quản lý các phiên hội thoại đa lượt và điền slot còn thiếu."""
 
     def __init__(self, registry=None):
         self.registry = registry
-        # node_id / client_id -> DialogSession
+
         self._sessions: Dict[str, DialogSession] = {}
 
     def set_registry(self, registry):
@@ -88,15 +85,13 @@ class DialogManager:
         location = _slug(cmd.get("location"))
         value = cmd.get("value")
 
-        # 1. Tự động bù đắp phòng nếu Spatial Arbitration định vị được người dùng
         if not location and detected_room:
             logger.info(f"📍 Spatial Audio: Inferred room '{detected_room}' for ambiguous command")
             location = _slug(detected_room)
             cmd["location"] = location
 
-        # 2. Kiểm tra điều hòa (dieu_hoa): nếu bật mà thiếu nhiệt độ
         if device in ("dieu_hoa", "may_lanh", "air_conditioner", "dieuhoa", "maylanh", "ac") and action in ("turn_on", "set"):
-            # Kiểm tra xem có số độ trong user_text hoặc value không
+
             if value is None:
                 r_name = get_room_name(location)
                 loc_str = f"ở {r_name}" if r_name else ""
@@ -109,7 +104,6 @@ class DialogManager:
                 logger.info(f"❓ Clarification needed (dieu_hoa temperature): {question}")
                 return True, question, "value", intent
 
-        # 3. Kiểm tra kênh thiết bị bị trùng lặp trong phòng (ví dụ: phòng có cả đèn ngủ lẫn đèn trần)
         if self.registry and location and device:
             room_nodes = self.registry.get_rooms().get(location, [])
             matching_channels = []
@@ -136,7 +130,7 @@ class DialogManager:
                             matching_channels.append(friendly_dev)
 
             if len(matching_channels) >= 2:
-                # Phòng có nhiều đèn khác nhau mà người dùng chỉ nói "bật đèn"
+
                 ch_names = " hay ".join(matching_channels[:2])
                 act_vn = "bật" if action == "turn_on" else "tắt"
                 r_name = get_room_name(location)
@@ -149,9 +143,8 @@ class DialogManager:
                 logger.info(f"❓ Clarification needed (channel ambiguity in {location}): {question}")
                 return True, question, "channel", intent
 
-        # 4. Kiểm tra thiếu vị trí phòng khi cả nhà có nhiều thiết bị cùng loại
         if not location and device and self.registry:
-            # Đếm xem cả nhà có bao nhiêu phòng có loại thiết bị này
+
             rooms_with_device = set()
             for nid, node in self.registry.get_all_nodes().items():
                 if node.get("status") != "online":
@@ -165,7 +158,7 @@ class DialogManager:
                             rooms_with_device.add(nr)
 
             if len(rooms_with_device) > 1:
-                # Có nhiều phòng có thiết bị này -> BẮT BUỘC hỏi lại phòng!
+
                 room_names = [get_room_name(r) for r in sorted(rooms_with_device)]
                 room_list_str = ", ".join(room_names)
                 dev_vn = get_device_name(device)
@@ -179,7 +172,6 @@ class DialogManager:
                 logger.info(f"❓ Clarification needed (location ambiguity): {question}")
                 return True, question, "location", intent
 
-        # Đã đủ thông tin hoặc tự động giải quyết được
         return False, None, None, intent
 
     def fill_slot(self, session: DialogSession, follow_up_text: str) -> Dict[str, Any]:
@@ -198,14 +190,14 @@ class DialogManager:
         logger.info(f"🧩 Merging slot [{missing}] from follow-up text: '{follow_up_text}'")
 
         if missing == "value":
-            # Trích xuất số nhiệt độ (ví dụ: "25", "hai mươi sáu", "26 độ")
+
             num_match = re.search(r"(\d{2})", norm_text)
             if num_match:
                 val = int(num_match.group(1))
                 cmd["value"] = val
                 intent["voice_reply"] = f"Đã cài đặt điều hòa {val} độ ạ."
             else:
-                # Text số cơ bản
+
                 text_map = {"hai lam": 25, "hai muoi lam": 25, "hai sau": 26, "hai bay": 27, "hai tam": 28}
                 found = False
                 for k, v in text_map.items():
@@ -215,10 +207,10 @@ class DialogManager:
                         found = True
                         break
                 if not found:
-                    cmd["value"] = 26  # Giá trị mặc định an toàn
+                    cmd["value"] = 26
 
         elif missing == "location":
-            # Tìm phòng trong câu trả lời theo danh sách phòng hợp lệ
+
             found_room = None
             room_map = [
                 (r"\b(phòng ngủ master|phòng master|ngủ master)\b", "phong_ngu_master"),
@@ -247,15 +239,17 @@ class DialogManager:
             cmd["location"] = found_room
 
         elif missing == "channel":
-            # Phân biệt đèn ngủ vs đèn trần, quạt bàn vs quạt trần, 1 vs 2
+
             if any(w in norm_text for w in ("ngủ", "đầu giường", "bàn", "den ngu")):
                 cmd["device"] = "den_ngu" if "den" in cmd.get("device", "") or cmd.get("device") == "light" else "quat_ban"
             elif any(w in norm_text for w in ("trần", "chiếu sáng", "chính", "chùm", "tuýp", "led")):
                 cmd["device"] = "den_tran" if "den" in cmd.get("device", "") or cmd.get("device") == "light" else "quat_tran"
-            elif any(w in norm_text for w in ("1", "một", "mot", "ch1", "relay 1", "công tắc 1")):
+            elif any(w in norm_text for w in ("1", "một", "mot", "ch1", "relay 1", "công tắc 1", "kênh 1", "kenh 1")):
                 cmd["device"] = "ch1"
-            elif any(w in norm_text for w in ("2", "hai", "ch2", "relay 2", "công tắc 2")):
+            elif any(w in norm_text for w in ("2", "hai", "ch2", "relay 2", "công tắc 2", "kênh 2", "kenh 2")):
                 cmd["device"] = "ch2"
+            elif any(w in norm_text for w in ("3", "ba", "ch3", "relay 3", "công tắc 3", "kênh 3", "kenh 3")):
+                cmd["device"] = "ch3"
             else:
                 cmd["device"] = None
 

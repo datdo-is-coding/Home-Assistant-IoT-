@@ -1,8 +1,3 @@
-/**
- * @file actionbox_registry.cpp
- * @brief Dynamic Registry and State Cache Implementation
- */
-
 #include "actionbox_registry.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -56,7 +51,7 @@ bool ActionBoxRegistry::findNodeByDeviceAndRoom(DeviceType device, RoomType room
         const auto& node = pair.second;
         if (node.is_online && node.device == device &&
             (room == RoomType::UNSPECIFIED || node.room == room)) {
-            if (found) return false; // Ambiguous targets require explicit provisioning.
+            if (found) return false;
             out_node = node;
             found = true;
         }
@@ -71,7 +66,7 @@ bool ActionBoxRegistry::findNodeById(const std::string& node_id, ActionBoxNode& 
         out_node = it->second;
         return true;
     }
-    // Check if matching base node ID (e.g. "AB001")
+
     for (const auto& pair : m_nodes) {
         if (pair.second.node_id == node_id || pair.second.node_id == node_id + "_CH2") {
             out_node = pair.second;
@@ -117,7 +112,6 @@ void ActionBoxRegistry::loadDefaultRoomNodes(RoomType local_room) {
 
     ESP_LOGI(TAG, "Populating default ActionBox registry entries for room: %s", roomToString(local_room));
 
-    // Channel 1: Light (Relay 1 - GPIO 4)
     ActionBoxNode light_node = {};
     light_node.node_id = "AB001";
     light_node.room = local_room;
@@ -136,7 +130,6 @@ void ActionBoxRegistry::loadDefaultRoomNodes(RoomType local_room) {
     light_node.last_seen_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m_nodes[light_node.node_id] = light_node;
 
-    // Channel 2: Fan (Relay 2 - GPIO 5)
     ActionBoxNode fan_node = {};
     fan_node.node_id = "AB001_CH2";
     fan_node.room = local_room;

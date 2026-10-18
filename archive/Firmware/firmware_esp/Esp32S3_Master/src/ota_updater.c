@@ -1,15 +1,3 @@
-/*
- * AETHERIA OS — ESP32-S3 Robust OTA Firmware Updater
- *
- * Implements high-reliability HTTP Pull OTA with:
- * - Anti-brick dual partition switching (ota_0 <-> ota_1)
- * - Automatic rollback cancellation upon confirmed healthy boot
- * - ESP image magic byte (0xE9) header verification
- * - MD5 checksum verification
- * - Real-time progress reporting (0-100%) via MQTT and WebSocket
- * - Dedicated FreeRTOS task with watchdog yielding and hardware status LEDs
- */
-
 #include "ota_updater.h"
 #include "esp_ota_ops.h"
 #include "esp_http_client.h"
@@ -48,8 +36,6 @@ typedef struct {
 static volatile bool s_ota_in_progress = false;
 static TaskHandle_t s_ota_task_handle = NULL;
 
-/* ─── Initialization & Rollback Confirmation ─────────────────────────── */
-
 esp_err_t ota_updater_init(void)
 {
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -66,7 +52,6 @@ esp_err_t ota_updater_init(void)
                  next_update->label, (unsigned long)next_update->address, (unsigned long)next_update->size / 1024);
     }
 
-    /* Check if current image is in pending verify state (first boot after OTA) */
     esp_ota_img_states_t ota_state;
     if (esp_ota_get_state_partition(running, &ota_state) == ESP_OK) {
         if (ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
@@ -90,8 +75,6 @@ bool ota_updater_is_in_progress(void)
     return s_ota_in_progress;
 }
 
-/* ─── Dedicated OTA Background Task ──────────────────────────────────── */
-
 static void ota_task(void *pvParameter)
 {
     ota_task_param_t *param = (ota_task_param_t *)pvParameter;
@@ -106,14 +89,12 @@ static void ota_task(void *pvParameter)
 
     ESP_LOGI(TAG, "🚀 [OTA Task] Initiating HTTP Pull from: %s", param->url);
 
-    /* 1. Hardware LED & Audio indicator (LED1=IO48, LED2=IO47) */
     led1_set(true);
     led2_set(true);
     audio_feedback_play(AUDIO_FB_TING);
 
     mqtt_relay_publish_ota_progress(0, "downloading", "Ket noi toi Gateway OTA...");
 
-    /* 2. Configure HTTP Client */
     esp_http_client_config_t http_cfg = {
         .url = param->url,
         .timeout_ms = 15000,
@@ -166,7 +147,6 @@ static void ota_task(void *pvParameter)
         return;
     }
 
-    /* 3. Determine target OTA partition */
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
     if (!update_partition) {
         ESP_LOGE(TAG, "Passive OTA partition not found!");
@@ -191,7 +171,6 @@ static void ota_task(void *pvParameter)
         return;
     }
 
-    /* 4. Begin OTA session */
     esp_ota_handle_t ota_handle = 0;
     err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &ota_handle);
     if (err != ESP_OK) {
@@ -208,12 +187,10 @@ static void ota_task(void *pvParameter)
     ESP_LOGI(TAG, "Writing firmware to partition '%s' (0x%08lX)...",
              update_partition->label, (unsigned long)update_partition->address);
 
-    /* 5. Initialize MD5 context for on-the-fly checksum verification */
     mbedtls_md5_context md5_ctx;
     mbedtls_md5_init(&md5_ctx);
     mbedtls_md5_starts(&md5_ctx);
 
-    /* 6. Download & Flash Loop */
     int binary_file_len = 0;
     int last_reported_percent = -1;
     bool image_header_checked = false;
@@ -226,7 +203,7 @@ static void ota_task(void *pvParameter)
             flash_error = true;
             break;
         } else if (data_read > 0) {
-            /* Verify ESP32 Image Header Magic Byte on first chunk */
+
             if (!image_header_checked) {
                 if ((uint8_t)ota_buf[0] != ESP_IMAGE_MAGIC) {
                     ESP_LOGE(TAG, "❌ Invalid ESP image magic byte: 0x%02X (expected 0x%02X)",
@@ -249,7 +226,6 @@ static void ota_task(void *pvParameter)
             mbedtls_md5_update(&md5_ctx, (const unsigned char *)ota_buf, data_read);
             binary_file_len += data_read;
 
-            /* Calculate progress */
             int total = (content_length > 0) ? content_length : (int)param->expected_size;
             int cur_percent = (total > 0) ? ((binary_file_len * 100) / total) : 0;
             if (cur_percent > 100) cur_percent = 100;
@@ -261,14 +237,12 @@ static void ota_task(void *pvParameter)
                 mqtt_relay_publish_ota_progress(cur_percent, "downloading", NULL);
             }
 
-            /* Blink LED2 (GPIO 47) during flashing activity */
             static int s_chunk_cnt = 0;
             led2_set((++s_chunk_cnt % 16) < 8);
 
-            /* Yield CPU to allow FreeRTOS IDLE and WiFi tasks to run smoothly */
             vTaskDelay(pdMS_TO_TICKS(1));
         } else {
-            /* data_read == 0 -> EOF */
+
             ESP_LOGI(TAG, "HTTP stream read finished. Total downloaded: %d bytes", binary_file_len);
             break;
         }
@@ -290,7 +264,6 @@ static void ota_task(void *pvParameter)
         return;
     }
 
-    /* 7. Verify MD5 Checksum */
     unsigned char md5_bytes[16];
     mbedtls_md5_finish(&md5_ctx, md5_bytes);
     mbedtls_md5_free(&md5_ctx);
@@ -317,7 +290,6 @@ static void ota_task(void *pvParameter)
         ESP_LOGI(TAG, "✅ MD5 Checksum verified successfully!");
     }
 
-    /* 8. End OTA and switch boot partition */
     err = esp_ota_end(ota_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));

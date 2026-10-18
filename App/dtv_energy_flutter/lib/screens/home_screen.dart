@@ -37,7 +37,7 @@ String metric(dynamic value, String unit, [int digits = 1]) {
 }
 
 bool? relayState(Map<String, dynamic> node, String channel) {
-  final index = {'ch1': 0, 'ch2': 1}[channel];
+  final index = {'ch1': 0, 'ch2': 1, 'ch3': 2}[channel];
   final states = node['relay_state'];
   if (index == null || states is! List || states.length <= index) return null;
   final value = states[index];
@@ -96,10 +96,9 @@ String channelName(String channel, dynamic info) {
     'pump' => 'Máy bơm',
     'ac' || 'air_conditioner' => 'Điều hòa',
     'switch' => 'Công tắc',
-    _ => const {'ch1': 'Kênh 1', 'ch2': 'Kênh 2'}[channel] ?? channel.toUpperCase(),
+    _ => const {'ch1': 'Kênh 1', 'ch2': 'Kênh 2', 'ch3': 'Kênh 3'}[channel] ?? channel.toUpperCase(),
   };
 }
-
 
 void showMessage(BuildContext context, String text) {
   ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -153,7 +152,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startPolling() {
     _timer?.cancel();
-    // ponytail: one snapshot every 5 seconds; use authenticated SSE if scale requires it.
+
     _timer =
         Timer.periodic(const Duration(seconds: 5), (_) => client.refresh());
   }
@@ -417,7 +416,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-
   Widget _home(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final online =
@@ -439,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     for (final entry in _entries) {
       final node = asMap(entry.value);
       for (final ch in asMap(node['channels']).entries) {
-        if (!['ch1', 'ch2'].contains(ch.key)) continue;
+        if (!['ch1', 'ch2', 'ch3'].contains(ch.key)) continue;
         final id = '${entry.key}/${ch.key}';
         if (_favoritesOnly && !_favorites.contains(id)) continue;
         relays.add(RelayTile(
@@ -717,7 +715,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ]);
   }
 
-
   Widget _bentoStat({
     required String label,
     required String value,
@@ -778,7 +775,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
-
 
   Widget _devices(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -1,30 +1,25 @@
-/**
- * @file entity_types.h
- * @brief Device, Room and Value Entity Definitions
- */
-
 #pragma once
 
 #include <string>
 
 enum class DeviceType {
-    LIGHT,              /**< Đèn chiếu sáng */
-    FAN,                /**< Quạt */
-    AIR_CONDITIONER,    /**< Điều hòa / Máy lạnh */
-    SOCKET,             /**< Ổ cắm điện */
-    OTHER,              /**< Thiết bị khác */
-    NONE                /**< Không xác định rõ trong câu */
+    LIGHT,
+    FAN,
+    AIR_CONDITIONER,
+    SOCKET,
+    OTHER,
+    NONE
 };
 
 enum class RoomType {
-    BEDROOM,            /**< Phòng ngủ */
-    LIVING_ROOM,        /**< Phòng khách */
-    KITCHEN,            /**< Phòng bếp */
-    BALCONY,            /**< Ban công */
-    PORCH,              /**< Hiên / Hành lang */
-    OUTDOOR,            /**< Ngoài trời / Sân */
-    OTHER,              /**< Phòng khác */
-    UNSPECIFIED         /**< Không chỉ định rõ -> Dùng speaker/subbox room */
+    BEDROOM,
+    LIVING_ROOM,
+    KITCHEN,
+    BALCONY,
+    PORCH,
+    OUTDOOR,
+    OTHER,
+    UNSPECIFIED
 };
 
 struct ParsedEntities {

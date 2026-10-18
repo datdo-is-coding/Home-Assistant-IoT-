@@ -1,8 +1,3 @@
-/**
- * @file room_manager.cpp
- * @brief SubBox Room Identity Implementation
- */
-
 #include "room_manager.h"
 
 RoomManager::RoomManager(const std::string& subbox_id, RoomType room)

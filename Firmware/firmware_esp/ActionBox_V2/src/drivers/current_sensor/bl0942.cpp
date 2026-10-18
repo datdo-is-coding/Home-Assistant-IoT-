@@ -1,8 +1,3 @@
-/**
- * @file bl0942.cpp
- * @brief Production BL0942 Energy Metering IC Driver Implementation
- */
-
 #include "bl0942.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -60,7 +55,6 @@ esp_err_t bl0942_driver_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    /* Initialize default calibration factors */
     for (uint8_t i = 0; i < BOARD_RELAY_CHANNEL_COUNT; i++) {
         s_calibrations[i].current_factor = BL0942_DEFAULT_CAL_CURRENT;
         s_calibrations[i].voltage_factor = BL0942_DEFAULT_CAL_VOLTAGE;
@@ -70,15 +64,19 @@ esp_err_t bl0942_driver_init(void) {
         s_latest_measurements[i].validity = SENSOR_STATUS_UNINITIALIZED;
     }
 
-    /* Channel 1 UART: TX=IO9, RX=IO10 */
     esp_err_t err = init_channel_uart(BOARD_BL0942_UART_NUM_CH1, BOARD_PIN_BL0942_TX, BOARD_PIN_BL0942_RX_CH1);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init UART for Ch1: %s", esp_err_to_name(err));
         return err;
     }
 
+    gpio_set_pull_mode(BOARD_PIN_BL0942_TX, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(BOARD_PIN_BL0942_RX_CH1, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(BOARD_PIN_BL0942_RX_CH2, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(BOARD_PIN_BL0942_RX_CH3, GPIO_PULLUP_ONLY);
+
 #if !defined(BOARD_BL0942_MULTIPLEX_RX)
-    /* Channel 2 UART: TX=IO9 (shared), RX=IO11 */
+
     err = init_channel_uart(BOARD_BL0942_UART_NUM_CH2, GPIO_NUM_NC, BOARD_PIN_BL0942_RX_CH2);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init UART for Ch2: %s", esp_err_to_name(err));
@@ -118,7 +116,7 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     }
 
 #if defined(BOARD_BL0942_MULTIPLEX_RX)
-    // Shared TX queries every meter; listen only to the selected physical RX.
+
     esp_err_t route_err = uart_set_pin(uart_port, UART_PIN_NO_CHANGE, rx_pins[idx],
                                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (route_err != ESP_OK) {
@@ -128,72 +126,85 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
         return route_err;
     }
 #endif
-    /* Allow short settle time and clear stale RX FIFO before polling */
+
     vTaskDelay(pdMS_TO_TICKS(10));
     uart_flush_input(uart_port);
 
-    /* Broadcast read all registers command: 0x58 0xAA */
     const uint8_t query_cmd[2] = { BL0942_CMD_HEADER_READ, BL0942_CMD_READ_ALL };
     int sent = uart_write_bytes(BOARD_BL0942_UART_NUM_CH1, (const char*)query_cmd, 2);
     esp_err_t tx_err = uart_wait_tx_done(BOARD_BL0942_UART_NUM_CH1, pdMS_TO_TICKS(20));
     if (sent != 2 || tx_err != ESP_OK) {
         s_latest_measurements[idx].validity = SENSOR_STATUS_TIMEOUT;
         *out_meas = s_latest_measurements[idx];
-        // Let any partial response finish before another channel broadcasts.
+
         vTaskDelay(pdMS_TO_TICKS(60));
         xSemaphoreGive(s_sensor_mutex);
         return tx_err != ESP_OK ? tx_err : ESP_FAIL;
     }
 
-    /* Wait for 23-byte response frame (at 4800 baud, 23 bytes ~48ms) */
-    uint8_t rx_buf[BL0942_PACKET_LEN];
-    int bytes_read = uart_read_bytes(uart_port, rx_buf, BL0942_PACKET_LEN, pdMS_TO_TICKS(200));
+    uint8_t rx_raw[64];
+    int bytes_read = uart_read_bytes(uart_port, rx_raw, sizeof(rx_raw), pdMS_TO_TICKS(200));
 
     if (bytes_read < BL0942_PACKET_LEN) {
         s_latest_measurements[idx].validity = SENSOR_STATUS_TIMEOUT;
         *out_meas = s_latest_measurements[idx];
         xSemaphoreGive(s_sensor_mutex);
-        ESP_LOGW(TAG, "Ch%u BL0942 Read timeout: received %d/23 bytes", channel, bytes_read);
+        if (bytes_read > 0) {
+            char hex[80] = {0};
+            for (int b = 0; b < bytes_read && b < 16; b++) {
+                snprintf(hex + strlen(hex), sizeof(hex) - strlen(hex), "%02X ", rx_raw[b]);
+            }
+            ESP_LOGW(TAG, "Ch%u BL0942 Short read: received %d/23 bytes: [%s]", channel, bytes_read, hex);
+        } else {
+            ESP_LOGW(TAG, "Ch%u BL0942 Read timeout: received 0/23 bytes", channel);
+        }
         return ESP_ERR_TIMEOUT;
     }
 
-    /* Verify packet preamble */
-    if (rx_buf[0] != BL0942_PACKET_HEADER) {
+    int frame_start = -1;
+    bool saw_header = false;
+    for (int offset = 0; offset <= bytes_read - BL0942_PACKET_LEN; offset++) {
+        if (rx_raw[offset] == BL0942_PACKET_HEADER) {
+            saw_header = true;
+            uint8_t sum = BL0942_CMD_HEADER_READ;
+            for (int i = 0; i < BL0942_PACKET_LEN - 1; i++) {
+                sum += rx_raw[offset + i];
+            }
+            uint8_t expected = (uint8_t)(~sum);
+            if (rx_raw[offset + BL0942_PACKET_LEN - 1] == expected) {
+                frame_start = offset;
+                break;
+            }
+        }
+    }
+
+    if (frame_start < 0) {
         s_latest_measurements[idx].validity = SENSOR_STATUS_CHECKSUM_ERR;
         *out_meas = s_latest_measurements[idx];
         xSemaphoreGive(s_sensor_mutex);
-        ESP_LOGW(TAG, "Ch%u BL0942 invalid header: 0x%02X (expected 0x55)", channel, rx_buf[0]);
-        return ESP_ERR_INVALID_RESPONSE;
+        char hex[160] = {0};
+        for (int b = 0; b < bytes_read && b < 28; b++) {
+            snprintf(hex + strlen(hex), sizeof(hex) - strlen(hex), "%02X ", rx_raw[b]);
+        }
+        ESP_LOGW(TAG, "Ch%u BL0942 frame sync failed (received %d bytes). Raw: [%s]", channel, bytes_read, hex);
+        return saw_header ? ESP_ERR_INVALID_CRC : ESP_ERR_INVALID_RESPONSE;
     }
 
-    /* Verify packet checksum: BL0942 computes ~(0x58 + sum(rx_buf[0..21])) */
-    uint8_t sum = BL0942_CMD_HEADER_READ; /* 0x58 */
-    for (int i = 0; i < BL0942_PACKET_LEN - 1; i++) {
-        sum += rx_buf[i];
-    }
-    uint8_t expected = (uint8_t)(~sum);
-
-    if (rx_buf[BL0942_PACKET_LEN - 1] != expected) {
-        s_latest_measurements[idx].validity = SENSOR_STATUS_CHECKSUM_ERR;
-        *out_meas = s_latest_measurements[idx];
-        xSemaphoreGive(s_sensor_mutex);
-        ESP_LOGW(TAG, "Ch%u BL0942 Checksum error! Got 0x%02X expected 0x%02X",
-                 channel, rx_buf[BL0942_PACKET_LEN - 1], expected);
-        return ESP_ERR_INVALID_CRC;
+    const uint8_t *rx_buf = &rx_raw[frame_start];
+    if (frame_start > 0) {
+        ESP_LOGI(TAG, "Ch%u BL0942 frame synced at offset +%d", channel, frame_start);
     }
 
-    /* Unpack 24-bit Little Endian fields */
     uint32_t raw_i = (uint32_t)rx_buf[1] | ((uint32_t)rx_buf[2] << 8) | ((uint32_t)rx_buf[3] << 16);
     uint32_t raw_v = (uint32_t)rx_buf[4] | ((uint32_t)rx_buf[5] << 8) | ((uint32_t)rx_buf[6] << 16);
-    
+
     int32_t raw_w = (int32_t)rx_buf[10] | ((int32_t)rx_buf[11] << 8) | ((int32_t)rx_buf[12] << 16);
     if (raw_w & 0x00800000) {
-        raw_w |= 0xFF000000; /* Sign extension for active power */
+        raw_w |= 0xFF000000;
     }
-    
+
     uint32_t raw_cf = (uint32_t)rx_buf[13] | ((uint32_t)rx_buf[14] << 8) | ((uint32_t)rx_buf[15] << 16);
 
-    /* Apply calibration */
     SensorCalibration cal = s_calibrations[idx];
     s_latest_measurements[idx].current_rms_ma = (uint32_t)((float)raw_i * cal.current_factor);
     s_latest_measurements[idx].voltage_rms_v  = (uint32_t)((float)raw_v * cal.voltage_factor);
@@ -203,7 +214,6 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     s_latest_measurements[idx].sample_count++;
     s_latest_measurements[idx].timestamp_ms   = (uint32_t)(esp_timer_get_time() / 1000);
 
-    /* Periodic rate-limited console logging every 1s per channel */
     static uint32_t s_last_log_ms[BOARD_RELAY_CHANNEL_COUNT] = {0};
     if (s_latest_measurements[idx].timestamp_ms - s_last_log_ms[idx] >= 1000) {
         s_last_log_ms[idx] = s_latest_measurements[idx].timestamp_ms;
@@ -215,8 +225,7 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
                  (long)s_latest_measurements[idx].active_power_w);
     }
 
-    /* Flag overcurrent if raw current exceeds threshold */
-    s_latest_measurements[idx].overcurrent = 
+    s_latest_measurements[idx].overcurrent =
         (s_latest_measurements[idx].current_rms_ma >= SAFETY_DEFAULT_MAX_CURRENT_MA);
 
     *out_meas = s_latest_measurements[idx];

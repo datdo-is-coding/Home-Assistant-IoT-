@@ -1,8 +1,3 @@
-/**
- * @file room_manager.h
- * @brief SubBox Room Identity and Boundary Coordinator
- */
-
 #pragma once
 
 #include <string>

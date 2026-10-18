@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/device.dart';
 import '../models/room.dart';
 import '../models/action_box.dart';
@@ -70,8 +72,6 @@ abstract class SmartHomeRepository
   void dispose();
 }
 
-/// Authoritative Gateway-backed SmartHomeRepository.
-/// Strictly drives application state from real Gateway nodes, relays, and PZEM telemetry.
 class GatewaySmartHomeRepository implements SmartHomeRepository {
   final GatewayClient gateway;
 
@@ -87,10 +87,49 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   List<Room> _rooms = [];
   List<ActionBox> _actionBoxes = [];
   final List<Automation> _automations = [];
+  static const String _kAutomationsPrefKey = 'aetheria_saved_automations';
 
   GatewaySmartHomeRepository(this.gateway) {
     gateway.addListener(_syncFromGateway);
+    _loadPersistedAutomations();
     _syncFromGateway();
+  }
+
+  Future<void> _loadPersistedAutomations() async {
+    try {
+      WidgetsFlutterBinding.ensureInitialized();
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kAutomationsPrefKey);
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          _automations.clear();
+          for (final item in decoded) {
+            if (item is Map<String, dynamic>) {
+              _automations.add(Automation.fromJson(item));
+            } else if (item is Map) {
+              _automations.add(Automation.fromJson(Map<String, dynamic>.from(item)));
+            }
+          }
+          if (!_automationStreamCtrl.isClosed) {
+            _automationStreamCtrl.add(List.unmodifiable(_automations));
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load automations: $e');
+    }
+  }
+
+  Future<void> _savePersistedAutomations() async {
+    try {
+      WidgetsFlutterBinding.ensureInitialized();
+      final prefs = await SharedPreferences.getInstance();
+      final list = _automations.map((a) => a.toJson()).toList();
+      await prefs.setString(_kAutomationsPrefKey, jsonEncode(list));
+    } catch (e) {
+      debugPrint('Failed to save automations: $e');
+    }
   }
 
   void _syncFromGateway() {
@@ -119,17 +158,19 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       final pzem = asMap(node['pzem']).isNotEmpty ? asMap(node['pzem']) : asMap(node['last_telemetry']);
       final double powerWatts = readNumber(pzem['power']) ?? 0.0;
 
-      // Real ESP32-S3 hardware has 2 physical channels: ch1 (GPIO 4), ch2 (GPIO 5)
-      final channelKeys = ['ch1', 'ch2'];
+      final has3Ch = channelsMap.containsKey('ch3') ||
+          rlList.length >= 3 ||
+          (node['capabilities'] is List && (node['capabilities'] as List).contains('relay_3ch'));
+      final channelKeys = has3Ch ? const ['ch1', 'ch2', 'ch3'] : const ['ch1', 'ch2'];
       for (int i = 0; i < channelKeys.length; i++) {
         final chKey = channelKeys[i];
         final chInfo = asMap(channelsMap[chKey]);
         final chName = _resolveChannelName(chKey, chInfo);
-        final chTypeStr = (chInfo['device_type'] ?? (i == 0 ? 'light' : 'fan')).toString().toLowerCase();
+        final chTypeStr = (chInfo['device_type'] ?? (i == 0 ? 'light' : (i == 1 ? 'fan' : 'switch'))).toString().toLowerCase();
         final devType = switch (chTypeStr) {
           'light' || 'den' || 'lamp' => DeviceType.light,
           'fan' || 'quat' => DeviceType.fan,
-          'socket' || 'o_cam' || 'outlet' => DeviceType.socket,
+          'socket' || 'o_cam' || 'outlet' || 'switch' || 'cong_tac' => DeviceType.socket,
           'ac' || 'air_conditioner' || 'dieu_hoa' => DeviceType.airConditioner,
           _ => DeviceType.custom,
         };
@@ -138,6 +179,16 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         final rawAliases = chInfo['aliases'];
         final aliases = rawAliases is List ? rawAliases.map((a) => a.toString()).toList() : <String>[];
         final devId = '$nodeId::$chKey';
+
+        final chPowerRaw = readNumber(chInfo['power'] ?? chInfo['power_w']);
+        final double channelPower;
+        if (chPowerRaw != null) {
+          channelPower = chPowerRaw;
+        } else if (i == 0) {
+          channelPower = powerWatts;
+        } else {
+          channelPower = 0.0;
+        }
 
         list.add(Device(
           id: devId,
@@ -148,7 +199,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
           channel: chKey,
           online: nodeOnline,
           isOn: isOn,
-          value: powerWatts > 0 ? powerWatts : 0.0,
+          value: channelPower > 0 ? channelPower : 0.0,
           voiceAliases: aliases,
           isFavorite: _favoriteIds.contains(devId),
           metadata: {
@@ -158,10 +209,11 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
             'ip': node['ip'] ?? '',
             'can_dim': false,
             'can_speed': false,
-            'power': powerWatts,
-            'voltage': readNumber(pzem['voltage']),
-            'current': readNumber(pzem['current']),
-            'energy': readNumber(pzem['energy']),
+            'power': channelPower,
+            'voltage': i == 0 ? readNumber(pzem['voltage']) : null,
+            'current': i == 0 ? readNumber(pzem['current']) : null,
+            'energy': i == 0 ? readNumber(pzem['energy']) : null,
+            'board_power': powerWatts,
           },
         ));
       }
@@ -197,16 +249,19 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       final channelsMap = asMap(node['channels']);
 
       final channels = <ActionBoxChannel>[];
-      final channelKeys = ['ch1', 'ch2'];
+      final has3Ch = channelsMap.containsKey('ch3') ||
+          rlList.length >= 3 ||
+          (node['capabilities'] is List && (node['capabilities'] as List).contains('relay_3ch'));
+      final channelKeys = has3Ch ? const ['ch1', 'ch2', 'ch3'] : const ['ch1', 'ch2'];
       for (int i = 0; i < channelKeys.length; i++) {
         final chKey = channelKeys[i];
         final chInfo = asMap(channelsMap[chKey]);
         final chName = _resolveChannelName(chKey, chInfo);
-        final chTypeStr = (chInfo['device_type'] ?? (i == 0 ? 'light' : 'fan')).toString().toLowerCase();
+        final chTypeStr = (chInfo['device_type'] ?? (i == 0 ? 'light' : (i == 1 ? 'fan' : 'switch'))).toString().toLowerCase();
         final devType = switch (chTypeStr) {
           'light' || 'den' || 'lamp' => DeviceType.light,
           'fan' || 'quat' => DeviceType.fan,
-          'socket' || 'o_cam' => DeviceType.socket,
+          'socket' || 'o_cam' || 'switch' || 'cong_tac' => DeviceType.socket,
           _ => DeviceType.custom,
         };
         final isOn = rlList.length > i && (rlList[i] == 1 || rlList[i] == true);
@@ -283,7 +338,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       'pump' || 'may_bom' => 'Máy bơm',
       'ac' || 'air_conditioner' || 'dieu_hoa' => 'Điều hòa',
       'switch' || 'cong_tac' => 'Công tắc',
-      _ => channel == 'ch1' ? 'Kênh 1' : 'Kênh 2',
+      _ => channel == 'ch1' ? 'Kênh 1' : (channel == 'ch2' ? 'Kênh 2' : (channel == 'ch3' ? 'Kênh 3' : 'Kênh $channel')),
     };
   }
 
@@ -313,7 +368,6 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     _ => Icons.meeting_room_rounded,
   };
 
-  // DeviceRepository Implementation
   @override
   Future<List<Device>> getDevices() async => List.unmodifiable(_devices);
 
@@ -331,12 +385,17 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     if (parts.length != 2) return;
     final nodeId = parts[0];
     final channel = parts[1];
-    await gateway.relay(nodeId, channel, isOn);
+    try {
+      await gateway.relay(nodeId, channel, isOn);
+    } catch (e) {
+      _syncFromGateway();
+      rethrow;
+    }
   }
 
   @override
   Future<void> setDeviceValue(String id, double value) async {
-    // For relays, toggles On if value > 0, Off if value == 0
+
     await toggleDevice(id, value > 0);
   }
 
@@ -370,16 +429,17 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       ch1Type: chKey == 'ch1' ? typeStr : null,
       ch2Name: chKey == 'ch2' ? device.name : null,
       ch2Type: chKey == 'ch2' ? typeStr : null,
+      ch3Name: chKey == 'ch3' ? device.name : null,
+      ch3Type: chKey == 'ch3' ? typeStr : null,
     );
   }
 
   @override
   Future<void> addDevice(Device device) async {
-    // In production, devices are registered via Gateway commissioning
+
     _syncFromGateway();
   }
 
-  // RoomRepository Implementation
   @override
   Future<List<Room>> getRooms() async => List.unmodifiable(_rooms);
 
@@ -391,7 +451,6 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     return _roomStreamCtrl.stream;
   }
 
-  // ActionBoxRepository Implementation
   @override
   Future<List<ActionBox>> getActionBoxes() async => List.unmodifiable(_actionBoxes);
 
@@ -417,7 +476,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     required String roomId,
     List<String>? voiceAliases,
   }) async {
-    final chKey = channelIndex == 0 ? 'ch1' : 'ch2';
+    final chKey = channelIndex == 0 ? 'ch1' : (channelIndex == 1 ? 'ch2' : 'ch3');
     final typeStr = switch (type) {
       DeviceType.light => 'den',
       DeviceType.fan => 'quat',
@@ -431,10 +490,11 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       ch1Type: chKey == 'ch1' ? typeStr : null,
       ch2Name: chKey == 'ch2' ? name : null,
       ch2Type: chKey == 'ch2' ? typeStr : null,
+      ch3Name: chKey == 'ch3' ? name : null,
+      ch3Type: chKey == 'ch3' ? typeStr : null,
     );
   }
 
-  // AutomationRepository Implementation
   @override
   Future<List<Automation>> getAutomations() async => List.unmodifiable(_automations);
 
@@ -452,6 +512,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     if (idx != -1) {
       _automations[idx] = _automations[idx].copyWith(enabled: enabled);
       if (!_automationStreamCtrl.isClosed) _automationStreamCtrl.add(List.unmodifiable(_automations));
+      await _savePersistedAutomations();
     }
   }
 
@@ -459,15 +520,16 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   Future<void> addAutomation(Automation automation) async {
     _automations.add(automation);
     if (!_automationStreamCtrl.isClosed) _automationStreamCtrl.add(List.unmodifiable(_automations));
+    await _savePersistedAutomations();
   }
 
   @override
   Future<void> deleteAutomation(String id) async {
     _automations.removeWhere((a) => a.id == id);
     if (!_automationStreamCtrl.isClosed) _automationStreamCtrl.add(List.unmodifiable(_automations));
+    await _savePersistedAutomations();
   }
 
-  // SceneRepository Implementation
   @override
   Future<List<Scene>> getScenes() async => _buildScenes(_devices);
 
@@ -481,26 +543,35 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
   @override
   Future<void> activateScene(String id) async {
+    final targets = <({String nodeId, String channel, bool targetOn})>[];
     if (id == 'scene_all_off' || id == 'scene_night' || id == 'scene_away') {
       for (final dev in _devices) {
         if (dev.online && dev.isOn && dev.channel != null && dev.actionBoxId != null) {
-          try {
-            await gateway.relay(dev.actionBoxId!, dev.channel!, false);
-          } catch (_) {}
+          targets.add((nodeId: dev.actionBoxId!, channel: dev.channel!, targetOn: false));
         }
       }
     } else if (id == 'scene_morning') {
       for (final dev in _devices) {
         if (dev.online && !dev.isOn && dev.type == DeviceType.light && dev.channel != null && dev.actionBoxId != null) {
-          try {
-            await gateway.relay(dev.actionBoxId!, dev.channel!, true);
-          } catch (_) {}
+          targets.add((nodeId: dev.actionBoxId!, channel: dev.channel!, targetOn: true));
         }
       }
     }
+
+    int failCount = 0;
+    for (final target in targets) {
+      try {
+        await gateway.relay(target.nodeId, target.channel, target.targetOn);
+      } catch (_) {
+        failCount++;
+      }
+    }
+
+    if (failCount > 0) {
+      throw GatewayException('Kích hoạt ngữ cảnh có một số thiết bị không phản hồi ($failCount/${targets.length})');
+    }
   }
 
-  // VoiceRepository Implementation
   @override
   Future<List<VoiceVocabularyItem>> getVocabulary() async => _buildVocabulary(_devices);
 
@@ -522,7 +593,6 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     final dev = _devices[devIdx];
     if (dev.voiceAliases.contains(cleanAlias)) return;
 
-    // Optimistic update
     final previousAliases = List<String>.from(dev.voiceAliases);
     final updatedAliases = List<String>.from(dev.voiceAliases)..add(cleanAlias);
     _devices[devIdx] = dev.copyWith(voiceAliases: updatedAliases);
@@ -537,7 +607,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         alias: cleanAlias,
       );
     } catch (e) {
-      // Rollback on network failure
+
       final rollbackIdx = _devices.indexWhere((d) => d.id == deviceId);
       if (rollbackIdx != -1) {
         _devices[rollbackIdx] = _devices[rollbackIdx].copyWith(voiceAliases: previousAliases);
@@ -558,7 +628,6 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     if (devIdx == -1) return;
     final dev = _devices[devIdx];
 
-    // Optimistic update
     final previousAliases = List<String>.from(dev.voiceAliases);
     final updatedAliases = List<String>.from(dev.voiceAliases)..remove(cleanAlias);
     _devices[devIdx] = dev.copyWith(voiceAliases: updatedAliases);
@@ -573,7 +642,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         alias: cleanAlias,
       );
     } catch (e) {
-      // Rollback on network failure
+
       final rollbackIdx = _devices.indexWhere((d) => d.id == deviceId);
       if (rollbackIdx != -1) {
         _devices[rollbackIdx] = _devices[rollbackIdx].copyWith(voiceAliases: previousAliases);
@@ -597,8 +666,6 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   }
 }
 
-/// Unified In-Memory Reactive Repository implementation.
-/// Used for mock/test mode only via --dart-define=USE_MOCK_DATA=true.
 class InMemorySmartHomeRepository implements SmartHomeRepository {
   final _deviceStreamCtrl = StreamController<List<Device>>.broadcast();
   final _roomStreamCtrl = StreamController<List<Room>>.broadcast();
@@ -650,7 +717,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       channel: 'ch3',
       online: true,
       isOn: true,
-      value: 120.5, // 120.5W
+      value: 120.5,
       isFavorite: true,
       voiceAliases: ['ổ cắm máy tính', 'ổ cắm bàn'],
     ),
@@ -661,7 +728,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       roomId: 'bedroom',
       online: true,
       isOn: false,
-      value: 24.0, // 24°C
+      value: 24.0,
       isFavorite: true,
       voiceAliases: ['điều hòa phòng ngủ', 'máy lạnh'],
     ),
@@ -672,7 +739,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       roomId: 'bedroom',
       actionBoxId: 'ab_02',
       channel: 'ch1',
-      online: false, // Offline demo
+      online: false,
       isOn: false,
       value: 50.0,
       isFavorite: true,
@@ -685,7 +752,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       roomId: 'bedroom',
       actionBoxId: 'ab_02',
       channel: 'ch2',
-      online: false, // Offline demo
+      online: false,
       isOn: false,
       value: 1.0,
       isFavorite: false,
@@ -761,7 +828,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     const Automation(id: 'auto_leave_home', name: 'Tự tắt điện khi rời nhà', icon: Icons.directions_walk_rounded, triggerText: 'Khi điện thoại ra khỏi bán kính 200m', deviceCount: 5, enabled: false),
   ];
 
-  // DeviceRepository Implementation
   @override
   Future<List<Device>> getDevices() async => List.unmodifiable(_devices);
 
@@ -776,11 +842,10 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     final idx = _devices.indexWhere((d) => d.id == id);
     if (idx == -1) return;
     final dev = _devices[idx];
-    if (!dev.online) return; // Cannot toggle offline devices
+    if (!dev.online) return;
     _devices[idx] = dev.copyWith(isOn: isOn);
     _deviceStreamCtrl.add(List.unmodifiable(_devices));
 
-    // Sync with ActionBox if attached
     if (dev.actionBoxId != null && dev.channel != null) {
       _syncDeviceToActionBox(dev.actionBoxId!, dev.channel!, isOn);
     }
@@ -823,7 +888,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _emitVocabulary();
   }
 
-  // RoomRepository Implementation
   @override
   Future<List<Room>> getRooms() async => List.unmodifiable(_rooms);
 
@@ -833,7 +897,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     return _roomStreamCtrl.stream;
   }
 
-  // ActionBoxRepository Implementation
   @override
   Future<List<ActionBox>> getActionBoxes() async => List.unmodifiable(_actionBoxes);
 
@@ -871,7 +934,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _actionBoxes[abIdx] = ab.copyWith(channels: updatedChannels);
     _actionBoxStreamCtrl.add(List.unmodifiable(_actionBoxes));
 
-    // Propagate automatically to DeviceRepository!
     final devIdx = _devices.indexWhere((d) => d.id == deviceId);
     final newAliases = voiceAliases ?? [name.toLowerCase()];
     if (devIdx != -1) {
@@ -917,7 +979,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _actionBoxStreamCtrl.add(List.unmodifiable(_actionBoxes));
   }
 
-  // AutomationRepository Implementation
   @override
   Future<List<Automation>> getAutomations() async => List.unmodifiable(_automations);
 
@@ -947,7 +1008,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _automationStreamCtrl.add(List.unmodifiable(_automations));
   }
 
-  // SceneRepository Implementation
   @override
   Future<List<Scene>> getScenes() async => List.unmodifiable(_scenes);
 
@@ -959,14 +1019,14 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
 
   @override
   Future<void> activateScene(String id) async {
-    // Executes device actions for the scene
+
     if (id == 'scene_morning') {
       for (var i = 0; i < _devices.length; i++) {
         if (_devices[i].type == DeviceType.light && _devices[i].online) {
           _devices[i] = _devices[i].copyWith(isOn: true, value: 50.0);
         }
       }
-    } else if (id == 'scene_night' || id == 'scene_away') {
+    } else if (id == 'scene_night' || id == 'scene_away' || id == 'scene_all_off') {
       for (var i = 0; i < _devices.length; i++) {
         if (_devices[i].online) {
           _devices[i] = _devices[i].copyWith(isOn: false);
@@ -976,7 +1036,6 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
     _deviceStreamCtrl.add(List.unmodifiable(_devices));
   }
 
-  // VoiceRepository Implementation
   @override
   Future<List<VoiceVocabularyItem>> getVocabulary() async {
     return _generateVocabulary();

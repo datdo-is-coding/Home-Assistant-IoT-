@@ -1,9 +1,3 @@
-/*
- * psram_fallback.c
- * Transparently redirects allocations to MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
- * when physical PSRAM is absent on ESP32-S3 (PKG: 0).
- */
-
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -64,7 +58,6 @@ void *__wrap_calloc(size_t n, size_t size)
     return ptr;
 }
 
-/* Deep learning library: dl_lib_calloc & dl_lib_calloc_psram implementation */
 void *__wrap_dl_lib_calloc(size_t n, size_t size, size_t align)
 {
     size_t total_size = n * size + align + 4;

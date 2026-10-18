@@ -1,8 +1,3 @@
-/**
- * @file relay_driver.cpp
- * @brief Thread-safe Relay Driver Implementation Supporting Monostable & Latching Relays
- */
-
 #include "relay_driver.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -96,14 +91,12 @@ static esp_err_t apply_hardware_actuation(uint8_t channel, RelayState state) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // All callers hold the relay mutex (or are single-threaded during init).
     esp_err_t err = gpio_set_level(pin, !BOARD_RELAY_ACTIVE_LEVEL);
     esp_err_t reset_err = gpio_set_level(reset_pin, !BOARD_RELAY_ACTIVE_LEVEL);
     if (err == ESP_OK) err = reset_err;
     s_pulse_pin = state == RELAY_STATE_ON ? pin : reset_pin;
     if (err == ESP_OK) {
-        // Do not allow task preemption between energizing the coil and arming
-        // its cutoff. Neither API blocks; the critical section is brief.
+
         portENTER_CRITICAL(&s_pulse_start_lock);
         err = gpio_set_level(s_pulse_pin, BOARD_RELAY_ACTIVE_LEVEL);
         if (err == ESP_OK) err = esp_timer_start_once(s_pulse_timer, BOARD_RELAY_LATCH_PULSE_MS * 1000ULL);
@@ -111,9 +104,12 @@ static esp_err_t apply_hardware_actuation(uint8_t channel, RelayState state) {
         portEXIT_CRITICAL(&s_pulse_start_lock);
     }
     if (err == ESP_OK) {
-        // Timer lowers the gate independently of the calling task's scheduling.
-        xSemaphoreTake(s_pulse_done, portMAX_DELAY);
-        err = s_pulse_result;
+
+        if (xSemaphoreTake(s_pulse_done, pdMS_TO_TICKS(BOARD_RELAY_LATCH_PULSE_MS + 25)) != pdTRUE) {
+            err = ESP_ERR_TIMEOUT;
+        } else {
+            err = s_pulse_result;
+        }
     }
     if (err != ESP_OK) {
         gpio_set_level(pin, !BOARD_RELAY_ACTIVE_LEVEL);
@@ -129,7 +125,7 @@ static esp_err_t apply_hardware_actuation(uint8_t channel, RelayState state) {
 
 esp_err_t relay_driver_init(void) {
     if (s_relay_mutex) return ESP_ERR_INVALID_STATE;
-    ESP_LOGI(TAG, "Initializing Relay Driver (Channels: %d, Type: %s)...", 
+    ESP_LOGI(TAG, "Initializing Relay Driver (Channels: %d, Type: %s)...",
              BOARD_RELAY_CHANNEL_COUNT,
              (BOARD_RELAY_DRIVE_TYPE == BOARD_RELAY_TYPE_MONOSTABLE) ? "Monostable" : "Latching");
 
@@ -177,7 +173,6 @@ esp_err_t relay_driver_init(void) {
     if (err != ESP_OK) return err;
 #endif
 
-    /* Set default safe state (OFF) */
     for (uint8_t i = 0; i < BOARD_RELAY_CHANNEL_COUNT; i++) {
         uint8_t ch = i + 1;
         s_channels[i].channel_id = ch;
@@ -209,20 +204,20 @@ esp_err_t relay_on(uint8_t channel) {
     uint8_t idx = ch_idx(channel);
     if (generation != s_emergency_generation.load() ||
         s_channels[idx].fault_state != RELAY_FAULT_NONE || !safety_sensor_ready(channel)) {
-        ESP_LOGW(TAG, "relay_on rejected: Channel %u is in FAULT state (%d)", 
+        ESP_LOGW(TAG, "relay_on rejected: Channel %u is in FAULT state (%d)",
                  channel, s_channels[idx].fault_state);
         xSemaphoreGive(s_relay_mutex);
         return ESP_FAIL;
     }
 
     if (s_channels[idx].current_state == RELAY_STATE_ON) {
-        /* Already ON, idempotent no-op */
+
         xSemaphoreGive(s_relay_mutex);
         return ESP_OK;
     }
 
     s_channels[idx].target_state = RELAY_STATE_ON;
-    /* Never hold the protection mutex while waiting for the stagger interval. */
+
     while (true) {
         int64_t remaining_us = SAFETY_RELAY_STAGGER_DELAY_MS * 1000LL -
             (esp_timer_get_time() - s_last_switch_time_us);
@@ -334,7 +329,7 @@ void relay_set_fault(uint8_t channel, RelayFault fault) {
         ESP_LOGW(TAG, "Channel %u fault status set to: %d", channel, fault);
 
         if (fault != RELAY_FAULT_NONE) {
-            /* Force relay OFF immediately on fault */
+
             s_channels[idx].target_state = RELAY_STATE_OFF;
             if (s_channels[idx].current_state != RELAY_STATE_OFF &&
                 apply_hardware_actuation(channel, RELAY_STATE_OFF) == ESP_OK) {
@@ -376,7 +371,7 @@ esp_err_t relay_get_channel_info(uint8_t channel, RelayChannelInfo *out_info) {
 void relay_emergency_all_off(void) {
     ESP_LOGE(TAG, "EMERGENCY: ALL RELAYS SHUTTING DOWN!");
     ++s_emergency_generation;
-    // Task context only: wait for the active pulse before issuing RESET pulses.
+
     if (s_relay_mutex && xSemaphoreTake(s_relay_mutex, portMAX_DELAY) == pdTRUE) {
         for (uint8_t i = 0; i < BOARD_RELAY_CHANNEL_COUNT; i++) {
             s_channels[i].target_state = RELAY_STATE_OFF;

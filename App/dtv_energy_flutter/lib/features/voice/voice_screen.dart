@@ -59,7 +59,7 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Header
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
               sliver: SliverToBoxAdapter(
@@ -109,7 +109,6 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Privacy & On-device Engine Banner
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -158,7 +157,6 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
               ),
             ),
 
-            // Devices and Aliases List
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
               sliver: SliverToBoxAdapter(
@@ -235,7 +233,6 @@ class _VoiceScreenState extends ConsumerState<VoiceScreen> {
                 ),
               ),
 
-            // Advanced Voice Settings
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
               sliver: SliverToBoxAdapter(

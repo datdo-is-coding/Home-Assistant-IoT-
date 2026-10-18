@@ -61,7 +61,6 @@ class LiquidGlassCard extends StatelessWidget {
                 child: child,
               ),
 
-              // 3D Glass Water Droplets Overlay on Borders
               ValueListenableBuilder<String>(
                 valueListenable: WeatherState().activeCondition,
                 builder: (context, condition, _) {
@@ -104,7 +103,6 @@ class _GlassBorderDropletsPainter extends CustomPainter {
     final bodyPaint = Paint()..color = const Color(0xFFBAE6FD).withOpacity(0.45);
     final highlightPaint = Paint()..color = Colors.white.withOpacity(0.95);
 
-    // Pre-calculated droplet offsets along the border
     final List<Map<String, double>> droplets = [
       {'x': 18.0, 'y': 6.0, 'r': 3.5, 'trail': 6.0},
       {'x': 45.0, 'y': 3.0, 'r': 2.5, 'trail': 4.0},
@@ -125,7 +123,6 @@ class _GlassBorderDropletsPainter extends CustomPainter {
 
       if (x > size.width || y > size.height) continue;
 
-      // 1. Water trail down glass
       if (trail > 0) {
         final trailPaint = Paint()
           ..color = const Color(0xFF7DD3FC).withOpacity(0.25)
@@ -134,19 +131,16 @@ class _GlassBorderDropletsPainter extends CustomPainter {
         canvas.drawLine(Offset(x, y - trail), Offset(x, y), trailPaint);
       }
 
-      // 2. 3D Drop Shadow underneath
       canvas.drawOval(
         Rect.fromCenter(center: Offset(x + 0.8, y + 1.2), width: r * 2.2, height: r * 2.4),
         shadowPaint,
       );
 
-      // 3. Drop Body (translucent liquid)
       canvas.drawOval(
         Rect.fromCenter(center: Offset(x, y), width: r * 2.0, height: r * 2.2),
         bodyPaint,
       );
 
-      // 4. Specular White Light Highlight (3D Glass Refraction)
       canvas.drawCircle(
         Offset(x - r * 0.3, y - r * 0.3),
         r * 0.45,

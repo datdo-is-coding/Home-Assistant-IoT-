@@ -46,19 +46,26 @@ class _DeviceScreenState extends State<DeviceScreen> {
     final channels = asMap(node['channels']);
     final ch1 = asMap(channels['ch1']);
     final ch2 = asMap(channels['ch2']);
+    final hasCh3 = channels.containsKey('ch3') || (node['relay_state'] is List && (node['relay_state'] as List).length >= 3);
+    final ch3 = asMap(channels['ch3']);
 
     final name = TextEditingController(text: nodeName(widget.nodeId, node));
     final room = TextEditingController(text: '${node['room'] ?? ''}');
     final location = TextEditingController(text: '${node['location'] ?? ''}');
     final ch1Name = TextEditingController(text: '${ch1['name'] ?? 'Đèn'}');
     final ch2Name = TextEditingController(text: '${ch2['name'] ?? 'Quạt'}');
+    final ch3Name = TextEditingController(text: '${ch3['name'] ?? 'Công tắc'}');
     String ch1Type = '${ch1['device_type'] ?? 'light'}';
     String ch2Type = '${ch2['device_type'] ?? 'fan'}';
+    String ch3Type = '${ch3['device_type'] ?? 'switch'}';
     if (!['light', 'fan', 'pump', 'switch'].contains(ch1Type)) {
       ch1Type = 'light';
     }
     if (!['light', 'fan', 'pump', 'switch'].contains(ch2Type)) {
       ch2Type = 'fan';
+    }
+    if (!['light', 'fan', 'pump', 'switch'].contains(ch3Type)) {
+      ch3Type = 'switch';
     }
 
     final form = GlobalKey<FormState>();
@@ -161,6 +168,35 @@ class _DeviceScreenState extends State<DeviceScreen> {
                                     onChanged: busy
                                         ? null
                                         : (v) => setDialog(() => ch2Type = v!)),
+                                if (hasCh3) ...[
+                                  const SizedBox(height: 18),
+                                  Text('Cấu hình Kênh 3',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary)),
+                                  const SizedBox(height: 8),
+                                  TextFormField(
+                                      controller: ch3Name,
+                                      maxLength: 64,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Tên Kênh 3'),
+                                      validator: (s) =>
+                                          s == null || s.trim().isEmpty
+                                              ? 'Nhập tên kênh 3'
+                                              : null),
+                                  const SizedBox(height: 8),
+                                  DropdownButtonFormField<String>(
+                                      initialValue: ch3Type,
+                                      decoration: const InputDecoration(
+                                          labelText: 'Loại thiết bị Kênh 3'),
+                                      items: _deviceTypes,
+                                      onChanged: busy
+                                          ? null
+                                          : (v) => setDialog(() => ch3Type = v!)),
+                                ],
                                 if (error != null)
                                   Padding(
                                       padding: const EdgeInsets.only(top: 12),
@@ -194,6 +230,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
                                     ch1Type: ch1Type,
                                     ch2Name: ch2Name.text.trim(),
                                     ch2Type: ch2Type,
+                                    ch3Name: hasCh3 ? ch3Name.text.trim() : null,
+                                    ch3Type: hasCh3 ? ch3Type : null,
                                   );
                                   if (dialogContext.mounted) {
                                     Navigator.pop(dialogContext, true);
@@ -216,6 +254,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
     location.dispose();
     ch1Name.dispose();
     ch2Name.dispose();
+    ch3Name.dispose();
     if (saved == true && mounted) {
       showMessage(context, 'Đã cập nhật thiết bị thành công.');
     }
@@ -354,7 +393,7 @@ class _DeviceScreenState extends State<DeviceScreen> {
               const SizedBox(height: 16),
               ResponsiveTiles(children: [
                 for (final ch in asMap(node['channels']).keys)
-                  if (['ch1', 'ch2'].contains(ch))
+                  if (['ch1', 'ch2', 'ch3'].contains(ch))
                     RelayTile(
                         client: widget.client,
                         nodeId: widget.nodeId,
@@ -522,7 +561,6 @@ class PowerChart extends CustomPainter {
         fillPath.lineTo(x, size.height);
         fillPath.close();
 
-        // Terminal glowing point
         canvas.drawCircle(
           Offset(x, y),
           7.0,
@@ -543,7 +581,6 @@ class PowerChart extends CustomPainter {
       }
     }
 
-    // Draw smooth gradient fill under the line
     if (values.length > 1) {
       final fillPaint = Paint()
         ..shader = LinearGradient(
@@ -559,7 +596,6 @@ class PowerChart extends CustomPainter {
       canvas.drawPath(fillPath, fillPaint);
     }
 
-    // Draw main stroke
     canvas.drawPath(
       path,
       Paint()

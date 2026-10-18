@@ -1,8 +1,3 @@
-/**
- * @file wifi_provisioning.cpp
- * @brief SubBox SoftAP Captive Portal Wi-Fi Provisioning Engine
- */
-
 #include "wifi_provisioning.h"
 #include "storage/nvs_manager.h"
 #include "nlu/entity/entity_types.h"
@@ -28,8 +23,7 @@ static TaskHandle_t s_dns_task_handle = NULL;
 static volatile bool s_is_active = false;
 static int s_dns_socket = -1;
 
-/* ─── Captive Portal Web UI ───────────────────────────────────────────── */
-static const char PORTAL_HTML[] = 
+static const char PORTAL_HTML[] =
 "<!DOCTYPE html>"
 "<html lang='vi'>"
 "<head>"
@@ -140,7 +134,6 @@ static const char PORTAL_HTML[] =
 "</body>"
 "</html>";
 
-/* ─── Captive Portal HTTP Handlers ───────────────────────────────────── */
 static esp_err_t portal_root_handler(httpd_req_t *req) {
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
@@ -264,7 +257,6 @@ static esp_err_t portal_save_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-/* ─── Captive DNS Server Task (UDP Port 53) ───────────────────────────── */
 static void dns_server_task(void *pvParameters) {
     struct sockaddr_in serv_addr;
     memset(&serv_addr, 0, sizeof(serv_addr));
@@ -298,29 +290,27 @@ static void dns_server_task(void *pvParameters) {
                            (struct sockaddr *)&client_addr, &client_len);
         if (len < 12) continue;
 
-        /* Minimal DNS Response: set Flags = 0x8180 (Standard response, no error) */
         buffer[2] = 0x81;
         buffer[3] = 0x80;
-        /* Set Questions = 1, Answers = 1, Authority = 0, Additional = 0 */
-        buffer[6] = 0x00; buffer[7] = 0x01; // Answer count = 1
+
+        buffer[6] = 0x00; buffer[7] = 0x01;
         buffer[8] = 0x00; buffer[9] = 0x00;
         buffer[10] = 0x00; buffer[11] = 0x00;
 
-        /* Skip question section */
         int idx = 12;
         while (idx < len && buffer[idx] != 0) {
             idx += buffer[idx] + 1;
         }
-        idx += 5; // null byte + QTYPE (2 bytes) + QCLASS (2 bytes)
+        idx += 5;
 
         if (idx + 16 < (int)sizeof(buffer)) {
-            /* Answer Section: Pointer to QNAME (0xc00c), Type A (0x0001), Class IN (0x0001), TTL=60s, Len=4 */
+
             buffer[idx++] = 0xc0; buffer[idx++] = 0x0c;
-            buffer[idx++] = 0x00; buffer[idx++] = 0x01; // Type A
-            buffer[idx++] = 0x00; buffer[idx++] = 0x01; // Class IN
-            buffer[idx++] = 0x00; buffer[idx++] = 0x00; buffer[idx++] = 0x00; buffer[idx++] = 0x3c; // TTL 60s
-            buffer[idx++] = 0x00; buffer[idx++] = 0x04; // Data length = 4 bytes
-            /* IP: 192.168.4.1 */
+            buffer[idx++] = 0x00; buffer[idx++] = 0x01;
+            buffer[idx++] = 0x00; buffer[idx++] = 0x01;
+            buffer[idx++] = 0x00; buffer[idx++] = 0x00; buffer[idx++] = 0x00; buffer[idx++] = 0x3c;
+            buffer[idx++] = 0x00; buffer[idx++] = 0x04;
+
             buffer[idx++] = 192;
             buffer[idx++] = 168;
             buffer[idx++] = 4;
@@ -337,7 +327,6 @@ static void dns_server_task(void *pvParameters) {
     vTaskDelete(NULL);
 }
 
-/* ─── Public API ──────────────────────────────────────────────────────── */
 esp_err_t wifi_provisioning_start(void) {
     if (s_is_active) return ESP_OK;
 
@@ -345,13 +334,11 @@ esp_err_t wifi_provisioning_start(void) {
     ESP_LOGW(TAG, "  🌐 STARTING SUBBOX SOFTAP CAPTIVE PORTAL PROVISIONING");
     ESP_LOGW(TAG, "===============================================================");
 
-    /* 1. Get MAC address to append to SSID */
     uint8_t mac[6] = {0};
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     char ap_ssid[32];
     snprintf(ap_ssid, sizeof(ap_ssid), "SubBox-Setup-%02X%02X", mac[4], mac[5]);
 
-    /* 2. Configure Wi-Fi in AP+STA mode */
     esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
     if (!ap_netif) {
         ESP_LOGW(TAG, "AP netif may already exist");
@@ -362,7 +349,7 @@ esp_err_t wifi_provisioning_start(void) {
     ap_config.ap.ssid_len = strlen(ap_ssid);
     ap_config.ap.channel = 1;
     ap_config.ap.max_connection = 4;
-    ap_config.ap.authmode = WIFI_AUTH_OPEN; /* Open network for hassle-free mobile setup */
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
 
     esp_wifi_set_mode(WIFI_MODE_APSTA);
     esp_wifi_set_config(WIFI_IF_AP, &ap_config);
@@ -372,10 +359,8 @@ esp_err_t wifi_provisioning_start(void) {
 
     s_is_active = true;
 
-    /* 3. Start DNS redirect server task */
     xTaskCreate(dns_server_task, "dns_task", 3072, NULL, 5, &s_dns_task_handle);
 
-    /* 4. Start HTTP Web Server */
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.max_uri_handlers = 12;
     config.stack_size = 8192;
@@ -405,7 +390,6 @@ esp_err_t wifi_provisioning_start(void) {
         };
         httpd_register_uri_handler(s_http_server, &save_uri);
 
-        /* Captive portal probes redirection */
         const char *probes[] = {
             "/generate_204",
             "/gen_204",

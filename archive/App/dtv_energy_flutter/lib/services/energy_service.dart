@@ -5,9 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:ota_update/ota_update.dart';
 
-/// Central API & Gateway service for AETHERIA OS Mobile App.
-/// Manages authentication, persistent API key & token storage,
-/// real-time device control, provisioning, and OTA management.
 class EnergyService {
   static const String _serverUrlKey = 'gateway_server_url';
   static const String _defaultServerUrl = 'http://192.168.11.29:8000';
@@ -47,9 +44,6 @@ class EnergyService {
     return headers;
   }
 
-  // ── Persistence & Auto-Login ──────────────────────────────────────────────
-
-  /// Load saved server URL and credentials from SharedPreferences on app launch.
   Future<bool> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
     _serverUrl = prefs.getString(_serverUrlKey) ?? _defaultServerUrl;
@@ -58,15 +52,13 @@ class EnergyService {
     _username = prefs.getString(_usernameKey) ?? '';
     _fullname = prefs.getString(_fullnameKey) ?? '';
 
-    // Attempt auto-login with saved key/token
     if (_apiKey.isNotEmpty || _authToken.isNotEmpty) {
       final isValid = await checkSession();
       if (isValid) {
         _isAuthenticated = true;
         return true;
       }
-      // If network timed out or unreachable but we have a persistent API key,
-      // retain authentication so the user is never forced to re-enter credentials!
+
       if (_apiKey.isNotEmpty) {
         _isAuthenticated = true;
         return true;
@@ -78,7 +70,6 @@ class EnergyService {
     return false;
   }
 
-  /// Check whether current saved token or API key is valid on the Gateway.
   Future<bool> checkSession() async {
     try {
       final res = await http.get(
@@ -100,7 +91,6 @@ class EnergyService {
     return false;
   }
 
-  /// Change and persist Gateway server URL.
   Future<void> setServerUrl(String url) async {
     _serverUrl = url.trim();
     if (_serverUrl.endsWith('/')) {
@@ -110,7 +100,6 @@ class EnergyService {
     await prefs.setString(_serverUrlKey, _serverUrl);
   }
 
-  /// Save permanent API key into SharedPreferences.
   Future<void> saveApiKey(String key) async {
     _apiKey = key.trim();
     final prefs = await SharedPreferences.getInstance();
@@ -118,7 +107,6 @@ class EnergyService {
     _isAuthenticated = true;
   }
 
-  /// Login with username and password. On success, persists token & permanent API key.
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
       final res = await http.post(
@@ -156,7 +144,6 @@ class EnergyService {
     }
   }
 
-  /// Register a new account.
   Future<Map<String, dynamic>> register(String username, String password, String fullname) async {
     try {
       final res = await http.post(
@@ -175,7 +162,6 @@ class EnergyService {
     }
   }
 
-  /// Logout and clear stored session and API key.
   Future<void> logout() async {
     try {
       await http.post(
@@ -197,9 +183,6 @@ class EnergyService {
     await prefs.remove(_fullnameKey);
   }
 
-  // ── DEVICE & RELAY CONTROLS (Gateway Unified) ─────────────────────────────
-
-  /// Fetch all active nodes, rooms, pending devices.
   Future<Map<String, dynamic>> fetchNodes() async {
     try {
       final res = await http.get(
@@ -211,11 +194,10 @@ class EnergyService {
     return {'nodes': {}, 'rooms': {}, 'pending': {}, 'discovered': {}};
   }
 
-  /// Control a relay channel on a specific node.
   Future<bool> toggleRelay({
     required String nodeId,
     required String channel,
-    required String action, // 'turn_on' or 'turn_off'
+    required String action,
   }) async {
     try {
       final res = await http.post(
@@ -235,7 +217,6 @@ class EnergyService {
     return false;
   }
 
-  /// Provision a newly discovered pending node into a room.
   Future<Map<String, dynamic>> provisionNode({
     required String mac,
     required String room,
@@ -261,12 +242,9 @@ class EnergyService {
     }
   }
 
-  // ── LIVE TELEMETRY & METRICS ──────────────────────────────────────────────
-
-  /// Fetch live energy metrics from ESP32 master node.
   Future<Map<String, dynamic>> fetchLiveMetrics() async {
     try {
-      // First try via Gateway /api/nodes
+
       final nodesData = await fetchNodes();
       final nodes = nodesData['nodes'] as Map<String, dynamic>? ?? {};
       if (nodes.containsKey('esp32s3_master')) {
@@ -296,7 +274,6 @@ class EnergyService {
     };
   }
 
-  /// Live TinyML Anomaly score from master node.
   Future<Map<String, dynamic>> fetchTinyML() async {
     return {
       'anomaly_score': 3,
@@ -306,9 +283,6 @@ class EnergyService {
     };
   }
 
-  // ── OTA FIRMWARE HUB ──────────────────────────────────────────────────────
-
-  /// Fetch available firmware binaries on Gateway.
   Future<List<dynamic>> fetchOtaList() async {
     try {
       final res = await http.get(
@@ -323,7 +297,6 @@ class EnergyService {
     return [];
   }
 
-  /// Trigger OTA flashing for an ESP32 node via Gateway.
   Future<Map<String, dynamic>> flashOta({
     required String filename,
     required String nodeId,
@@ -343,7 +316,6 @@ class EnergyService {
     }
   }
 
-  /// Upload a firmware file directly from device storage to Gateway or direct node OTA.
   Future<bool> uploadOtaFirmware({
     required PlatformFile file,
     required Function(double progress) onProgress,
@@ -376,8 +348,6 @@ class EnergyService {
     }
   }
 
-  // ── APP SELF-UPDATE ───────────────────────────────────────────────────────
-
   Stream<OtaEvent>? triggerAppOtaUpdate({String? customApkUrl}) {
     try {
       final url = (customApkUrl != null && customApkUrl.startsWith('http'))
@@ -393,9 +363,6 @@ class EnergyService {
     }
   }
 
-  // ── SOUNDSCAPE & ACOUSTIC EFFECTS ─────────────────────────────────────────
-
-  /// Fetch list of available system soundscapes.
   Future<List<Map<String, dynamic>>> fetchSounds() async {
     try {
       final res = await http.get(
@@ -411,7 +378,6 @@ class EnergyService {
     return [];
   }
 
-  /// Trigger a system sound to play on the ESP32 physical speaker.
   Future<bool> playSoundOnSpeaker(String soundName, {String nodeId = 'esp32s3_master'}) async {
     try {
       final res = await http.post(
@@ -447,7 +413,6 @@ class EnergyService {
     return defaultVal;
   }
 
-  /// Test connectivity to the Gateway server.
   Future<bool> testServerConnection() async {
     try {
       final res = await http.get(
@@ -459,7 +424,6 @@ class EnergyService {
     }
   }
 
-  /// Fetch active alerts / anomalies.
   Future<List<dynamic>> fetchAlerts() async {
     try {
       final res = await http.get(
@@ -474,7 +438,6 @@ class EnergyService {
     return [];
   }
 
-  /// Fetch weather data from Gateway.
   Future<Map<String, dynamic>> fetchWeather() async {
     try {
       final res = await http.get(
@@ -486,7 +449,6 @@ class EnergyService {
     return {'temp': 28.5, 'humidity': 65, 'condition': 'Clear'};
   }
 
-  /// Fetch system config.
   Future<Map<String, dynamic>> fetchConfig() async {
     try {
       final res = await http.get(
@@ -498,7 +460,6 @@ class EnergyService {
     return {};
   }
 
-  /// Update system config.
   Future<bool> updateConfig({
     Map<String, dynamic>? config,
     String? espS3Ip,
@@ -519,7 +480,6 @@ class EnergyService {
     }
   }
 
-  /// Fetch app version info.
   Future<Map<String, dynamic>> fetchAppVersion() async {
     try {
       final res = await http.get(
@@ -531,7 +491,6 @@ class EnergyService {
     return {'version': '1.0.10', 'build': 10};
   }
 
-  /// Fetch analytics data list.
   Future<List<dynamic>> fetchAnalytics() async {
     try {
       final res = await http.get(

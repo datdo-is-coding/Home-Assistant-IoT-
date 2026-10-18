@@ -9,10 +9,9 @@ import time
 import shutil
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # Chạy chế độ headless lưu ảnh
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-# Cấu hình font chữ hiển thị chuẩn tiếng Việt trên Windows
 plt.rcParams['font.sans-serif'] = ['Segoe UI', 'Arial', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -25,7 +24,6 @@ DATA_DIR = "d:/KWS/data"
 MODEL_DIR = "d:/KWS/models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# Dataset tùy biến có hỗ trợ Data Augmentation (Time Shift & Additive Noise)
 class KWSDataset(Dataset):
     def __init__(self, X, y, augment=False):
         self.X = torch.from_numpy(X).float()
@@ -40,43 +38,39 @@ class KWSDataset(Dataset):
         y = self.y[idx]
 
         if self.augment:
-            # 1. Time shifting (dịch ngẫu nhiên dọc theo trục thời gian ±5 frames)
+
             shift = np.random.randint(-5, 6)
             if shift != 0:
                 x = torch.roll(x, shifts=shift, dims=1)
-            # 2. Additive Gaussian noise nhẹ (SNR ngẫu nhiên)
+
             if np.random.rand() > 0.5:
                 noise = torch.randn_like(x) * 0.05
                 x = x + noise
 
         return x, y
 
-# Kiến trúc mô hình TinyKWS (Depthwise Separable CNN)
 class TinyKWS(nn.Module):
     def __init__(self, num_classes=10):
         super(TinyKWS, self).__init__()
-        # Khối Conv 1
+
         self.conv1 = nn.Conv2d(1, 16, kernel_size=(3, 3), padding=1)
         self.bn1 = nn.BatchNorm2d(16)
         self.relu = nn.ReLU()
         self.pool1 = nn.MaxPool2d((2, 2))
         self.drop1 = nn.Dropout(0.15)
 
-        # Khối Depthwise Separable 2
         self.dw2 = nn.Conv2d(16, 16, kernel_size=(3, 3), padding=1, groups=16)
         self.pw2 = nn.Conv2d(16, 32, kernel_size=(1, 1))
         self.bn2 = nn.BatchNorm2d(32)
         self.pool2 = nn.MaxPool2d((2, 2))
         self.drop2 = nn.Dropout(0.2)
 
-        # Khối Depthwise Separable 3
         self.dw3 = nn.Conv2d(32, 32, kernel_size=(3, 3), padding=1, groups=32)
         self.pw3 = nn.Conv2d(32, 64, kernel_size=(1, 1))
         self.bn3 = nn.BatchNorm2d(64)
         self.pool3 = nn.MaxPool2d((2, 2))
         self.drop3 = nn.Dropout(0.25)
 
-        # Phân lớp
         self.gap = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(64, num_classes)
 
@@ -92,7 +86,6 @@ class TinyKWS(nn.Module):
 def plot_and_save_visualizations(history, y_true, y_pred, classes):
     print("\nĐang tạo các biểu đồ trực quan hóa kết quả...")
 
-    # 1. BIỂU ĐỒ 1: LOSS & ACCURACY QUA CÁC EPOCH
     plt.figure(figsize=(14, 5))
     epochs = range(1, len(history["train_loss"]) + 1)
 
@@ -120,7 +113,6 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
     plt.close()
     print(f"-> Đã lưu biểu đồ Loss & Accuracy: {loss_acc_path}")
 
-    # 2. BIỂU ĐỒ 2: MA TRẬN NHẦM LẪN (CONFUSION MATRIX)
     cm = confusion_matrix(y_true, y_pred)
     cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
 
@@ -151,7 +143,6 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
     plt.close()
     print(f"-> Đã lưu Ma trận nhầm lẫn: {cm_path}")
 
-    # 3. BIỂU ĐỒ 3: PRECISION, RECALL, F1-SCORE CHO TỪNG TỪ KHÓA
     report = classification_report(y_true, y_pred, target_names=classes, output_dict=True)
     precisions = [report[cls]["precision"] * 100 for cls in classes]
     recalls = [report[cls]["recall"] * 100 for cls in classes]
@@ -179,11 +170,9 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
     plt.close()
     print(f"-> Đã lưu biểu đồ Precision/Recall/F1: {metrics_path}")
 
-    # 4. TỔNG HỢP DASHBOARD 4-TRONG-1
     fig = plt.figure(figsize=(16, 12))
     gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.25)
 
-    # Panel A: Loss
     ax1 = fig.add_subplot(gs[0, 0])
     ax1.plot(epochs, history["train_loss"], 'b-', label='Train Loss', linewidth=2)
     ax1.plot(epochs, history["val_loss"], 'r--', label='Val Loss', linewidth=2)
@@ -193,7 +182,6 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
     ax1.grid(True, linestyle='--', alpha=0.6)
     ax1.legend()
 
-    # Panel B: Accuracy
     ax2 = fig.add_subplot(gs[0, 1])
     ax2.plot(epochs, [a * 100 for a in history["train_acc"]], 'b-', label='Train Acc', linewidth=2)
     ax2.plot(epochs, [a * 100 for a in history["val_acc"]], 'r--', label='Val Acc', linewidth=2)
@@ -203,7 +191,6 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
     ax2.grid(True, linestyle='--', alpha=0.6)
     ax2.legend()
 
-    # Panel C: Confusion Matrix
     ax3 = fig.add_subplot(gs[1, 0])
     im = ax3.imshow(cm_norm, cmap=plt.cm.Blues)
     ax3.set_title('(C) Ma Trận Nhầm Lẫn (Confusion Matrix)', fontsize=12, fontweight='bold')
@@ -216,7 +203,6 @@ def plot_and_save_visualizations(history, y_true, y_pred, classes):
             ax3.text(j, i, f"{cm_norm[i, j]*100:.0f}%", ha="center", va="center",
                      fontsize=8, color="white" if cm_norm[i, j] > thresh else "black")
 
-    # Panel D: F1-Score Bar Chart
     ax4 = fig.add_subplot(gs[1, 1])
     bars = ax4.bar(classes, f1s, color=['#2ecc71' if f >= 80 else '#e74c3c' for f in f1s])
     ax4.axhline(y=80, color='gray', linestyle='--', label='Ngưỡng 80%')
@@ -247,7 +233,6 @@ def train_and_visualize():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Thiết bị tính toán: {device}")
 
-    # Đọc dữ liệu
     X_train = np.load(os.path.join(DATA_DIR, "X_train.npy"))
     y_train = np.load(os.path.join(DATA_DIR, "y_train.npy"))
     X_val = np.load(os.path.join(DATA_DIR, "X_val.npy"))
@@ -310,7 +295,6 @@ def train_and_visualize():
         epoch_train_loss = train_loss / train_total
         epoch_train_acc = train_correct / train_total
 
-        # Validation
         model.eval()
         val_loss, val_correct, val_total = 0.0, 0, 0
         with torch.no_grad():
@@ -340,7 +324,6 @@ def train_and_visualize():
 
     print(f"Huấn luyện xong trong {time.time() - start_time:.1f}s.")
 
-    # Đánh giá trên tập test
     model.load_state_dict(torch.load(best_model_path, map_location=device))
     model.eval()
 
@@ -356,14 +339,11 @@ def train_and_visualize():
     y_pred = np.array(y_pred)
     y_true = np.array(y_true)
 
-    # Lưu lại lịch sử vào file json
     with open(os.path.join(MODEL_DIR, "training_history.json"), "w") as f:
         json.dump(history, f, indent=2)
 
-    # Xuất các biểu đồ trực quan hóa
     vis_res = plot_and_save_visualizations(history, y_true, y_pred, classes)
 
-    # Copy ảnh sang thư mục artifacts để hiển thị cho người dùng
     artifact_dir = r"C:\Users\Admin\.gemini\antigravity-ide\brain\e905d283-4a08-4e27-afa6-ee04742952cb"
     if os.path.exists(artifact_dir):
         for img_name in ["kws_evaluation_dashboard.png", "training_loss_accuracy.png", "confusion_matrix.png", "per_class_metrics.png"]:

@@ -17,7 +17,7 @@ final appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
   initialLocation: '/home',
   routes: [
-    // Modal & Full-screen Flows
+
     GoRoute(
       path: '/actionbox/add-device',
       parentNavigatorKey: _rootNavigatorKey,
@@ -53,13 +53,12 @@ final appRouter = GoRouter(
       },
     ),
 
-    // Stateful Nested Shell for Bottom Navigation / Tablet Rail
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) {
         return SmartHomeScaffold(navigationShell: navigationShell);
       },
       branches: [
-        // Tab 1: Home
+
         StatefulShellBranch(
           routes: [
             GoRoute(
@@ -69,7 +68,6 @@ final appRouter = GoRouter(
           ],
         ),
 
-        // Tab 2: Devices
         StatefulShellBranch(
           routes: [
             GoRoute(
@@ -79,7 +77,6 @@ final appRouter = GoRouter(
           ],
         ),
 
-        // Tab 3: Automation
         StatefulShellBranch(
           routes: [
             GoRoute(
@@ -89,7 +86,6 @@ final appRouter = GoRouter(
           ],
         ),
 
-        // Tab 4: Settings
         StatefulShellBranch(
           routes: [
             GoRoute(

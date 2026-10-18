@@ -1,14 +1,3 @@
-/*
- * T2 Zone Controller — Infrared (IR) Controller Implementation
- * DTV Smart Home — 3-Tier IoT Architecture
- *
- * Implements:
- *   - RMT TX with 38kHz modulation for AC and Appliances
- *   - NEC protocol generation for TVs / Fans
- *   - Raw timings transmission (Universal AC: Daikin, Panasonic, Casper, Gree)
- *   - JSON command dispatcher
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -27,8 +16,6 @@ static rmt_channel_handle_t s_tx_chan = NULL;
 static rmt_encoder_handle_t s_copy_encoder = NULL;
 static bool s_ir_initialized = false;
 
-/* ─── Initialize IR Subsystem ────────────────────────────────────────── */
-
 esp_err_t ir_controller_init(gpio_num_t tx_gpio, gpio_num_t rx_gpio)
 {
     ESP_LOGI(TAG, "Initializing IR Controller (TX GPIO: %d, RX GPIO: %d)...", tx_gpio, rx_gpio);
@@ -37,7 +24,7 @@ esp_err_t ir_controller_init(gpio_num_t tx_gpio, gpio_num_t rx_gpio)
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .gpio_num = tx_gpio,
         .mem_block_symbols = 64,
-        .resolution_hz = 1000000, /* 1MHz = 1us resolution */
+        .resolution_hz = 1000000,
         .trans_queue_depth = 4,
         .flags.invert_out = false,
         .flags.with_dma = false,
@@ -49,7 +36,6 @@ esp_err_t ir_controller_init(gpio_num_t tx_gpio, gpio_num_t rx_gpio)
         return ret;
     }
 
-    /* Configure 38kHz carrier modulation with 33% duty cycle */
     rmt_carrier_config_t carrier_cfg = {
         .duty_cycle = 0.33f,
         .frequency_hz = 38000,
@@ -61,7 +47,6 @@ esp_err_t ir_controller_init(gpio_num_t tx_gpio, gpio_num_t rx_gpio)
         return ret;
     }
 
-    /* Create copy encoder to transmit raw pulse-space symbols */
     rmt_copy_encoder_config_t copy_encoder_cfg = {};
     ret = rmt_new_copy_encoder(&copy_encoder_cfg, &s_copy_encoder);
     if (ret != ESP_OK) {
@@ -79,8 +64,6 @@ esp_err_t ir_controller_init(gpio_num_t tx_gpio, gpio_num_t rx_gpio)
     ESP_LOGI(TAG, "✅ IR Controller initialized successfully on GPIO %d (38kHz carrier ready)", tx_gpio);
     return ESP_OK;
 }
-
-/* ─── Transmit Raw Timings ───────────────────────────────────────────── */
 
 esp_err_t ir_send_raw(const uint32_t *timings_us, size_t count)
 {
@@ -103,9 +86,9 @@ esp_err_t ir_send_raw(const uint32_t *timings_us, size_t count)
 
     for (size_t i = 0; i < num_symbols; i++) {
         symbols[i].val = 0;
-        symbols[i].level0 = 1; /* Mark (carrier active) */
+        symbols[i].level0 = 1;
         symbols[i].duration0 = (uint16_t)timings_us[i * 2];
-        symbols[i].level1 = 0; /* Space (carrier idle) */
+        symbols[i].level1 = 0;
         symbols[i].duration1 = (uint16_t)timings_us[i * 2 + 1];
     }
 
@@ -125,15 +108,12 @@ esp_err_t ir_send_raw(const uint32_t *timings_us, size_t count)
     return ret;
 }
 
-/* ─── Transmit NEC Protocol Frame ─────────────────────────────────────── */
-
 esp_err_t ir_send_nec(uint16_t address, uint16_t command)
 {
-    /* NEC: 9ms mark + 4.5ms space header, followed by 32 bits (addr + ~addr + cmd + ~cmd) */
+
     uint32_t raw[2 + 32 * 2 + 2];
     size_t idx = 0;
 
-    /* Header */
     raw[idx++] = 9000;
     raw[idx++] = 4500;
 
@@ -150,15 +130,14 @@ esp_err_t ir_send_nec(uint16_t address, uint16_t command)
                     (uint32_t)addr_lo;
 
     for (int i = 0; i < 32; i++) {
-        raw[idx++] = 560; /* Mark */
+        raw[idx++] = 560;
         if (data & (1 << i)) {
-            raw[idx++] = 1690; /* 1: 1.69ms space */
+            raw[idx++] = 1690;
         } else {
-            raw[idx++] = 560;  /* 0: 0.56ms space */
+            raw[idx++] = 560;
         }
     }
 
-    /* Stop bit */
     raw[idx++] = 560;
     raw[idx++] = 20000;
 
@@ -166,20 +145,14 @@ esp_err_t ir_send_nec(uint16_t address, uint16_t command)
     return ir_send_raw(raw, idx);
 }
 
-/* ─── Send Structured AC Command ─────────────────────────────────────── */
-
 esp_err_t ir_send_ac(const ir_ac_cmd_t *cmd)
 {
     if (!cmd) return ESP_ERR_INVALID_ARG;
     ESP_LOGI(TAG, "Sending AC Command: Brand=%s, Power=%d, Temp=%dC, Mode=%d, Fan=%d",
              cmd->brand, cmd->power, cmd->temp_c, cmd->mode, cmd->fan);
 
-    /*
-     * For demonstration & testing: Send NEC test beacon or pre-recorded
-     * pulse array matching common Daikin / Panasonic frames.
-     */
     if (strcasecmp(cmd->brand, "daikin") == 0) {
-        /* Standard Daikin leader: 3500us mark, 1750us space */
+
         uint32_t daikin_sample[] = {
             3500, 1750,
             450, 1300, 450, 450, 450, 1300, 450, 450,
@@ -189,11 +162,8 @@ esp_err_t ir_send_ac(const ir_ac_cmd_t *cmd)
         return ir_send_raw(daikin_sample, sizeof(daikin_sample) / sizeof(daikin_sample[0]));
     }
 
-    /* Generic Fallback: Standard power toggle sequence */
     return ir_send_nec(0x1234, cmd->power ? 0x01 : 0x00);
 }
-
-/* ─── JSON Command Dispatcher (MQTT Hook) ────────────────────────────── */
 
 esp_err_t ir_handle_json_cmd(const char *json_str)
 {

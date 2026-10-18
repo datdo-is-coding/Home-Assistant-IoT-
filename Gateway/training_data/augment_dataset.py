@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Vietnamese Smart Home NLU Data Augmentation
 =============================================
@@ -18,8 +17,6 @@ import re
 import copy
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-
-# ─── Augmentation Templates ────────────────────────────────────────
 
 PREFIXES = [
     "", "ê ", "nè ", "ơi ", "này ", "ok ",
@@ -58,15 +55,13 @@ CONTEXT_PREFIXES = [
     "ngồi xem tivi ",
 ]
 
-# Common ASR noise patterns to inject
 ASR_NOISE_PATTERNS = [
-    # Vietnamese diacritical errors (random missing/wrong diacritics)
+
     ("ắ", "a"), ("ật", "at"), ("ạt", "at"),
     ("è", "e"), ("ền", "en"), ("ẹn", "en"),
     ("ủ", "u"), ("ộ", "o"),
     ("ò", "o"), ("ấ", "a"),
 ]
-
 
 def augment_prefix_suffix(sample, prefixes=PREFIXES, suffixes=SUFFIXES):
     """Generate new samples with different prefixes and suffixes."""
@@ -84,7 +79,6 @@ def augment_prefix_suffix(sample, prefixes=PREFIXES, suffixes=SUFFIXES):
 
     return augmented
 
-
 def augment_context(sample, contexts=CONTEXT_PREFIXES):
     """Add natural context sentences before the command."""
     augmented = []
@@ -100,12 +94,10 @@ def augment_context(sample, contexts=CONTEXT_PREFIXES):
 
     return augmented
 
-
 def augment_asr_noise(sample, noise_rate=0.15):
     """Inject random ASR-like noise into the user text."""
     original_text = sample["messages"][1]["content"]
 
-    # Only augment some characters
     new_text = original_text
     for correct, noisy in random.sample(ASR_NOISE_PATTERNS, min(2, len(ASR_NOISE_PATTERNS))):
         if correct in new_text and random.random() < noise_rate:
@@ -117,13 +109,11 @@ def augment_asr_noise(sample, noise_rate=0.15):
         return [new_sample]
     return []
 
-
 def main():
     base_dir = os.path.dirname(__file__)
     input_path = os.path.join(base_dir, "smarthome_vi_nlu_full.jsonl")
     output_path = os.path.join(base_dir, "smarthome_vi_nlu_augmented.jsonl")
 
-    # Load base dataset
     base_samples = []
     with open(input_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -133,14 +123,13 @@ def main():
 
     print(f"Base dataset: {len(base_samples)} samples")
 
-    # Augment
-    all_samples = list(base_samples)  # Keep originals
+    all_samples = list(base_samples)
     seen_texts = set(s["messages"][1]["content"] for s in base_samples)
 
     random.seed(42)
 
     for sample in base_samples:
-        # 1. Prefix/Suffix augmentation (selective, not every sample)
+
         if random.random() < 0.6:
             for aug in augment_prefix_suffix(sample):
                 text = aug["messages"][1]["content"]
@@ -148,7 +137,6 @@ def main():
                     all_samples.append(aug)
                     seen_texts.add(text)
 
-        # 2. Context augmentation (selective)
         if random.random() < 0.4:
             for aug in augment_context(sample):
                 text = aug["messages"][1]["content"]
@@ -156,7 +144,6 @@ def main():
                     all_samples.append(aug)
                     seen_texts.add(text)
 
-        # 3. ASR noise injection (selective)
         if random.random() < 0.3:
             for aug in augment_asr_noise(sample):
                 text = aug["messages"][1]["content"]
@@ -164,15 +151,12 @@ def main():
                     all_samples.append(aug)
                     seen_texts.add(text)
 
-    # Shuffle
     random.shuffle(all_samples)
 
-    # Write augmented dataset
     with open(output_path, "w", encoding="utf-8") as f:
         for s in all_samples:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
-    # Split: 90% train, 10% val
     split_idx = int(len(all_samples) * 0.9)
     train = all_samples[:split_idx]
     val = all_samples[split_idx:]
@@ -187,7 +171,6 @@ def main():
         for s in val:
             f.write(json.dumps(s, ensure_ascii=False) + "\n")
 
-    # Stats
     print("=" * 70)
     print("  AUGMENTED VIETNAMESE SMART HOME NLU DATASET")
     print("=" * 70)
@@ -200,7 +183,6 @@ def main():
     print(f"  Validation split:   {os.path.abspath(val_path)}")
     print(f"  File size:          {os.path.getsize(output_path)/1024:.0f} KB")
 
-    # Distribution
     actions = {}
     devices = {}
     for s in all_samples:
@@ -227,7 +209,6 @@ def main():
     print("\n" + "=" * 70)
     print("  AUGMENTATION COMPLETE")
     print("=" * 70)
-
 
 if __name__ == "__main__":
     main()

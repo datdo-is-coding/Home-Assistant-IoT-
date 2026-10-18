@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gateway"))
 from registry_manager import canon_device, slug
 import tts_engine
 
-
 class RegistryNamesTests(unittest.TestCase):
     def test_vietnamese_names(self):
         cases = {
@@ -31,10 +30,9 @@ class RegistryNamesTests(unittest.TestCase):
         self.assertEqual(canon_device("máy bơm"), "pump")
         self.assertEqual(canon_device("custom device"), "custom_device")
 
-
 class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        # Only exercise streaming; avoid constructing caches or local models.
+
         self.engine = tts_engine.TTSEngine.__new__(tts_engine.TTSEngine)
         self.engine.voice = "primary"
         self.engine.fallback_voice = "fallback"
@@ -76,7 +74,6 @@ class TTSStreamTests(unittest.IsolatedAsyncioTestCase):
     async def test_unavailable_provider(self):
         with patch.object(tts_engine, "HAS_EDGE_TTS", False):
             self.assertIsNone(await self.engine.synthesize_edgetts("Xin chào"))
-
 
 if __name__ == "__main__":
     unittest.main()

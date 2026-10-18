@@ -1,0 +1,29 @@
+{
+  "test_execution_counts": {
+    "gateway_unittest_distinct_methods": 103,
+    "gateway_unittest_executions": 103,
+    "gateway_simulator_applied_commands": 4,
+    "firmware_unit_tests": 7,
+    "flutter_widget_unit_tests": 24,
+    "flutter_dart_analysis_issues": {
+      "errors": 0,
+      "warnings": 0,
+      "info": 106
+    }
+  },
+  "timings_seconds": {
+    "gateway_unittest": 5.117,
+    "gateway_simulator": 0.18,
+    "gateway_integration_int01_int02": 0.238,
+    "firmware_unittest": 10.368,
+    "flutter_test": 4.482,
+    "flutter_analyze": 1.15
+  },
+  "status_summary": {
+    "total_cases_evaluated": 11,
+    "passed_cases": 11,
+    "failed_cases": 0,
+    "blocked_cases": 0,
+    "unverified_physical_cases": 46
+  }
+}

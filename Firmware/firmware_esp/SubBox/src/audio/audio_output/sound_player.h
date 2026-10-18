@@ -1,11 +1,3 @@
-/**
- * @file sound_player.h
- * @brief Zero-Latency Acoustic Feedback & I2S Speaker Driver for SubBox
- *
- * Provides instant sound cues (wake chime, success tone, error blip)
- * directly via local I2S amplifier (MAX98357A) on SubBox without TTS delay.
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -15,45 +7,30 @@
 #include "esp_err.h"
 
 enum class SoundType {
-    WAKE,       /**< "Hi ESP" wake word detected: crisp ascending double chime */
-    SUCCESS,    /**< Command executed successfully: melodic bright confirmation triad */
-    ERROR,      /**< Command unrecognized or failed: soft descending double blip */
-    BOOTUP      /**< SubBox ready & connected: warm welcome chord */
+    WAKE,
+    SUCCESS,
+    ERROR,
+    BOOTUP
 };
 
 class SoundPlayer {
 public:
     static SoundPlayer& instance();
 
-    /**
-     * @brief Initialize I2S peripheral and amplifier shutdown GPIO
-     * @return ESP_OK on success
-     */
     esp_err_t init();
 
-    /**
-     * @brief Play synthesized acoustic feedback sound effect asynchronously
-     * @param type Sound cue to play
-     * @return true if queued/playing successfully
-     */
     bool play(SoundType type);
 
-    /**
-     * @brief Play raw PCM audio data directly to speaker
-     * @param pcm 16kHz, 16-bit signed mono samples
-     * @param samples Sample count
-     * @return true on success
-     */
     bool playPcm(const int16_t* pcm, size_t samples);
 
-    /**
-     * @brief Check if sound is currently actively playing
-     */
+    bool startPcmStream();
+
+    bool streamPcmChunk(const int16_t* pcm, size_t samples);
+
+    void finishPcmStream();
+
     bool isPlaying() const;
 
-    /**
-     * @brief Stop any active playback and mute amplifier
-     */
     void stop();
 
 private:
@@ -73,6 +50,8 @@ private:
 
     bool m_initialized;
     volatile bool m_playing;
+    volatile bool m_streaming_pcm;
+    int64_t m_last_chunk_time_us;
     void* m_i2s_handle;
     void* m_queue;
     void* m_task_handle;

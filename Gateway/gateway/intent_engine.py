@@ -48,9 +48,6 @@ from display_names import get_room_name, get_device_name, clean_voice_text
 
 logger = logging.getLogger("intent")
 
-
-# ── BẢNG TỪ ĐIỂN VÀ ALIASES CHUẨN HOÁ ────────────────────────────────────────
-
 def slug(s: Optional[str]) -> str:
     """Chuyển đổi chuỗi tiếng Việt có dấu thành slug không dấu dạng snake_case."""
     if s is None:
@@ -64,8 +61,6 @@ def slug(s: Optional[str]) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
     return s
 
-
-# Danh mục thiết bị chuẩn (Canonical Device Mapping)
 DEVICE_ALIASES: Dict[str, List[str]] = {
     "light": [
         "đèn", "bóng đèn", "đèn điện", "ánh sáng", "light", "den", "bong_den",
@@ -107,12 +102,14 @@ DEVICE_ALIASES: Dict[str, List[str]] = {
     "ch2": [
         "relay 2", "relay hai", "công tắc 2", "công tắc hai", "kênh 2", "kênh hai", "nút 2"
     ],
+    "ch3": [
+        "relay 3", "relay ba", "công tắc 3", "công tắc ba", "kênh 3", "kênh ba", "nút 3"
+    ],
     "all": [
         "tất cả", "toàn bộ", "hết", "toàn bộ thiết bị", "tất cả thiết bị"
     ]
 }
 
-# Danh mục phòng chuẩn (Canonical Room Mapping)
 ROOM_ALIASES: Dict[str, List[str]] = {
     "phong_ngu": [
         "phòng ngủ", "phong ngu", "ngủ", "bedroom", "p_ngu"
@@ -155,7 +152,6 @@ ROOM_ALIASES: Dict[str, List[str]] = {
     ]
 }
 
-# Bảng số từ tiếng Việt biểu diễn nhiệt độ điều hòa (16 - 32 độ C)
 VIETNAMESE_NUMBERS: Dict[str, int] = {
     "mười sáu": 16, "mười bảy": 17, "mười tám": 18, "mười chín": 19,
     "hai mươi": 20, "hai mốt": 21, "hai mươi mốt": 21,
@@ -172,9 +168,6 @@ VIETNAMESE_NUMBERS: Dict[str, int] = {
     "ba hai": 32, "ba mươi hai": 32
 }
 
-
-# ── DATA STRUCTURES & INTENT RESULT ──────────────────────────────────────────
-
 @dataclass
 class Target:
     """Mục tiêu điều khiển của Intent (Device Type, Specific Name, Room)."""
@@ -189,7 +182,6 @@ class Target:
             "room": self.room,
         }
 
-
 @dataclass
 class NormalizedText:
     """Kết quả sau khi chuẩn hóa âm vị và phát hiện lỗi ASR."""
@@ -197,7 +189,6 @@ class NormalizedText:
     original_text: str
     corrections: List[Dict[str, str]] = field(default_factory=list)
     confidence: float = 1.0
-
 
 class IntentResult(dict):
     """
@@ -269,7 +260,6 @@ class IntentResult(dict):
         ]
         self["voice_reply"] = self.voice_reply
 
-        # Legacy command object format mong đợi bởi main.py
         self["command"] = {
             "action": action,
             "device": self.target.device_type,
@@ -288,9 +278,6 @@ class IntentResult(dict):
             f"clarify={self.needs_clarification}, negated={self.negated})"
         )
 
-
-# ── MODULE 1: ASR NORMALIZER ─────────────────────────────────────────────────
-
 class ASRNormalizer:
     """
     Module chuẩn hóa âm vị và khắc phục lỗi ASR tiếng Việt chuyên sâu.
@@ -299,13 +286,12 @@ class ASRNormalizer:
     """
     def __init__(self):
         self.phonetic_rules: List[Tuple[str, str, float, str]] = [
-            # Lỗi đặc thù nghiêm trọng của ASR: "bạn bè" -> "bật đèn"
+
             (r"\bbạn bè phòng\b", "bật đèn phòng", 0.96, "bạn bè phòng → bật đèn phòng"),
             (r"\bbạn bè\b", "bật đèn", 0.95, "bạn bè → bật đèn"),
             (r"\bbạn về\b", "bật đèn", 0.94, "bạn về → bật đèn"),
             (r"\bbạn đề\b", "bật đèn", 0.94, "bạn đề → bật đèn"),
 
-            # Họ âm vị quạt: "bất quá / bật quà / bật quát" -> "bật quạt"
             (r"\bbất quá\b", "bật quạt", 0.95, "bất quá → bật quạt"),
             (r"\bbật quà\b", "bật quạt", 0.95, "bật quà → bật quạt"),
             (r"\bbật quát\b", "bật quạt", 0.95, "bật quát → bật quạt"),
@@ -317,7 +303,6 @@ class ASRNormalizer:
             (r"\btắt quá\b", "tắt quạt", 0.95, "tắt quá → tắt quạt"),
             (r"\btắt quà\b", "tắt quạt", 0.95, "tắt quà → tắt quạt"),
 
-            # Họ âm vị đèn
             (r"\bbật điên\b", "bật đèn", 0.95, "bật điên → bật đèn"),
             (r"\btắt điên\b", "tắt đèn", 0.95, "tắt điên → tắt đèn"),
             (r"\bbật đền\b", "bật đèn", 0.95, "bật đền → bật đèn"),
@@ -328,13 +313,11 @@ class ASRNormalizer:
             (r"\bbạt đền\b", "bật đèn", 0.95, "bạt đền → bật đèn"),
             (r"\btác đèn\b", "tắt đèn", 0.95, "tác đèn → tắt đèn"),
 
-            # Họ điều hòa / máy lạnh
             (r"\bmáy lặng\b", "máy lạnh", 0.97, "máy lặng → máy lạnh"),
             (r"\bmáy lạng\b", "máy lạnh", 0.97, "máy lạng → máy lạnh"),
             (r"\bđiều hoà\b", "điều hòa", 0.99, "điều hoà → điều hòa"),
             (r"\bmáy điều hòa\b", "điều hòa", 0.99, "máy điều hòa → điều hòa"),
 
-            # Phòng
             (r"\bphòng ngue\b", "phòng ngủ", 0.96, "phòng ngue → phòng ngủ"),
             (r"\bphòng nghủ\b", "phòng ngủ", 0.96, "phòng nghủ → phòng ngủ"),
             (r"\bphòng khash\b", "phòng khách", 0.96, "phòng khash → phòng khách"),
@@ -342,12 +325,10 @@ class ASRNormalizer:
             (r"\bphòng bép\b", "phòng bếp", 0.96, "phòng bép → phòng bếp"),
             (r"\bnhà bép\b", "nhà bếp", 0.96, "nhà bép → nhà bếp"),
 
-            # Đồng nghĩa thiết bị
             (r"\bquạt điện\b", "quạt", 0.98, "quạt điện → quạt"),
             (r"\bquạt máy\b", "quạt", 0.98, "quạt máy → quạt"),
             (r"\bbóng đèn\b", "đèn", 0.98, "bóng đèn → đèn"),
 
-            # Lỗi nhầm lẫn âm học đặc thù từ Zipformer ASR
             (r"\bban đêm không ngủ\b", "bật quạt phòng ngủ", 0.98, "ban đêm không ngủ → bật quạt phòng ngủ"),
             (r"\bđêm qua không ngủ\b", "bật quạt phòng ngủ", 0.98, "đêm qua không ngủ → bật quạt phòng ngủ"),
             (r"\bkhông ngủ\b", "phòng ngủ", 0.96, "không ngủ → phòng ngủ"),
@@ -392,9 +373,6 @@ class ASRNormalizer:
             confidence=accumulated_confidence
         )
 
-
-# ── MODULE 2: NEGATION DETECTOR ──────────────────────────────────────────────
-
 class NegationDetector:
     """
     Nhận diện câu phủ định để TUYỆT ĐỐI KHÔNG chuyển thành hành động kích hoạt.
@@ -423,9 +401,6 @@ class NegationDetector:
             if re.search(r"mà\s+" + pattern, t):
                 return True
         return False
-
-
-# ── MODULE 3: MULTI-TURN CONTEXT MANAGER ─────────────────────────────────────
 
 class IntentContextManager:
     """
@@ -471,7 +446,6 @@ class IntentContextManager:
         has_pronoun = bool(re.search(r"\b(nó|cái này|cái kia|cái đó|thiết bị đó|ở đó)\b", text))
         is_bare_action = not raw_intent.target.device_type and raw_intent.intent in ("turn_on", "turn_off", "toggle") and len(text.strip().split()) <= 3
 
-        # Trường hợp 1: Đại từ thay thế hoặc lệnh ngắn ("bật nó lên", "tắt nó đi", "tắt", "bật")
         if (has_pronoun or is_bare_action) and self.last_device_type:
             if not raw_intent.target.device_type:
                 raw_intent.target.device_type = self.last_device_type
@@ -484,7 +458,6 @@ class IntentContextManager:
             raw_intent._sync_dict()
             return raw_intent
 
-        # Trường hợp 2: Lệnh cài đặt nhiệt độ thiếu thiết bị/phòng ("Cài 25 độ", "Tăng lên 26 độ")
         if raw_intent.intent in ("set_temperature", "set_value"):
             if self.last_device_type in ("air_conditioner", "dieu_hoa", "may_lanh"):
                 if not raw_intent.target.device_type:
@@ -498,9 +471,6 @@ class IntentContextManager:
                 raw_intent._sync_dict()
                 return raw_intent
 
-        # Trường hợp 3: Nguyên tắc an toàn CHỐNG suy diễn vô hạn:
-        # Nếu người dùng đổi sang thiết bị khác (ví dụ trước đó 'Bật đèn phòng ngủ', giờ 'Bật quạt')
-        # Tuyệt đối KHÔNG tự ý gán quạt vào phòng ngủ nếu người dùng không nói rõ!
         if raw_intent.target.device_type and raw_intent.target.device_type != self.last_device_type:
             pass
 
@@ -512,9 +482,6 @@ class IntentContextManager:
         self.last_intent = None
         self.last_value = None
         self.updated_at = 0.0
-
-
-# ── MODULE 4: STRICT VALIDATOR ───────────────────────────────────────────────
 
 class StrictValidator:
     """
@@ -539,18 +506,15 @@ class StrictValidator:
         r_slug = slug(room_input)
         allowed_rooms = set(self.registry.allowed_rooms()) if self.registry else set(ROOM_ALIASES.keys())
 
-        # 1. Exact match
         if r_slug in allowed_rooms:
             return r_slug, False
 
-        # 2. Alias match
         for canon, aliases in ROOM_ALIASES.items():
             if canon in allowed_rooms or not self.registry:
                 for a in aliases:
                     if r_slug == slug(a) or slug(a) == r_slug:
                         return canon, False
 
-        # 3. Unique Fuzzy match (khoảng cách sai biệt 1 ký tự hoặc tiền tố duy nhất)
         candidates = []
         for ar in allowed_rooms:
             if ar.startswith(r_slug) or r_slug.startswith(ar):
@@ -560,7 +524,6 @@ class StrictValidator:
         elif len(candidates) > 1:
             return None, True
 
-        # 4. Hallucination / Không tồn tại
         return None, False
 
     def resolve_device(self, device_input: Optional[str]) -> Tuple[Optional[str], bool]:
@@ -574,18 +537,15 @@ class StrictValidator:
         d_slug = slug(device_input)
         allowed_devs = set(self.registry.allowed_devices()) if self.registry else set(DEVICE_ALIASES.keys())
 
-        # 1. Exact match
         if d_slug in allowed_devs:
             return d_slug, False
 
-        # 2. Alias match
         for canon, aliases in DEVICE_ALIASES.items():
             for a in aliases:
                 if d_slug == slug(a):
                     target_dev = "light" if canon in ("den", "bong_den") else canon
                     return target_dev, False
 
-        # 3. Unique Fuzzy match
         candidates = []
         for ad in allowed_devs:
             if ad.startswith(d_slug) or d_slug.startswith(ad):
@@ -595,7 +555,6 @@ class StrictValidator:
         elif len(candidates) > 1:
             return None, True
 
-        # 4. Hallucination
         return None, False
 
     def validate(self, result: IntentResult) -> IntentResult:
@@ -603,7 +562,6 @@ class StrictValidator:
         if not self.registry:
             return result
 
-        # Validate Room
         if result.target.room:
             clean_r, is_ambig = self.resolve_room(result.target.room)
             if clean_r:
@@ -618,7 +576,6 @@ class StrictValidator:
                 result.needs_clarification = True
                 result.clarification_reason = "unregistered_room"
 
-        # Validate Device
         if result.target.device_type and result.target.device_type != "all":
             clean_d, is_ambig = self.resolve_device(result.target.device_type)
             if clean_d:
@@ -636,9 +593,6 @@ class StrictValidator:
         result._sync_dict()
         return result
 
-
-# ── MODULE 5: FAST PATH ENGINE ───────────────────────────────────────────────
-
 class FastPathEngine:
     """
     Fast-Path Rule Matcher hiệu năng cao (< 5ms trên Pi 4).
@@ -653,7 +607,6 @@ class FastPathEngine:
         if not text:
             return None
 
-        # 1. Kiểm tra Negation trước tiên
         if NegationDetector.is_negated(text):
             return IntentResult(
                 intent="unknown",
@@ -668,32 +621,25 @@ class FastPathEngine:
                 voice_reply="Đã hủy lệnh."
             )
 
-        # 2. Xử lý Scene / Ngữ cảnh sinh hoạt
         scene_intent = self._extract_scene(norm)
         if scene_intent:
             return scene_intent
 
-        # 3. Xử lý Query vs Command (Truy vấn trạng thái / Cảm biến)
         query_intent = self._extract_query(norm)
         if query_intent:
             return query_intent
 
-        # 4. Trích xuất Action cơ bản
         action, action_conf = self._extract_action(text)
 
-        # 5. Trích xuất Value (Nhiệt độ điều hòa số hoặc chữ)
         value = self._extract_temperature(text)
 
-        # 6. Trích xuất Thiết bị & Phòng
         device, dev_conf = self._extract_device(text)
         room, room_conf = self._extract_room(text)
 
-        # Cảm xúc / Sensory trigger (nóng quá, tối quá, lạnh quá, cho mát)
         sensory_intent = self._extract_sensory(norm)
         if sensory_intent and not action:
             return sensory_intent
 
-        # Nếu không có action và không có value nhiệt độ
         if not action and value is None:
             if device:
                 return IntentResult(
@@ -709,16 +655,13 @@ class FastPathEngine:
                 )
             return None
 
-        # Nếu có giá trị nhiệt độ mà không có action rõ ràng -> set_temperature
         if value is not None and not action:
             action = "set_temperature"
             action_conf = 0.95
 
-        # Nếu điều hòa và set_value -> chuyển về set_temperature
         if action == "set_value" and value is not None:
             action = "set_temperature"
 
-        # Tính toán mức độ tin cậy tổng thể (Confidence Calibration)
         confidence = norm.confidence * action_conf
         needs_clarify = False
         clarify_reason = None
@@ -731,7 +674,7 @@ class FastPathEngine:
         if device and room:
             confidence = min(0.99, norm.confidence * 0.98)
         elif device and not room:
-            # Lệnh đơn (bật đèn, tắt quạt, bật relay 1)
+
             confidence = min(0.98, norm.confidence * 0.98)
         elif not device and room and action != "set_temperature":
             confidence = 0.60
@@ -744,7 +687,6 @@ class FastPathEngine:
 
         target = Target(device_type=device, room=room)
 
-        # Pre-computed refined Vietnamese voice reply
         v_reply = None
         if action in ("turn_on", "turn_off"):
             act_vi = "bật" if action == "turn_on" else "tắt"
@@ -802,12 +744,11 @@ class FastPathEngine:
         return None, 0.0
 
     def _extract_temperature(self, text: str) -> Optional[int]:
-        # 1. Dạng số chữ số: 25 độ, 26, 24 độ c
+
         num_match = re.search(r"\b(1[6-9]|2[0-9]|3[0-2])\s*(?:độ|do|c)?\b", text)
         if num_match:
             return int(num_match.group(1))
 
-        # 2. Dạng số từ tiếng Việt: ưu tiên cụm từ dài trước (ví dụ 'hai mươi lăm' trước 'hai mươi')
         for word, val in sorted(VIETNAMESE_NUMBERS.items(), key=lambda x: len(x[0]), reverse=True):
             pattern = r"\b" + re.escape(word) + r"(?:\s*độ)?\b"
             if re.search(pattern, text):
@@ -817,7 +758,7 @@ class FastPathEngine:
 
     def _extract_query(self, norm: NormalizedText) -> Optional[IntentResult]:
         text = norm.text
-        # Query sensor: "phòng ngủ bao nhiêu độ", "nhiệt độ phòng khách"
+
         if re.search(r"\b(bao nhiêu độ|nhiệt độ|độ ẩm|mấy độ)\b", text):
             room, _ = self._extract_room(text)
             return IntentResult(
@@ -830,7 +771,6 @@ class FastPathEngine:
                 normalized_text=norm.text
             )
 
-        # Query state: "đèn phòng ngủ đang bật không", "quạt có đang chạy không", "quạt đang chạy không"
         if re.search(r"\b(?:có\s+)?đang\s+(?:bật|tắt|chạy|mở|hoạt động)\s+(?:không|chưa)\b|\b(?:bật|tắt|chạy|mở)\s+chưa\b", text):
             device, _ = self._extract_device(text)
             room, _ = self._extract_room(text)
@@ -912,9 +852,6 @@ class FastPathEngine:
             )
         return None
 
-
-# ── MAIN INTENT ENGINE V3 ───────────────────────────────────────────────────
-
 class IntentEngine:
     """
     Bộ xử lý ý định thế hệ 3 (Production-Ready Smart Home Intent Engine v3).
@@ -927,7 +864,6 @@ class IntentEngine:
         self._base_prompt = config.SYSTEM_PROMPT
         self.active_engine = "Fast-Path"
 
-        # Khởi tạo các module con
         self.normalizer = ASRNormalizer()
         self.fast_path = FastPathEngine()
         self.context_manager = IntentContextManager(
@@ -979,7 +915,6 @@ class IntentEngine:
         t0 = time.time()
         logger.info(f"🎤 [ASR] original=\"{user_text}\"")
 
-        # ── 1. Kiểm tra câu lệnh ghép (Multi-command) ──
         clauses = self._split_compound_command(user_text)
         if len(clauses) > 1:
             sub_results: List[IntentResult] = []
@@ -1006,21 +941,18 @@ class IntentEngine:
 
     async def _extract_single(self, user_text: str, context=None) -> IntentResult:
         context = context if context is not None else self.context_manager
-        # ── 2. ASR Normalization ──
+
         norm = self.normalizer.normalize(user_text)
         if norm.corrections:
             logger.info(f"🔧 [NORMALIZE] normalized=\"{norm.text}\" (applied: {norm.corrections})")
 
-        # ── 3. Fast-Path Pattern Matcher ──
         fast_result = self.fast_path.extract(norm)
 
-        # ── 4. Context Resolution (Multi-turn) ──
         if fast_result:
             resolved_result = context.resolve(fast_result, user_text)
         else:
             resolved_result = None
 
-        # Nếu Fast-Path đạt HIGH CONFIDENCE (≥ 0.95) và không bị mơ hồ -> Bypass LLM!
         if resolved_result and resolved_result.confidence >= 0.95 and not resolved_result.needs_clarification:
             self.active_engine = "Fast-Path (Instant)"
             final_result = self.validator.validate(resolved_result)
@@ -1032,12 +964,10 @@ class IntentEngine:
             )
             return final_result
 
-        # Nếu câu có dấu hiệu phủ định -> Trả về kết quả phủ định ngay
         if resolved_result and resolved_result.negated:
             self.active_engine = "Fast-Reject (Negated)"
             return resolved_result
 
-        # ── 5. Non-Command Rejection Filter (0.0001s) ──
         if not self._is_potential_command(norm.text):
             self.active_engine = "Fast-Reject (Non-Command)"
             logger.info(f"🚫 [Non-Command Reject] '{user_text}' is not a smart home command.")
@@ -1052,7 +982,6 @@ class IntentEngine:
                 voice_reply="Chưa rõ khẩu lệnh. Bạn muốn điều khiển thiết bị nào?"
             )
 
-        # Nếu Fast-Path có kết quả khả dĩ (MEDIUM confidence) nhưng chưa cần LLM
         if resolved_result and resolved_result.confidence >= 0.60 and not resolved_result.needs_clarification:
             self.active_engine = "Fast-Path (Medium-Confidence)"
             final_result = self.validator.validate(resolved_result)
@@ -1064,7 +993,6 @@ class IntentEngine:
             )
             return final_result
 
-        # ── 6. Hybrid LLM NLU (Chỉ kích hoạt khi AI_ENABLED = True và LLM_MODE != 'off') ──
         mode = getattr(config, "LLM_MODE", "off").lower()
         ai_enabled = getattr(config, "AI_ENABLED", False)
 
@@ -1106,7 +1034,6 @@ class IntentEngine:
                 context.update(final_res)
                 return final_res
 
-        # Nếu tất cả thất bại nhưng trước đó có resolved_result từ Fast-Path
         if resolved_result:
             return self.validator.validate(resolved_result)
 

@@ -32,7 +32,6 @@ import config
 
 logger = logging.getLogger("tts")
 
-
 class VieNeuEngine:
     """
     On-device Vietnamese Text-to-Speech using VieNeu-TTS (Phạm Nguyễn Ngọc Bảo).
@@ -74,11 +73,11 @@ class VieNeuEngine:
         try:
             def _infer():
                 try:
-                    # steps=8 and sway=-1 gives ~2x speedup on CPU
+
                     audio_arr = self._vieneu.infer(text, voice=voice, steps=8, sway=-1)
                 except TypeError:
                     audio_arr = self._vieneu.infer(text, voice=voice)
-                
+
                 import io
                 import soundfile as sf
                 buf = io.BytesIO()
@@ -92,16 +91,14 @@ class VieNeuEngine:
             logger.error(f"VieNeu inference error: {e}")
             return None
 
-
 class TTSEngine:
     """Vietnamese text-to-speech with dual engine support (VieNeu-TTS local + EdgeTTS cloud)."""
 
-    # Precompiled regex patterns for text sanitization (class-level for performance)
-    _RE_EMOJI_SUPP = re.compile(r'[\U00010000-\U0010ffff]')       # Supplementary plane emoji
-    _RE_EMOJI_MISC = re.compile(r'[\u2600-\u27bf\u2300-\u23ff]')  # Misc symbols & dingbats
-    _RE_EMOJI_VAR  = re.compile(r'[\ufe00-\ufe0f\u200d]')         # Variation selectors & ZWJ
-    _RE_MULTI_DOT  = re.compile(r'\s*\.\s*\.+')                   # Multiple dots
-    _RE_MULTI_SP   = re.compile(r'\s+')                            # Multiple spaces
+    _RE_EMOJI_SUPP = re.compile(r'[\U00010000-\U0010ffff]')
+    _RE_EMOJI_MISC = re.compile(r'[\u2600-\u27bf\u2300-\u23ff]')
+    _RE_EMOJI_VAR  = re.compile(r'[\ufe00-\ufe0f\u200d]')
+    _RE_MULTI_DOT  = re.compile(r'\s*\.\s*\.+')
+    _RE_MULTI_SP   = re.compile(r'\s+')
 
     def __init__(self):
         self.voice = getattr(config, "TTS_VOICE", "vi-VN-HoaiMyNeural")
@@ -109,7 +106,7 @@ class TTSEngine:
         self.rate = getattr(config, "TTS_RATE", "-4%")
         self.pitch = getattr(config, "TTS_PITCH", "+2Hz")
         self.vieneu = VieNeuEngine()
-        # Persistent audio cache setup
+
         self.cache_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "cache", "tts")
         if os.path.exists("/home/pi4/smarthome"):
             self.cache_dir = "/home/pi4/smarthome/tts_cache"
@@ -131,9 +128,9 @@ class TTSEngine:
         if not text:
             return ""
         t = text
-        t = cls._RE_EMOJI_SUPP.sub('', t)      # 🎶 🎵 😀 etc.
-        t = cls._RE_EMOJI_MISC.sub('', t)       # ☀ ⛅ ✨ etc.
-        t = cls._RE_EMOJI_VAR.sub('', t)        # variation selectors
+        t = cls._RE_EMOJI_SUPP.sub('', t)
+        t = cls._RE_EMOJI_MISC.sub('', t)
+        t = cls._RE_EMOJI_VAR.sub('', t)
         t = t.replace('~', ' ').replace('!', '.')
         t = cls._RE_MULTI_DOT.sub('.', t)
         t = cls._RE_MULTI_SP.sub(' ', t).strip()
@@ -150,12 +147,10 @@ class TTSEngine:
             return ""
         t = text.strip()
 
-        # Loại bỏ các từ đệm, trợ từ rườm rà sến sẩm
         t = re.sub(r"\b(nè|nha|nhé|nghe)\b\s*~*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"\b(ạ|ơi)\b\s*~*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"~\s*", "", t)
 
-        # Xóa các từ xưng hô sến lặp đi lặp lại nếu có
         t = re.sub(r"^Dạ,\s*", "", t, flags=re.IGNORECASE)
         t = re.sub(r"^Dạ\s+", "", t, flags=re.IGNORECASE)
         t = re.sub(r"^Vâng,\s*", "", t, flags=re.IGNORECASE)
@@ -164,7 +159,6 @@ class TTSEngine:
         t = re.sub(r"\s+(anh|em)\s+nhé\b", "", t, flags=re.IGNORECASE)
         t = re.sub(r"\s+rồi\s+nè\b", "", t, flags=re.IGNORECASE)
 
-        # Chuẩn hóa khoảng trắng và dấu chấm câu
         t = re.sub(r"\s+", " ", t).strip()
         t = re.sub(r"\s+([.,?!])", r"\1", t)
         if t and not t.endswith((".", "?", "!")):
@@ -191,7 +185,6 @@ class TTSEngine:
         if not clean_text:
             return None
 
-        # Ensure sign prefix for edge-tts
         rate_str = str(rate or "-4%").strip()
         if not rate_str.startswith(("+", "-")):
             rate_str = f"+{rate_str}"
@@ -200,7 +193,7 @@ class TTSEngine:
             pitch_str = f"+{pitch_str}"
 
         voices_to_try = [self.voice, self.fallback_voice]
-        max_retries = 2  # Total attempts = voices × retries
+        max_retries = 2
 
         for attempt in range(max_retries):
             voice = voices_to_try[0] if attempt == 0 else voices_to_try[-1]
@@ -218,7 +211,6 @@ class TTSEngine:
             except Exception as e:
                 logger.error(f"EdgeTTS error (attempt {attempt+1}/{max_retries}, voice={voice}): {e}")
 
-            # Brief pause before retry — EdgeTTS intermittent failures often resolve within 1s
             if attempt < max_retries - 1:
                 await asyncio.sleep(1.0)
 
@@ -233,7 +225,6 @@ class TTSEngine:
         if not text or not text.strip():
             return None
 
-        # Sanitize FIRST — before beautify_prosody and cache key computation
         text = self._sanitize_text(text)
         if not text:
             return None
@@ -260,7 +251,7 @@ class TTSEngine:
                 pass
 
         audio_data = None
-        # 1. Thử VieNeu-TTS local on-device nếu provider được chọn là vieneu
+
         if provider == "vieneu":
             try:
                 t0 = time.time()
@@ -272,7 +263,6 @@ class TTSEngine:
                 logger.warning(f"⚠️ VieNeu-TTS failed: {e}")
                 audio_data = None
 
-        # 2. Nếu provider là edgetts hoặc vieneu tạm thời lỗi/chưa tải xong: Dùng EdgeTTS mượt mà
         if not audio_data:
             if provider == "vieneu":
                 logger.info("⚡ VieNeu-TTS unavailable, falling back seamlessly to EdgeTTS Cloud")
@@ -289,7 +279,7 @@ class TTSEngine:
             return audio_data
 
         return None
-    
+
     def _cache_put(self, key, data):
         limit = 16 * 1024 * 1024
         old = self._mem_cache.pop(key, b"")
@@ -303,7 +293,7 @@ class TTSEngine:
         self._mem_cache_bytes += len(data)
 
     def _trim_disk_cache(self):
-        # Only generated audio files belong to this cache; leave other files alone.
+
         try:
             files = [(p.stat().st_mtime, p.stat().st_size, p)
                      for p in Path(self.cache_dir).iterdir()
@@ -329,7 +319,6 @@ class TTSEngine:
         if not text or not text.strip():
             return None
 
-        # Sanitize at entry so cache key is deterministic and clean
         text = self._sanitize_text(text)
         if not text:
             return None
@@ -357,18 +346,17 @@ class TTSEngine:
             return None
 
         pcm_data = None
-        # Method 1: If audio_bytes is already a WAV file, we can use soundfile or pydub
+
         if HAS_PYDUB:
             try:
                 audio = AudioSegment.from_file(io.BytesIO(audio_bytes))
                 audio = audio.set_frame_rate(sample_rate)
-                audio = audio.set_channels(1)      # Mono
-                audio = audio.set_sample_width(2)  # 16-bit
+                audio = audio.set_channels(1)
+                audio = audio.set_sample_width(2)
                 pcm_data = audio.raw_data
             except Exception as e:
                 logger.warning(f"pydub from_file failed: {e}, trying fallback")
 
-        # Method 2: If WAV and soundfile available
         if not pcm_data and audio_bytes.startswith(b"RIFF"):
             try:
                 import soundfile as sf
@@ -384,7 +372,6 @@ class TTSEngine:
             except Exception as e:
                 logger.debug(f"soundfile direct conversion failed: {e}")
 
-        # Method 3: ffmpeg subprocess (universal for WAV, MP3, AAC)
         if not pcm_data:
             try:
                 proc = await asyncio.create_subprocess_exec(

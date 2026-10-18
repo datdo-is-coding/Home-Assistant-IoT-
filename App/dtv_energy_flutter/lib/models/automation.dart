@@ -34,4 +34,32 @@ class Automation {
       enabled: enabled ?? this.enabled,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'iconCode': icon.codePoint,
+      'fontFamily': icon.fontFamily,
+      'fontPackage': icon.fontPackage,
+      'triggerText': triggerText,
+      'deviceCount': deviceCount,
+      'enabled': enabled,
+    };
+  }
+
+  factory Automation.fromJson(Map<String, dynamic> json) {
+    final iconCode = json['iconCode'] as int? ?? Icons.auto_awesome_rounded.codePoint;
+    final fontFamily = json['fontFamily'] as String?;
+    final fontPackage = json['fontPackage'] as String?;
+    return Automation(
+      id: json['id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      // ignore: non_const_argument_for_const_parameter
+      icon: IconData(iconCode, fontFamily: fontFamily ?? 'MaterialIcons', fontPackage: fontPackage),
+      triggerText: json['triggerText'] as String? ?? '',
+      deviceCount: json['deviceCount'] as int? ?? 0,
+      enabled: json['enabled'] as bool? ?? true,
+    );
+  }
 }

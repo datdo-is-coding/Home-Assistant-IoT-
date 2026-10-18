@@ -1,8 +1,3 @@
-/**
- * @file safety_supervisor.cpp
- * @brief Independent Local Safety Supervisor Implementation
- */
-
 #include "safety_supervisor.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -61,10 +56,8 @@ esp_err_t safety_supervisor_init(void) {
         s_ch_state[i].peak_current_ma = 0;
     }
 
-    /* Start in timed out state until first packet from SubBox */
     s_last_network_heartbeat_us = 0;
 
-    /* Configure Task Watchdog Timer */
 #if defined(CONFIG_ESP_TASK_WDT_EN)
     esp_task_wdt_config_t twdt_config = {
         .timeout_ms = SAFETY_WATCHDOG_TIMEOUT_MS,
@@ -100,12 +93,10 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
     uint32_t limit_ma = cfg->max_current_ma[idx];
     int64_t now_us = esp_timer_get_time();
 
-    /* Track peak current */
     if (meas->current_rms_ma > s_ch_state[idx].peak_current_ma) {
         s_ch_state[idx].peak_current_ma = meas->current_rms_ma;
     }
 
-    /* 1. Hard Ceiling Instant Trip: Cut off immediately */
     if (meas->current_rms_ma >= SAFETY_ABSOLUTE_MAX_CURRENT_MA) {
         ESP_LOGE(TAG, "EMERGENCY HARD CEILING TRIP! Ch%u current %lu mA >= %d mA!",
                  channel, meas->current_rms_ma, SAFETY_ABSOLUTE_MAX_CURRENT_MA);
@@ -120,7 +111,6 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
         return;
     }
 
-    /* 2. Sustained Overcurrent Trip (with inrush debounce) */
     if (meas->current_rms_ma >= limit_ma) {
         if (!s_ch_state[idx].overcurrent_active) {
             s_ch_state[idx].overcurrent_active = true;
@@ -133,7 +123,6 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
                 ESP_LOGE(TAG, "OVERCURRENT TRIP EXCEEDED! Ch%u sustained %lld ms (%lu mA). TRIP RELAY!",
                          channel, elapsed_ms, meas->current_rms_ma);
 
-                /* Trip relay immediately */
                 relay_set_fault(channel, RELAY_FAULT_OVERCURRENT);
                 if (channel != 1) led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
 
@@ -144,7 +133,7 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
             }
         }
     } else {
-        /* Normal operating current */
+
         s_ch_state[idx].overcurrent_active = false;
     }
 }
@@ -155,11 +144,10 @@ bool safety_validate_command(const ActionBoxCommand *cmd, char *out_err_msg, siz
         return false;
     }
 
-    /* Check channel boundary for channel-specific commands */
-    if (cmd->cmd == CMD_TYPE_TURN_ON || cmd->cmd == CMD_TYPE_TURN_OFF || 
+    if (cmd->cmd == CMD_TYPE_TURN_ON || cmd->cmd == CMD_TYPE_TURN_OFF ||
         cmd->cmd == CMD_TYPE_TOGGLE || cmd->cmd == CMD_TYPE_CLEAR_FAULT ||
         cmd->cmd == CMD_TYPE_GET_STATE || cmd->cmd == CMD_TYPE_GET_CURRENT || cmd->cmd == CMD_TYPE_GET_POWER) {
-        
+
         if (cmd->channel < 1 || cmd->channel > BOARD_RELAY_CHANNEL_COUNT) {
             ESP_LOGW(TAG, "Rejected: Invalid channel %u", cmd->channel);
             if (out_err_msg) snprintf(out_err_msg, max_err_len, "Invalid channel %u", cmd->channel);
@@ -167,7 +155,6 @@ bool safety_validate_command(const ActionBoxCommand *cmd, char *out_err_msg, siz
         }
     }
 
-    /* Check channel fault state */
     if (cmd->cmd == CMD_TYPE_TURN_ON || cmd->cmd == CMD_TYPE_TOGGLE) {
         RelayFault flt = relay_get_fault(cmd->channel);
         if (flt != RELAY_FAULT_NONE) {

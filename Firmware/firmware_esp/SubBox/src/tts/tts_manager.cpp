@@ -1,8 +1,3 @@
-/**
- * @file tts_manager.cpp
- * @brief SubBox TTS Coordinator & Local Audio Response Generator Implementation
- */
-
 #include "tts_manager.h"
 #include <cmath>
 #include "esp_log.h"
@@ -31,9 +26,9 @@ void TTSManager::generateChime(std::vector<int16_t>& pcm_out, float freq_hz, flo
     float decay_rate = 4.0f / (float)samples;
 
     for (size_t i = 0; i < samples; ++i) {
-        float env = expf(-decay_rate * (float)i); // Smooth exponential decay
+        float env = expf(-decay_rate * (float)i);
         float wave = sinf(angular_freq * (float)i);
-        pcm_out[i] = (int16_t)(wave * env * 12000.0f); // ~35% volume
+        pcm_out[i] = (int16_t)(wave * env * 12000.0f);
     }
 }
 
@@ -42,10 +37,9 @@ bool TTSManager::synthesize(const char* text, std::vector<int16_t>& pcm_out) {
 
     ESP_LOGI(TAG, "Synthesizing audio prompt for: \"%s\"", text);
 
-    // Initial version generates dual-tone melodic chime acknowledgment
     std::vector<int16_t> tone1, tone2;
-    generateChime(tone1, 880.0f, 0.15f); // High chime (A5)
-    generateChime(tone2, 587.3f, 0.35f); // Low resolution chime (D5)
+    generateChime(tone1, 880.0f, 0.15f);
+    generateChime(tone2, 587.3f, 0.35f);
 
     pcm_out.clear();
     pcm_out.reserve(tone1.size() + tone2.size());
@@ -58,7 +52,7 @@ bool TTSManager::synthesize(const char* text, std::vector<int16_t>& pcm_out) {
 bool TTSManager::speakResponse(const char* target_node_id, const std::string& text) {
     (void)target_node_id;
     (void)text;
-    // Acoustic sound feedback only (no robotic TTS)
+
     return SoundPlayer::instance().play(SoundType::SUCCESS);
 }
 

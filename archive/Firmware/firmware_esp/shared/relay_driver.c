@@ -1,11 +1,3 @@
-/*
- * Relay Driver — Implementation
- * DTV Smart Home — Shared between T1 Actuator Nodes
- *
- * Controls 2-channel relay via GPIO with Active-LOW optocoupler (PC817).
- * Extracted from mqtt_relay.c for clean reuse in 3-tier architecture.
- */
-
 #include "relay_driver.h"
 
 #include <string.h>
@@ -32,12 +24,11 @@ esp_err_t relay_driver_init(void)
         return err;
     }
 
-    /* Set both relays to OFF (Active-LOW: OFF = GPIO HIGH) */
     for (int i = 0; i < 2; i++) {
 #if RELAY_ACTIVE_LOW
-        gpio_set_level(relay_gpio[i], 1);  /* HIGH = OFF for Active-LOW */
+        gpio_set_level(relay_gpio[i], 1);
 #else
-        gpio_set_level(relay_gpio[i], 0);  /* LOW = OFF for Active-HIGH */
+        gpio_set_level(relay_gpio[i], 0);
 #endif
         relay_state[i] = false;
     }
@@ -58,7 +49,7 @@ void relay_driver_set(int channel, bool on)
     relay_state[idx] = on;
 
 #if RELAY_ACTIVE_LOW
-    /* Active-LOW: ON=GPIO LOW (0), OFF=GPIO HIGH (1) */
+
     gpio_set_level(relay_gpio[idx], on ? 0 : 1);
 #else
     gpio_set_level(relay_gpio[idx], on ? 1 : 0);

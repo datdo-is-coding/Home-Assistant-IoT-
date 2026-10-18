@@ -1,8 +1,3 @@
-/**
- * @file dummy_asr.cpp
- * @brief Development & Simulation ASR Implementation
- */
-
 #include "dummy_asr.h"
 #include "esp_log.h"
 
@@ -38,10 +33,9 @@ bool DummyASR::feedAudio(const int16_t* pcm, size_t samples) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_samples_fed += samples;
 
-    // Simulate streaming partial decoding after 8000 samples (~500ms)
     if (m_samples_fed >= 8000 && !m_has_partial) {
         m_has_partial = true;
-        // Take first words of configured phrase as partial transcript
+
         size_t space_pos = m_configured_phrase.find(' ');
         if (space_pos != std::string::npos) {
             size_t second_space = m_configured_phrase.find(' ', space_pos + 1);
@@ -54,7 +48,6 @@ bool DummyASR::feedAudio(const int16_t* pcm, size_t samples) {
         ESP_LOGD(TAG, "ASR Partial Result: \"%s\"", m_partial_result.c_str());
     }
 
-    // Simulate final result after 16000 samples (~1000ms speech)
     if (m_samples_fed >= 16000 && !m_has_final) {
         m_has_final = true;
         m_final_result = m_configured_phrase;

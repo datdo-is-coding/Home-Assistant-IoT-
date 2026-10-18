@@ -9,7 +9,6 @@ import time
 from pathlib import Path
 import serial
 
-
 def send(port, command, prefix, timeout=5):
     port.write((command + '\n').encode())
     deadline = time.monotonic() + timeout
@@ -20,7 +19,6 @@ def send(port, command, prefix, timeout=5):
         if line.startswith(prefix):
             return line
     raise TimeoutError('No USB provisioning response')
-
 
 def provision(port_name, config, wait_seconds=120):
     required = ('ssid', 'password', 'mqtt_uri', 'mqtt_user', 'mqtt_pass', 'ca_pem')
@@ -49,7 +47,7 @@ def provision(port_name, config, wait_seconds=120):
             if key in config:
                 send(port, 'SEC ' + json.dumps({'key': key, 'value': config[key]}), 'PROVISION_OK')
         send(port, 'WIFI ' + json.dumps({'ssid': config['ssid'], 'password': config['password']}), 'PROVISION_OK')
-        # Release BOOT before restart: otherwise ESP32 could enter download mode.
+
         print('Configuration saved. Release BOOT now.', flush=True)
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
@@ -61,7 +59,6 @@ def provision(port_name, config, wait_seconds=120):
         raise TimeoutError('Release BOOT, then press RESET to apply saved configuration')
     finally:
         port.close()
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

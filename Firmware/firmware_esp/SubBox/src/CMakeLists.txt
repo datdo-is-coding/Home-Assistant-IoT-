@@ -8,6 +8,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
         "config"
+        "network"
         "audio"
         "audio/audio_manager"
         "audio/audio_transport"
@@ -31,6 +32,7 @@ idf_component_register(
         "storage"
         "system"
     REQUIRES
+        hc_core
         nvs_flash
         esp_wifi
         esp_event

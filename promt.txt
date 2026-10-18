@@ -1,0 +1,1114 @@
+# MASTER PROMPT — HOME COMPETITION CORE V1
+
+## 0. Vai trò và mục tiêu
+
+Bạn là **Senior Embedded Systems Engineer, IoT Systems Architect, Backend Engineer và Flutter Developer**, chịu trách nhiệm thiết kế và triển khai nền tảng **Home Competition**, một hệ sinh thái Smart Home hướng đến sản phẩm thương mại.
+
+Nhiệm vụ lần này là xây dựng **Home Competition Core V1**, bao gồm:
+
+1. Giao thức truyền thông thống nhất giữa Gateway, SubBox, ActionBox và App.
+2. Hệ thống định danh phần cứng, đăng ký Box và xác thực quyền sở hữu.
+3. Cơ chế phân cấp quản lý Gateway → SubBox → ActionBox → SmartChannel → Electrical Device.
+4. Đăng ký và quản lý thiết bị điện trên từng relay.
+5. Đồng bộ cấu hình và trạng thái toàn bộ ngôi nhà theo thời gian thực.
+6. Giao tiếp ổn định, phục hồi kết nối, chống lặp lệnh, phát hiện lỗi.
+7. OTA firmware đầy đủ cho SubBox và ActionBox, quản lý cập nhật phần mềm Gateway.
+8. Backend Gateway, cơ sở dữ liệu và API quản lý.
+9. Khung giao diện Flutter để cài đặt, quản lý và kiểm thử các chức năng trên.
+10. Hệ thống kiểm thử tự động, tài liệu giao thức và hướng dẫn triển khai.
+
+Đây là **dự án phần mềm thực tế, không phải demo, mockup hay proof of concept**.
+
+Yêu cầu viết code có kiến trúc rõ ràng, biên dịch được, có xử lý lỗi, có kiểm thử và có khả năng mở rộng về sau.
+
+Không được tuyên bố đã hoàn thành chức năng nếu mới tạo interface, stub hoặc chưa kiểm thử.
+
+---
+
+## 1. Khảo sát repository trước khi triển khai
+
+Trước khi chỉnh sửa code:
+
+- Đọc cấu trúc toàn bộ repository và các file hướng dẫn hiện có.
+- Xác định firmware ESP32-S3 hiện tại, firmware SubBox/ActionBox, backend Gateway, các service, ứng dụng Flutter và phần tích hợp Home Assistant.
+- Kiểm tra phiên bản ESP-IDF, các component hiện có, cấu hình FreeRTOS và partition table.
+- Đọc giao thức đang sử dụng, cấu trúc telemetry và cấu hình thiết bị.
+- Xác định những chức năng đã hoạt động ổn định để tái sử dụng.
+- Kiểm tra phần wake word, lệnh giọng nói cục bộ, STT/TTS, relay, CT, IR và audio.
+
+Môi trường phát triển dự kiến:
+
+- ESP32-S3 sử dụng ESP-IDF 6.0.2 hoặc phiên bản đã được xác minh tương thích với repository.
+- Gateway là Raspberry Pi 4 4GB, chạy Ubuntu Server/CLI 24.04 LTS.
+- Ứng dụng di động sử dụng Flutter.
+- Hệ thống tích hợp Home Assistant.
+- Ngôn ngữ firmware ưu tiên C với FreeRTOS và ESP-IDF.
+- Backend ưu tiên công nghệ nhẹ, phù hợp Raspberry Pi 4.
+
+Không viết lại những module hiện tại đang hoạt động đúng nếu không cần thiết.
+
+Không xóa chức năng Home Assistant, wake word, IR, điều khiển relay hoặc telemetry đã có.
+
+Nếu cần migration giao thức cũ, phải có phương án nâng cấp cấu hình và giữ tương thích hoặc mô tả rõ giới hạn tương thích.
+
+Sau khảo sát, tạo tài liệu `docs/architecture/current_state.md` trước khi tiến hành triển khai.
+
+## 2. Kiến trúc phần cứng bắt buộc
+
+### 2.1. Gateway — Raspberry Pi 4 4GB
+
+Gateway quản lý toàn bộ hệ thống:
+
+- Danh sách nhà và phòng.
+- Danh sách SubBox.
+- Danh sách ActionBox thuộc từng SubBox.
+- Danh sách thiết bị điện.
+- Quyền sở hữu và tài khoản.
+- Device Registry.
+- Device State Manager.
+- Configuration Manager.
+- Command Router.
+- MQTT Broker.
+- OTA Server/Coordinator.
+- Database.
+- API và WebSocket.
+- Home Assistant Integration.
+
+Gateway giao tiếp với SubBox qua **Wi-Fi 2.4 GHz sử dụng TCP/IP**.
+
+Ưu tiên MQTT cho giao tiếp realtime giữa Gateway và SubBox.
+
+App giao tiếp với Gateway qua HTTP(S) API và WebSocket.
+
+Gateway không giao tiếp ESP-NOW trực tiếp với ActionBox.
+
+### 2.2. SubBox — ESP32-S3
+
+Mỗi phòng có đúng một SubBox chính đang hoạt động.
+
+Một SubBox quản lý nhiều ActionBox trong cùng phòng.
+
+Phần cứng hiện tại:
+
+- ESP32-S3.
+- Ampli I2S MAX98357A (xác minh mã linh kiện thực tế).
+- Speaker.
+- IR LED.
+
+Nhiệm vụ SubBox:
+
+- Kết nối Gateway qua Wi-Fi.
+- Giao tiếp với các ActionBox bằng ESP-NOW.
+- Phát hiện, ghép nối và quản lý các ActionBox đã được Gateway cấp quyền.
+- Quản lý Room State Cache.
+- Nhận lệnh từ Gateway rồi định tuyến đến ActionBox thích hợp.
+- Nhận dữ liệu trạng thái từ ActionBox.
+- Tổng hợp dữ liệu của phòng và gửi lên Gateway.
+- Phân xử các sự kiện giọng nói đến từ nhiều ActionBox trong phòng.
+- Điều khiển IR và phát audio.
+- Là OTA Coordinator cho các ActionBox.
+- Duy trì cấu hình phòng cần thiết trong NVS.
+- Tự đồng bộ khi kết nối lại Gateway.
+
+SubBox không được tự ý nhận một ActionBox chưa được Gateway cấp quyền làm thiết bị con chính thức.
+
+### 2.3. ActionBox — ESP32-S3
+
+Phần cứng:
+
+- ESP32-S3.
+- Microphone INMP441.
+- 3 relay độc lập.
+- 3 CT đo dòng điện độc lập.
+- Các thành phần điều khiển và bảo vệ hiện có.
+
+Nhiệm vụ ActionBox:
+
+- Kết nối SubBox bằng ESP-NOW.
+- Xử lý wake word và các lệnh nhanh đã huấn luyện.
+- Điều khiển ba relay.
+- Đo dòng điện từ ba CT.
+- Quản lý trạng thái và lỗi từng kênh.
+- Gửi trạng thái, sự kiện và telemetry cho SubBox.
+- Nhận cấu hình, lệnh điều khiển và OTA từ SubBox.
+- Lưu cấu hình được cấp quyền trong NVS.
+- Duy trì các chức năng điều khiển local an toàn khi mất kết nối.
+
+**ActionBox không được phụ thuộc Wi-Fi TCP/IP để hoạt động thông thường.**
+
+Toàn bộ giao tiếp vận hành và OTA giữa SubBox với ActionBox phải đi qua ESP-NOW.
+
+Chỉ sử dụng SoftAP ở ActionBox trong quy trình provisioning/khôi phục có kiểm soát, không dùng để thay thế ESP-NOW trong vận hành hoặc OTA.
+
+---
+
+## 3. Nguyên tắc định danh thiết bị
+
+Mỗi ESP32-S3 có Base MAC gốc được lập trình trong eFuse.
+
+Đọc Base MAC bằng API ESP-IDF phù hợp.
+
+Tạo Factory ID bất biến theo cấu trúc:
+
+`HC-{12_HEX_BASE_MAC}`
+
+Ví dụ:
+
+- Factory ID: `HC-7C9EBD42A153`
+- Product Type: `ACTION_BOX`
+- Model: `HC-A1`
+- Firmware: `1.0.0`
+
+Phân biệt:
+
+| ID | Chức năng |
+|---|---|
+| `factory_id` | Định danh phần cứng xuất xưởng, bất biến |
+| `node_id` | Định danh logic của Box |
+| `home_id` | Nhà sở hữu thiết bị |
+| `room_id` | Phòng chứa thiết bị |
+| `parent_id` | SubBox cha của ActionBox |
+| `channel_id` | Định danh kênh relay/CT |
+| `device_id` | Định danh thiết bị điện logic |
+
+MAC được dùng làm ID, **không được dùng làm bằng chứng xác thực bảo mật**.
+
+Thiết kế cơ chế khóa riêng cho mỗi Box, provisioning an toàn, xác thực hai chiều, chống giả mạo Factory ID và chống replay.
+
+Phải hỗ trợ thu hồi quyền, thay chủ sở hữu, thay Box và factory reset đúng quy trình.
+
+Không hardcode một khóa bảo mật dùng chung cho toàn bộ sản phẩm.
+
+## 4. Trạng thái đăng ký và Factory Provisioning
+
+Mỗi Box phải hỗ trợ state machine:
+
+- `UNREGISTERED`
+- `PAIRING`
+- `REGISTERED`
+- `CONNECTING`
+- `ONLINE`
+- `OFFLINE`
+- `AUTH_FAILED`
+- `TRANSFER_PENDING`
+- `OTA_IN_PROGRESS`
+- `ERROR`
+
+Tách riêng trạng thái đăng ký/quyền sở hữu và trạng thái kết nối thực tế.
+
+Khi chưa đăng ký, Box phát SoftAP theo quy tắc:
+
+- SubBox: `siciot_sub_XXXXXX`
+- ActionBox: `siciot_act_XXXXXX`
+
+`XXXXXX` là sáu ký tự cuối của Base MAC.
+
+Tên thương mại và giao diện người dùng luôn là **Home Competition**. Giữ prefix SICIOT cho SSID provisioning theo yêu cầu tương thích hiện tại; cho phép đổi prefix qua cấu hình sản xuất ở các phiên bản sau.
+
+Mỗi Box cần một mật khẩu provisioning riêng, không dùng mật khẩu chung mặc định.
+
+QR Code phải hỗ trợ Factory ID, loại sản phẩm, mã setup và thông tin cần thiết cho xác minh ghép nối.
+
+Dùng cơ chế provisioning an toàn tương thích ESP-IDF 6.x; ưu tiên component chính thức thay vì tự xây mã hóa từ đầu.
+
+### Đăng ký SubBox
+
+Quy trình:
+
+1. App chọn hoặc tạo phòng.
+2. App quét QR/phát hiện SubBox.
+3. Thực hiện secure provisioning.
+4. Cấu hình mạng Wi-Fi.
+5. SubBox kết nối Gateway.
+6. Gateway xác thực danh tính.
+7. Gateway kiểm tra quyền sở hữu.
+8. Gateway cấp Room ID, Node ID và credential vận hành.
+9. SubBox lưu cấu hình.
+10. Gateway đánh dấu đăng ký hoàn tất sau khi nhận xác nhận.
+
+Một phòng chỉ có một SubBox chính đang hoạt động.
+
+### Đăng ký ActionBox
+
+Quy trình:
+
+1. App chọn phòng và SubBox cha.
+2. Phát hiện ActionBox chưa đăng ký bằng AP/QR.
+3. Xác thực quyền ghép nối ActionBox.
+4. Gateway tạo yêu cầu ghép nối có thời hạn.
+5. SubBox nhận yêu cầu từ Gateway.
+6. ActionBox và SubBox thiết lập kết nối ESP-NOW an toàn.
+7. Gateway xác minh Factory ID và credential của ActionBox thông qua SubBox.
+8. Gateway cấp quyền ActionBox thuộc SubBox đó.
+9. Hai Box lưu thông tin peer và cấu hình.
+10. ActionBox gửi Hardware Capabilities và trạng thái ban đầu.
+11. Gateway tạo ba SmartChannel chưa gán thiết bị.
+
+Không yêu cầu ActionBox đăng nhập vào router Wi-Fi.
+
+Giải quyết rõ vấn đề provisioning khi ActionBox chưa biết kênh Wi-Fi của SubBox. Có cơ chế discovery/channel synchronization, timeout và khôi phục khi pairing thất bại.
+
+Không được đánh dấu đăng ký thành công nếu một trong các bước cấp quyền, lưu cấu hình hoặc xác nhận peer chưa hoàn tất.
+
+---
+
+## 5. SmartChannel — 3 Relay + 3 CT
+
+Mỗi ActionBox có ba SmartChannel cố định:
+
+- CH1 = Relay 1 + CT 1
+- CH2 = Relay 2 + CT 2
+- CH3 = Relay 3 + CT 3
+
+Mã Channel được tạo theo công thức:
+
+`channel_id = factory_id + ":CH" + channel_number`
+
+Ví dụ:
+
+`HC-7C9EBD42A153:CH1`
+
+Mã này không thay đổi khi người dùng đổi tên hoặc di chuyển thiết bị.
+
+Khi ActionBox đăng ký thành công, Gateway tự tạo ba Channel ở trạng thái `UNBOUND`.
+
+Một Channel có thể liên kết với một thiết bị điện logic.
+
+Ví dụ:
+
+- CH1 → Đèn trần → `DEV001`
+- CH2 → Quạt trần → `DEV002`
+- CH3 → Ổ cắm → `DEV003`
+
+Người dùng phải có khả năng:
+
+- Gán tên thiết bị điện.
+- Chọn loại đèn, quạt, ổ cắm hoặc thiết bị khác.
+- Chọn relay đang điều khiển thiết bị.
+- Xem trạng thái relay và CT.
+- Đổi tên, đổi loại thiết bị.
+- Hủy liên kết.
+- Gán thiết bị sang Channel khác.
+- Thay ActionBox mà giữ nguyên Device ID.
+- Xem lịch sử điều khiển và dòng điện.
+
+Gateway quản lý liên kết `Device ID → Channel ID`, không cho SubBox tự quyết định vĩnh viễn liên kết này.
+
+Không cho phép một Channel bị gán đồng thời cho hai thiết bị điện độc lập.
+
+CT phải được ánh xạ cố định đúng nhánh relay theo sơ đồ phần cứng. Không giả định CT có thể đo tải bất kỳ nếu phần cứng không hỗ trợ.
+
+Các chức năng giới hạn dòng/cảnh báo cần có xử lý sai số, hiệu chuẩn, độ trễ khởi động tải và phát hiện lỗi cảm biến.
+
+Không xem CT là hệ thống bảo vệ an toàn điện duy nhất. Không suy diễn chính xác công suất W/kWh chỉ từ dòng RMS.
+
+---
+
+## 6. Home Competition Protocol V1
+
+Thiết kế một giao thức thống nhất với hai lớp truyền tải:
+
+- **HC-WIFI:** Gateway ↔ SubBox, qua MQTT/TCP/IP.
+- **HC-NOW:** SubBox ↔ ActionBox, qua ESP-NOW.
+
+Hai lớp sử dụng chung mô hình bản tin logic, nhưng serializer và transport adapter có thể khác nhau.
+
+Tạo tài liệu protocol chính thức, versioning rõ ràng và có test vector chung giữa C firmware và backend Gateway.
+
+### Loại bản tin bắt buộc
+
+- `HELLO`
+- `IDENTITY_CHALLENGE`
+- `IDENTITY_RESPONSE`
+- `PAIR_REQUEST`
+- `PAIR_ACCEPT`
+- `PAIR_REJECT`
+- `HEARTBEAT`
+- `CAPABILITY_REPORT`
+- `CONFIG_PUSH`
+- `CONFIG_ACK`
+- `COMMAND`
+- `COMMAND_ACK`
+- `STATE_REPORT`
+- `TELEMETRY_REPORT`
+- `EVENT_REPORT`
+- `ROOM_SNAPSHOT`
+- `STATE_SYNC_REQUEST`
+- `ERROR_REPORT`
+- `OTA_OFFER`
+- `OTA_START`
+- `OTA_PROGRESS`
+- `OTA_RESULT`
+- `OTA_ABORT`
+- `UNPAIR`
+- `FACTORY_RESET_REQUEST`
+
+Có thể bổ sung loại message khác nếu cần nhưng phải mô tả trong protocol specification.
+
+### Frame ESP-NOW
+
+Thiết kế packet nhị phân có header gồm tối thiểu:
+
+- Protocol version.
+- Message type.
+- Message ID.
+- Source Node ID.
+- Destination Node ID.
+- Boot/session ID.
+- Sequence number.
+- Payload length.
+- Flags.
+- Payload.
+
+Các trường khác được thêm theo nhu cầu thực tế, ví dụ ACK reference, binding/config revision và xác thực.
+
+Ưu tiên dùng fixed-width binary/CBOR hoặc TLV nhỏ gọn thay vì gửi JSON dài qua ESP-NOW.
+
+Đối với control messages, chọn payload tương thích giới hạn ESP-NOW V1 250 bytes sau khi trừ overhead. Nếu dùng ESP-NOW V2, phải thương lượng version và giới hạn kích thước thay vì mặc định tất cả thiết bị hỗ trợ frame lớn.
+
+Các frame lớn phải có cơ chế fragmentation/reassembly có giới hạn bộ nhớ.
+
+CRC chỉ dùng để phát hiện hỏng dữ liệu, không được coi là xác thực bảo mật.
+
+### Reliability
+
+Phải hỗ trợ:
+
+- Application-level ACK.
+- Command ID duy nhất.
+- Sequence number.
+- Timeout.
+- Retry có giới hạn.
+- Duplicate detection.
+- Idempotent relay commands.
+- Replay protection.
+- Message priority.
+- Queue giới hạn dung lượng.
+- Rate limiting.
+- Backpressure.
+- Snapshot recovery.
+- Phát hiện mất gói và reconnect.
+
+Không dùng hành động `TOGGLE` làm primitive điều khiển relay trên mạng. Sử dụng `SET_ON`/`SET_OFF` hoặc `SET_STATE`, để việc retry không làm đảo trạng thái sai.
+
+Không coi ESP-NOW send callback thành công là bằng chứng relay đã thực thi lệnh.
+
+Định nghĩa rõ `RECEIVED`, `ACCEPTED`, `APPLIED`, `FAILED` và `TIMEOUT`.
+
+### Wi-Fi và ESP-NOW coexistence
+
+Đây là hạng mục bắt buộc phải nghiên cứu và triển khai đúng.
+
+SubBox chạy Wi-Fi STA để kết nối router đồng thời sử dụng ESP-NOW.
+
+ESP-NOW cần hoạt động tương thích với Wi-Fi channel mà SubBox đang sử dụng.
+
+Phải xử lý:
+
+- Router thay đổi kênh Wi-Fi.
+- SubBox reconnect Wi-Fi.
+- ActionBox mất đồng bộ channel.
+- ActionBox khởi động trước SubBox.
+- SubBox khởi động trước Gateway.
+- Nhiều ActionBox kết nối đồng thời.
+- Wi-Fi yếu hoặc ESP-NOW mất gói.
+- Nhiễu vô tuyến khi OTA.
+
+Đề xuất chế độ triển khai với router 2.4 GHz cố định channel để tăng tính ổn định, nhưng vẫn cần xử lý phục hồi khi channel thay đổi.
+
+Phải có cơ chế Channel Discovery/Resynchronization cho ActionBox, không thực hiện scan kéo dài làm ảnh hưởng điều khiển relay và xử lý giọng nói.
+
+Nghiên cứu và cấu hình giới hạn peer ESP-NOW và encrypted peer phù hợp phần cứng/ESP-IDF. Không tuyên bố hỗ trợ vô hạn ActionBox.
+
+Phải hỗ trợ mã hóa unicast giữa SubBox và ActionBox bằng khóa riêng theo peer và quy trình phân phối/thu hồi khóa an toàn.
+
+Không gửi khóa bí mật trên broadcast ESP-NOW.
+
+---
+
+## 7. Device Registry và SQLite Database
+
+Gateway giữ database chính thức.
+
+Thiết kế SQLite với migration và transactional operations.
+
+Các bảng tối thiểu:
+
+- `homes`
+- `rooms`
+- `factory_devices`
+- `registered_nodes`
+- `node_assignments`
+- `node_credentials`
+- `channels`
+- `devices`
+- `device_bindings`
+- `channel_states`
+- `state_events`
+- `room_state_snapshots`
+- `config_revisions`
+- `users`
+- `home_members`
+- `firmware_artifacts`
+- `ota_jobs`
+- `ota_targets`
+- `audit_logs`
+
+Ràng buộc database:
+
+- Factory ID duy nhất.
+- Một ActionBox chỉ có một SubBox cha hiện hành.
+- Một phòng chỉ có một SubBox chính hiện hành.
+- Một Channel chỉ có một active primary binding.
+- Một Device ID không bị thay đổi khi đổi tên.
+- Không xóa liên kết đang dùng mà không xử lý dữ liệu phụ thuộc.
+- Không cấp quyền vận hành cho Box đã bị revoke.
+
+Sử dụng foreign keys, unique indexes, transaction, schema migration và WAL khi phù hợp.
+
+Gateway là source of truth cho cấu hình/ownership.
+
+ActionBox là source of truth cho trạng thái phần cứng của chính nó.
+
+SubBox giữ bản sao trạng thái phòng cùng config revision.
+
+Tạo công cụ sao lưu, kiểm tra tính toàn vẹn và khôi phục database. Backup cấu hình cần bảo vệ cả vật liệu xác thực cần thiết để phục hồi quyền quản lý thiết bị.
+
+---
+
+## 8. Đồng bộ dữ liệu ba tầng
+
+Luồng chuẩn:
+
+`ActionBox → ESP-NOW → SubBox → MQTT/Wi-Fi → Gateway → WebSocket → Flutter App`
+
+SubBox nhận dữ liệu từ tất cả ActionBox thuộc phòng, cập nhật Room State Cache và chuyển delta/snapshot đến Gateway.
+
+Dữ liệu trạng thái tối thiểu cho mỗi SmartChannel:
+
+- `channel_id`
+- `relay_state`
+- `current_rms_a`
+- `ct_valid`
+- `fault_flags`
+- `boot_id`
+- `state_seq`
+- `config_rev`
+
+Tách:
+
+- Desired state: yêu cầu điều khiển.
+- Reported state: trạng thái phần cứng đã báo.
+- Observed load status: nhận định dựa trên CT nếu hợp lệ.
+
+Không hiển thị lệnh thành công trên app khi chưa có xác nhận thực thi.
+
+SubBox gửi:
+
+- Relay event: ngay khi thay đổi.
+- Fault event: ngay, mức ưu tiên cao.
+- CT telemetry: định kỳ/có thay đổi đáng kể.
+- Room snapshot: khi reconnect, khởi động hoặc có yêu cầu.
+- Heartbeat/availability: theo cấu hình.
+
+Cấu hình thử nghiệm ban đầu có thể dùng heartbeat 5 giây, telemetry 2 giây, nhưng phải cho phép điều chỉnh và kiểm thử hiệu năng.
+
+Không gửi raw ADC liên tục lên Gateway.
+
+Không ghi mỗi mẫu ADC vào SQLite.
+
+Sử dụng `boot_id + seq` và version để phát hiện bản tin cũ/trùng.
+
+Nếu SubBox mất kết nối Gateway:
+
+- Các ActionBox vẫn giao tiếp local với SubBox nếu ESP-NOW còn hoạt động.
+- Các lệnh đã được cho phép trong phạm vi phòng có thể tiếp tục chạy.
+- SubBox lưu một hàng đợi sự kiện có giới hạn.
+- Sau reconnect phải reconcile trạng thái thực tế và snapshot.
+- Không tự động phát lại lệnh relay đã hết hạn.
+
+Nếu SubBox tắt hoàn toàn, ActionBox chỉ duy trì các chức năng local an toàn. Vì ActionBox không kết nối Wi-Fi Gateway nên app không thể xem trạng thái realtime của ActionBox đó trong lúc SubBox offline.
+
+App phải hiển thị offline/stale state chính xác.
+
+Không giả định mọi tầng luôn kết nối.
+
+---
+
+## 9. Command Router
+
+Gateway nhận điều khiển dựa trên Device ID.
+
+Ví dụ App yêu cầu bật `DEV001`:
+
+1. Gateway kiểm tra quyền.
+2. Query Device Binding.
+3. Xác định Channel ID.
+4. Xác định ActionBox.
+5. Xác định SubBox cha.
+6. Tạo Command ID.
+7. Gửi COMMAND đến SubBox qua MQTT.
+8. SubBox chuyển thành ESP-NOW COMMAND cho ActionBox.
+9. ActionBox kiểm tra quyền/config revision.
+10. ActionBox điều khiển relay.
+11. ActionBox gửi COMMAND_ACK và STATE_REPORT.
+12. SubBox chuyển kết quả lên Gateway.
+13. Gateway cập nhật database và push event về app.
+
+Cần xử lý:
+
+- Thiết bị offline.
+- Channel chưa gán.
+- Relay lỗi.
+- CT lỗi.
+- Binding revision không khớp.
+- Lệnh trùng.
+- Lệnh quá hạn.
+- Người dùng không đủ quyền.
+- SubBox đang OTA.
+- ActionBox đang OTA.
+
+Cấu hình relay ưu tiên an toàn hơn việc cố hoàn thành lệnh bằng mọi giá.
+
+---
+
+## 10. OTA hoàn chỉnh cho cả hệ thống
+
+Đây là **yêu cầu bắt buộc của Core V1**, không được để thành TODO.
+
+### OTA SubBox
+
+Luồng:
+
+`Gateway → Wi-Fi → SubBox`
+
+Gateway quản lý firmware artifacts, phiên bản và OTA jobs.
+
+SubBox nhận firmware qua HTTPS hoặc cơ chế an toàn phù hợp, xác minh firmware rồi ghi vào inactive OTA partition.
+
+Sử dụng cơ chế OTA của ESP-IDF:
+
+- `ota_0` và `ota_1`.
+- OTA data partition.
+- Image validation.
+- SHA-256.
+- Signed firmware.
+- Boot verification.
+- Application rollback.
+- Watchdog.
+
+Firmware mới chỉ được xác nhận là hợp lệ sau khi boot, hoàn tất self-test và khôi phục các chức năng thiết yếu.
+
+Không tự xóa cấu hình đăng ký, khóa hoặc binding trong quá trình OTA.
+
+### OTA ActionBox
+
+Luồng bắt buộc:
+
+`Gateway → Wi-Fi → SubBox → ESP-NOW → ActionBox`
+
+SubBox đóng vai trò OTA Initiator/Coordinator.
+
+ActionBox đóng vai trò OTA Responder.
+
+Khảo sát và ưu tiên tái sử dụng ESP-NOW OTA component chính thức của Espressif, chọn phiên bản tương thích với ESP-IDF của dự án và pin version rõ ràng.
+
+Hỗ trợ:
+
+- Manifest firmware.
+- Kiểm tra đúng product model/target.
+- Kiểm tra version và security version.
+- Signed image verification.
+- Hash firmware toàn bộ.
+- Truyền firmware theo chunk.
+- ACK/retransmission.
+- Giới hạn RAM.
+- Timeout.
+- Resume khi được hỗ trợ và xác minh an toàn.
+- Progress.
+- Phát hiện mất kết nối.
+- Phục hồi sau reset.
+- Rollback khi firmware mới lỗi.
+
+Không dùng kênh OTA để nhận firmware chưa được xác thực.
+
+Không lưu khóa ký firmware production trên Gateway.
+
+Không reboot cả phòng cùng lúc. OTA ActionBox theo batch/tuần tự có kiểm soát, bảo đảm kênh điều khiển thiết yếu không bị gián đoạn ngoài chính sách an toàn.
+
+Trong khi OTA, tránh starvation tác vụ ESP-NOW điều khiển quan trọng.
+
+### OTA Gateway
+
+Xây dựng cơ chế cập nhật phần mềm Gateway qua gói phát hành có phiên bản.
+
+Yêu cầu:
+
+- Kiểm tra chữ ký/hash artifact.
+- Backup cấu hình/database trước nâng cấp.
+- Kiểm tra migration.
+- Restart service có kiểm soát.
+- Health check.
+- Rollback phần mềm khi cập nhật lỗi.
+- Không tự ý nâng cấp hệ điều hành hoặc xóa dữ liệu.
+
+### OTA App
+
+Flutter chỉ đóng vai trò quản lý và hiển thị tiến trình OTA của hệ thống. Cập nhật phiên bản ứng dụng qua kênh phân phối phù hợp của Android/iOS; không tự xây cơ chế chạy mã ứng dụng tùy ý từ Gateway.
+
+### Giao diện OTA
+
+App phải hiển thị:
+
+- Phiên bản hiện tại.
+- Phiên bản có sẵn.
+- Model mục tiêu.
+- Trạng thái tải và truyền firmware.
+- Phần trăm tiến trình có căn cứ.
+- Trạng thái xác minh/khởi động lại.
+- Thành công hoặc thất bại.
+- Lý do thất bại.
+- Kết quả rollback.
+- Lịch sử OTA.
+
+Không được đánh dấu thành công chỉ vì đã truyền xong toàn bộ firmware; phải nhận kết quả boot và health check sau cập nhật.
+
+---
+
+## 11. Flutter — Home Competition App
+
+Tận dụng ứng dụng Flutter sẵn có nếu repository đã có.
+
+Tập trung xây khung quản trị hệ thống và thiết bị; chưa cần thiết kế đầy đủ AI/voice UI trong giai đoạn này.
+
+Các màn hình tối thiểu:
+
+1. Dashboard toàn nhà.
+2. Danh sách phòng.
+3. Chi tiết phòng/SubBox.
+4. Danh sách ActionBox thuộc phòng.
+5. Chi tiết ActionBox.
+6. Ba SmartChannel của mỗi ActionBox.
+7. Thêm thiết bị điện vào Channel.
+8. Đăng ký SubBox.
+9. Đăng ký ActionBox.
+10. Xem trạng thái online/offline.
+11. Xem dòng điện từng Channel.
+12. Quản lý firmware/OTA.
+13. Nhật ký sự kiện và lỗi.
+14. Cài đặt Gateway.
+
+Khi đăng ký thiết bị điện:
+
+- Chọn ActionBox.
+- Chọn một Channel chưa gán.
+- Đặt tên.
+- Chọn loại thiết bị.
+- Xác nhận.
+- Gateway tạo Device ID và binding.
+- SubBox nhận config revision mới.
+- ActionBox nhận phần cấu hình liên quan.
+- App cập nhật kết quả.
+
+Dữ liệu từ Gateway là nguồn chính thức.
+
+Flutter không tự tạo thiết bị giả hoặc mặc định thiết bị tồn tại nếu Gateway chưa xác nhận.
+
+Chỉ hiển thị trạng thái ON/OFF thực tế hoặc pending/stale/error.
+
+Tạo API client typed, error handling, retry thích hợp và realtime synchronization. Sau khi app reconnect, tải snapshot để tránh mất trạng thái.
+
+---
+
+## 12. Gateway Backend API
+
+Xây API có version prefix `/api/v1`.
+
+Các endpoint dự kiến:
+
+- `GET /homes`
+- `GET /rooms`
+- `POST /rooms`
+- `GET /rooms/{id}/nodes`
+- `GET /nodes`
+- `GET /nodes/{id}`
+- `POST /nodes/claim`
+- `POST /nodes/{id}/assign`
+- `POST /nodes/{id}/unpair`
+- `GET /nodes/{id}/channels`
+- `GET /devices`
+- `POST /devices`
+- `PATCH /devices/{id}`
+- `POST /devices/{id}/command`
+- `POST /channels/{id}/bind`
+- `DELETE /channels/{id}/binding`
+- `GET /states/snapshot`
+- `GET /events`
+- `GET /firmware`
+- `POST /firmware`
+- `POST /ota/jobs`
+- `GET /ota/jobs/{id}`
+- `GET /health`
+- `WebSocket /api/v1/events`
+
+Điều chỉnh API theo REST convention và kiến trúc thực tế.
+
+Cần có:
+
+- Authentication.
+- Authorization.
+- Role: Owner / Member / Installer.
+- Input validation.
+- Rate limiting.
+- API schema/OpenAPI.
+- Error response thống nhất.
+- Command/audit logging.
+- Transactional mutations.
+- WebSocket reconnect và snapshot synchronization.
+
+Không public các endpoint provisioning, OTA, reset, điều khiển điện mà không có kiểm tra quyền.
+
+---
+
+## 13. Home Assistant Integration
+
+Home Competition giữ quyền quản lý danh tính, thiết bị, cấu hình và binding trong Gateway Registry.
+
+Home Assistant được sử dụng như nền tảng tích hợp/automation.
+
+Yêu cầu:
+
+- Mỗi thiết bị điện có unique ID ổn định.
+- Relay state được ánh xạ thành entity thích hợp.
+- CT được ánh xạ thành sensor current.
+- Có availability.
+- Có discovery và cập nhật cấu hình.
+- Đổi tên trong app không tạo entity trùng.
+- Xóa binding xử lý entity phù hợp.
+- Không có hai service cùng ghi trạng thái trái ngược nhau.
+- Reconnect Home Assistant không làm mất cấu hình Home Competition.
+
+Nếu Home Assistant tạm thời không chạy, Device Registry và điều khiển cơ bản của Home Competition vẫn phải hoạt động.
+
+---
+
+## 14. Reliability, bảo mật và an toàn
+
+Yêu cầu bắt buộc:
+
+- Task watchdog.
+- Safe relay initialization.
+- Chính sách trạng thái relay sau boot/mất điện.
+- Không vô tình đóng relay khi reboot hoặc OTA.
+- NVS validation/migration.
+- NVS Encryption khi triển khai production.
+- Per-device authentication.
+- ESP-NOW peer encryption.
+- MQTT TLS/authentication và ACL.
+- Secure firmware signing.
+- Hỗ trợ Secure Boot và Flash Encryption với quy trình provision eFuse an toàn.
+- Không ghi bí mật ra log.
+- Memory leak monitoring.
+- Stack overflow detection.
+- Queue overflow handling.
+- Graceful reconnect.
+- Bounded retries.
+- Persistence và recovery.
+- Heartbeat và Last Will cho MQTT.
+- Phân biệt offline và stale state.
+- Cơ chế reset/chuyển chủ an toàn.
+
+Các chức năng giọng nói hiện có phải tiếp tục hoạt động. Không làm chậm đáng kể tác vụ điều khiển relay do tác vụ network hoặc OTA.
+
+Các cấu hình bảo mật chưa thể bật tự động trên bo phát triển phải được ghi rõ, có quy trình thử nghiệm trước khi ghi eFuse không thể đảo ngược.
+
+Không ghi/chốt eFuse bảo mật không thể đảo ngược trên phần cứng thật khi chưa có sự cho phép rõ ràng.
+
+---
+
+## 15. Cấu trúc repository mong muốn
+
+Có thể điều chỉnh theo repository hiện tại, nhưng phải tách module rõ ràng.
+
+```text
+Home-Competition/
+├── firmware/
+│   ├── common/
+│   │   ├── hc_protocol/
+│   │   ├── hc_identity/
+│   │   ├── hc_security/
+│   │   ├── hc_storage/
+│   │   ├── hc_transport/
+│   │   └── hc_ota/
+│   │
+│   ├── subbox/
+│   │   ├── wifi_manager/
+│   │   ├── espnow_coordinator/
+│   │   ├── child_registry/
+│   │   ├── room_state/
+│   │   ├── command_router/
+│   │   ├── audio/
+│   │   ├── ir/
+│   │   └── ota_coordinator/
+│   │
+│   └── actionbox/
+│       ├── espnow_client/
+│       ├── channel_manager/
+│       ├── relay_controller/
+│       ├── ct_monitor/
+│       ├── local_voice/
+│       ├── state_reporter/
+│       └── ota_responder/
+│
+├── gateway/
+│   ├── api/
+│   ├── registry/
+│   ├── state_manager/
+│   ├── command_router/
+│   ├── mqtt_bridge/
+│   ├── ota_manager/
+│   ├── ha_integration/
+│   ├── database/
+│   ├── migrations/
+│   └── services/
+│
+├── app/
+│   └── home_competition_flutter/
+│
+├── protocol/
+│   ├── schemas/
+│   ├── test_vectors/
+│   └── specifications/
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── protocol/
+│   ├── simulation/
+│   └── ota/
+│
+├── deployment/
+│   ├── systemd/
+│   ├── scripts/
+│   └── config_examples/
+│
+└── docs/
+    ├── architecture/
+    ├── protocol/
+    ├── provisioning/
+    ├── database/
+    ├── ota/
+    ├── testing/
+    └── deployment/
+```
+
+Nếu repository đã có cấu trúc khác phù hợp, ưu tiên tái sử dụng thay vì tạo các thư mục song song không được kết nối.
+
+---
+
+## 16. Kiểm thử tự động và Acceptance Tests
+
+Phải có unit tests, integration tests, protocol tests và mô phỏng nhiều Box trên máy phát triển.
+
+Các tình huống bắt buộc:
+
+**Đăng ký thiết bị**
+
+- SubBox mới đăng ký Gateway.
+- ActionBox mới đăng ký qua SubBox.
+- Trùng Factory ID.
+- Sai khóa xác thực.
+- ActionBox cố đăng ký vào SubBox khác.
+- ActionBox chuyển phòng hợp lệ.
+- Reset Box.
+- Gateway reboot và khôi phục registry.
+
+**SmartChannel**
+
+- Đăng ký ba thiết bị trên ba Channel.
+- Gán trùng Channel bị từ chối.
+- Đổi tên thiết bị không thay ID.
+- Thay ActionBox giữ Device ID.
+- Relay đổi trạng thái local.
+- CT lỗi.
+- Dữ liệu CT bất thường.
+
+**ESP-NOW**
+
+- Mất gói.
+- Lệnh trùng.
+- ACK bị mất.
+- Message đến sai thứ tự.
+- ActionBox reset.
+- SubBox reset.
+- Wi-Fi router đổi channel.
+- Mất Gateway nhưng mạng ESP-NOW còn hoạt động.
+- Nhiều ActionBox truyền đồng thời.
+- Quá giới hạn peer.
+
+**Đồng bộ**
+
+- App điều khiển relay thành công.
+- App gửi lệnh nhưng ActionBox offline.
+- Relay đổi local và App cập nhật.
+- App mất mạng rồi kết nối lại.
+- SubBox giữ cache trong lúc Gateway offline.
+- Config revision không khớp.
+- Gateway khởi động lại và tái tạo state.
+- Snapshot reconcile không làm ghi đè trạng thái mới bằng sự kiện cũ.
+
+**OTA**
+
+- OTA SubBox thành công.
+- OTA ActionBox qua ESP-NOW thành công.
+- Mất kết nối giữa OTA.
+- File firmware sai model.
+- Hash không khớp.
+- Firmware không có chữ ký hợp lệ.
+- Mất điện trong OTA.
+- Firmware mới boot lỗi.
+- Rollback về bản cũ.
+- OTA không làm mất Factory ID, ownership hoặc device bindings.
+
+Viết simulator để kiểm thử gateway, protocol và state synchronization mà không cần phần cứng.
+
+Khi có phần cứng, cung cấp hardware-in-the-loop test plan với ít nhất một Gateway, hai SubBox và nhiều ActionBox.
+
+Không được khẳng định đã kiểm thử ESP-NOW radio hoặc relay thực nếu chỉ chạy simulator.
+
+---
+
+## 17. Tiêu chí nghiệm thu Core V1
+
+Hệ thống chỉ được coi là hoàn thành khi:
+
+1. Firmware SubBox và ActionBox biên dịch thành công trên toolchain phù hợp.
+2. Gateway khởi động và chạy migrations/database thành công.
+3. API hoạt động và có kiểm thử.
+4. Một SubBox có thể đăng ký vào Gateway.
+5. Nhiều ActionBox có thể ghép nối vào SubBox qua ESP-NOW.
+6. Gateway nhận đầy đủ Factory ID, capabilities và ba Channel mỗi ActionBox.
+7. App có thể đăng ký thiết bị điện vào từng Channel.
+8. App gửi lệnh tới Device ID và lệnh được định tuyến đúng.
+9. Trạng thái relay và CT từ ActionBox về Gateway qua SubBox.
+10. App cập nhật trạng thái realtime và phục hồi sau reconnect.
+11. OTA SubBox hoạt động với rollback.
+12. OTA ActionBox đi qua ESP-NOW và có xác minh kết quả sau reboot.
+13. Thiết bị giữ nguyên danh tính và cấu hình sau reset/reboot.
+14. Có cơ chế xác thực, phân quyền và chống lệnh trùng.
+15. Các chức năng Home Assistant và voice hiện có không bị phá vỡ.
+16. Có test reports, tài liệu triển khai và hướng dẫn flash/debug.
+
+Các chức năng chưa có phần cứng hoặc môi trường để xác minh phải được đánh dấu `UNVERIFIED`, không được ghi là `PASS`.
+
+---
+
+## 18. Quy trình làm việc bắt buộc của Codex
+
+Thực hiện công việc theo thứ tự:
+
+**Phase 1 — Audit & Architecture**
+
+Khảo sát repository, xác định trạng thái hiện tại, thiết kế architecture, database schema, protocol specification và kế hoạch migration.
+
+**Phase 2 — Core Protocol**
+
+Triển khai identity, packet codec, frame validation, state machine, ACK/retry, duplicate detection và unit tests.
+
+**Phase 3 — Gateway Core**
+
+Triển khai Device Registry, SQLite, API, MQTT Bridge, Command Router và State Manager.
+
+**Phase 4 — Firmware Connectivity**
+
+Triển khai Wi-Fi/MQTT trên SubBox, ESP-NOW Coordinator, ESP-NOW Client của ActionBox, secure pairing và synchronization.
+
+**Phase 5 — SmartChannel**
+
+Triển khai quản lý 3 Relay + 3 CT, liên kết thiết bị điện và đồng bộ trạng thái.
+
+**Phase 6 — Flutter Management UI**
+
+Kết nối app với Gateway API, tạo các màn hình provisioning, quản lý thiết bị, trạng thái và cấu hình.
+
+**Phase 7 — OTA**
+
+Triển khai OTA Gateway/SubBox/ActionBox với signed image, progress, verification và rollback.
+
+**Phase 8 — Reliability & Integration**
+
+Chạy kiểm thử, sửa lỗi, kiểm tra race condition, mất kết nối, trùng lệnh, recovery và resource usage.
+
+**Phase 9 — Documentation & Delivery**
+
+Hoàn thành hướng dẫn triển khai, build/flash, database migration, provisioning, OTA, troubleshooting và test report.
+
+Sau mỗi phase:
+
+- Chạy build/test liên quan.
+- Sửa những lỗi có thể xác minh.
+- Ghi lại các quyết định kỹ thuật.
+- Không bỏ qua lỗi compiler/warning nghiêm trọng bằng cách tắt kiểm tra.
+- Không tạo placeholder cho chức năng bắt buộc rồi tuyên bố đã hoàn thành.
+- Tiếp tục phase tiếp theo khi các dependency đã được đáp ứng.
+
+Nếu thiếu phần cứng để kiểm thử, vẫn triển khai đầy đủ phần code có thể kiểm tra bằng build/simulation, đồng thời ghi rõ bước cần xác minh trên phần cứng thật.
+
+Không làm việc chỉ ở mức lập kế hoạch. Hãy thực sự tạo/chỉnh sửa các file cần thiết trong repository được cung cấp.
+
+## 19. Yêu cầu về chất lượng code
+
+Code phải:
+
+- Modular, maintainable, testable.
+- Không hardcode MAC/Device ID thật.
+- Có type definitions rõ ràng.
+- Có API versioning.
+- Có packet validation.
+- Có input bounds checking.
+- Có error handling.
+- Có logging có cấu trúc.
+- Không block tác vụ realtime trong callback ESP-NOW.
+- Hạn chế cấp phát động trong callback thời gian nhạy cảm.
+- Không ghi NVS liên tục theo mỗi telemetry sample.
+- Không ghi đè cấu hình hợp lệ bằng dữ liệu lỗi.
+- Không phụ thuộc thứ tự khởi động thiết bị.
+- Có migration và backward compatibility plan.
+- Có giới hạn tài nguyên rõ ràng phù hợp ESP32-S3 và Pi4 4GB.
+
+Ưu tiên thư viện chính thức của Espressif và các dependency đang được bảo trì. Kiểm tra tương thích phiên bản trước khi sử dụng.
+
+Không tự phát minh cơ chế mã hóa thay cho thư viện mật mã đã được kiểm chứng.
+
+## 20. Báo cáo cuối cùng
+
+Khi thực hiện xong, xuất báo cáo gồm:
+
+1. Sơ đồ kiến trúc thực tế.
+2. Danh sách module đã triển khai.
+3. Các file đã tạo/sửa.
+4. Phiên bản dependency.
+5. Database schema.
+6. Protocol message specification.
+7. Hướng dẫn build Gateway.
+8. Hướng dẫn build/flash SubBox.
+9. Hướng dẫn build/flash ActionBox.
+10. Hướng dẫn khởi chạy Flutter App.
+11. Quy trình đăng ký Box và thiết bị điện.
+12. Quy trình OTA ba tầng.
+13. Kết quả unit/integration tests.
+14. Những phần đã xác minh trên hardware.
+15. Những phần chưa xác minh và nguyên nhân.
+16. Các rủi ro còn tồn tại trước khi thương mại hóa.
+
+### Ưu tiên cao nhất
+
+**Ổn định giao tiếp, định danh chính xác, quản lý thiết bị đúng, đồng bộ trạng thái tin cậy, an toàn relay, bảo mật và OTA có khả năng phục hồi.**
+
+Không ưu tiên animation, giao diện phức tạp hay bổ sung AI mới trước khi nền tảng Device Management và Protocol Core hoạt động ổn định.
+
+Toàn bộ sản phẩm mang tên:
+
+**HOME COMPETITION**
+
+Bắt đầu bằng khảo sát repository, sau đó triển khai có kiểm chứng theo các phase nói trên. Chỉ báo cáo chức năng đã hoạt động khi có bằng chứng build/test tương ứng.

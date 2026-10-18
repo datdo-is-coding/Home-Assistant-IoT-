@@ -19,36 +19,37 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
   int _currentStep = 0;
   bool _isSubmitting = false;
 
-  // Selected hardware info
   String _selectedBoxModel = 'ESP32-S3 Voice ActionBox';
   String _selectedBoxId = '';
   String _selectedMac = '';
   String _boxName = 'ActionBox Phòng Khách';
 
-  // Room selection
   String _selectedRoomId = 'livingroom';
   String _selectedRoomName = 'Phòng khách';
 
-  // 2 Hardware channels (ESP32-S3 physical relays: ch1, ch2)
   final List<String> _channelNames = [
     'Đèn chính',
     'Quạt trần',
+    'Công tắc phụ',
   ];
 
   final List<DeviceType> _channelTypes = [
     DeviceType.light,
     DeviceType.fan,
+    DeviceType.socket,
   ];
 
   final List<List<String>> _channelAliases = [
     ['đèn chính', 'đèn phòng'],
     ['quạt trần', 'quạt số 1'],
+    ['công tắc phụ', 'ổ cắm phụ'],
   ];
 
   late AnimationController _pulseController;
   late TextEditingController _boxNameController;
   late TextEditingController _ch1NameController;
   late TextEditingController _ch2NameController;
+  late TextEditingController _ch3NameController;
 
   @override
   void initState() {
@@ -56,6 +57,7 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     _boxNameController = TextEditingController(text: _boxName);
     _ch1NameController = TextEditingController(text: _channelNames[0]);
     _ch2NameController = TextEditingController(text: _channelNames[1]);
+    _ch3NameController = TextEditingController(text: _channelNames[2]);
 
     _pulseController = AnimationController(
       vsync: this,
@@ -70,19 +72,18 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     _boxNameController.dispose();
     _ch1NameController.dispose();
     _ch2NameController.dispose();
+    _ch3NameController.dispose();
     super.dispose();
   }
 
   void _nextStep() {
     HapticFeedback.lightImpact();
 
-    // Guard step 1 -> step 2
     if (_currentStep == 0) {
-      // Trigger scan
+
       ref.read(gatewayClientProvider).refresh();
     }
 
-    // Guard step 2 -> step 3 (must have selected a pending device or allow retry)
     if (_currentStep == 1) {
       final gateway = ref.read(gatewayClientProvider);
       if (gateway.pending.isEmpty && _selectedBoxId.isEmpty) {
@@ -152,9 +153,9 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
         location: _selectedRoomName,
         rl1: relayTypeStr(_channelTypes[0]),
         rl2: relayTypeStr(_channelTypes[1]),
+        rl3: relayTypeStr(_channelTypes[2]),
       );
 
-      // Also persist channel names and voice aliases if specified
       try {
         await gateway.updateDevice(
           deviceId: targetDevId,
@@ -166,9 +167,13 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
               ? _ch2NameController.text.trim()
               : _channelNames[1],
           ch2Aliases: _channelAliases[1],
+          ch3Name: _ch3NameController.text.trim().isNotEmpty
+              ? _ch3NameController.text.trim()
+              : _channelNames[2],
+          ch3Aliases: _channelAliases[2],
         );
       } catch (_) {
-        // Name update is best-effort if provision succeeded
+
       }
 
       if (mounted) {
@@ -330,7 +335,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 1: Search
   Widget _buildStep1Search(ThemeData theme, bool isDark, GatewayClient gateway) {
     return _StepContainer(
       icon: Icons.wifi_tethering_rounded,
@@ -400,7 +404,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 2: Select ActionBox / SubBox
   Widget _buildStep2Select(ThemeData theme, bool isDark, GatewayClient gateway) {
     final pendingNodes = gateway.pending;
 
@@ -514,7 +517,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 3: Connecting
   Widget _buildStep3Connecting(ThemeData theme, bool isDark) {
     return _StepContainer(
       icon: Icons.sync_rounded,
@@ -531,7 +533,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 4: Connected
   Widget _buildStep4Connected(ThemeData theme, bool isDark) {
     return _StepContainer(
       icon: Icons.check_circle_rounded,
@@ -556,7 +557,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 5: Select Room
   Widget _buildStep5SelectRoom(ThemeData theme, bool isDark) {
     final rooms = [
       {'id': 'livingroom', 'name': 'Phòng khách', 'icon': Icons.weekend_rounded},
@@ -626,16 +626,15 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 6: Configure Channels (2 physical relays)
   Widget _buildStep6ConfigureChannels(ThemeData theme, bool isDark) {
     return _StepContainer(
       icon: Icons.tune_rounded,
       iconColor: const Color(0xFF7B1FA2),
-      title: 'Cấu hình 2 cổng rơ-le',
+      title: 'Cấu hình 3 cổng rơ-le',
       subtitle:
-          'ESP32-S3 ActionBox trang bị 2 kênh rơ-le vật lý (Kênh 1: GPIO 4, Kênh 2: GPIO 5).',
+          'ActionBox trang bị 3 kênh rơ-le vật lý (Kênh 1: GPIO 4, Kênh 2: GPIO 5, Kênh 3: GPIO 5).',
       child: Column(
-        children: List.generate(2, (index) {
+        children: List.generate(3, (index) {
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(14),
@@ -666,7 +665,7 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Kênh ${index + 1} (${index == 0 ? "GPIO 4" : "GPIO 5"})',
+                        'Kênh ${index + 1} (${index == 0 ? "GPIO 4" : (index == 1 ? "GPIO 5" : "GPIO 5")})',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w700,
@@ -707,7 +706,6 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 7: Name Devices
   Widget _buildStep7NameDevices(ThemeData theme, bool isDark) {
     return _StepContainer(
       icon: Icons.edit_note_rounded,
@@ -763,12 +761,27 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
               onChanged: (text) => _channelNames[1] = text,
             ),
           ),
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            child: TextField(
+              controller: _ch3NameController,
+              decoration: InputDecoration(
+                labelText: 'Kênh 3 (${_channelTypes[2].name})',
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1E242B) : Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+              onChanged: (text) => _channelNames[2] = text,
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // STEP 8: Voice Aliases
   Widget _buildStep8VoiceAliases(ThemeData theme, bool isDark) {
     return _StepContainer(
       icon: Icons.record_voice_over_rounded,
@@ -776,8 +789,10 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
       title: 'Khẩu lệnh điều khiển giọng nói',
       subtitle: 'Trợ lý ảo ngoại tuyến sẽ nhận diện các cụm từ này để bật/tắt thiết bị tức thì.',
       child: Column(
-        children: List.generate(2, (index) {
-          final devName = index == 0 ? _ch1NameController.text : _ch2NameController.text;
+        children: List.generate(3, (index) {
+          final devName = index == 0
+              ? _ch1NameController.text
+              : (index == 1 ? _ch2NameController.text : _ch3NameController.text);
           return Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(12),
@@ -816,17 +831,17 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
     );
   }
 
-  // STEP 9: Finish
   Widget _buildStep9Finish(ThemeData theme, bool isDark) {
     final name1 = _ch1NameController.text.isNotEmpty ? _ch1NameController.text : _channelNames[0];
     final name2 = _ch2NameController.text.isNotEmpty ? _ch2NameController.text : _channelNames[1];
+    final name3 = _ch3NameController.text.isNotEmpty ? _ch3NameController.text : _channelNames[2];
 
     return _StepContainer(
       icon: Icons.rocket_launch_rounded,
       iconColor: const Color(0xFF43A047),
       title: 'Tất cả đã sẵn sàng!',
       subtitle:
-          '${_boxNameController.text} ($_selectedBoxModel) sẽ được tích hợp vào $_selectedRoomName với 2 kênh tải độc lập.',
+          '${_boxNameController.text} ($_selectedBoxModel) sẽ được tích hợp vào $_selectedRoomName với 3 kênh tải độc lập.',
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
@@ -841,6 +856,8 @@ class _AddDeviceFlowScreenState extends ConsumerState<AddDeviceFlowScreen>
             _buildReviewChannel(1, name1, _channelTypes[0], theme),
             const Divider(height: 16),
             _buildReviewChannel(2, name2, _channelTypes[1], theme),
+            const Divider(height: 16),
+            _buildReviewChannel(3, name3, _channelTypes[2], theme),
           ],
         ),
       ),

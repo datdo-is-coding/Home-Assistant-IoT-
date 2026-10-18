@@ -222,7 +222,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
           const Divider(color: Colors.white10),
           const SizedBox(height: 12),
 
-          // Room input
           const Text('TÊN PHÒNG', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
           const SizedBox(height: 6),
           TextField(
@@ -238,7 +237,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Relay 1 & Relay 2 types
           Row(
             children: [
               Expanded(
@@ -266,7 +264,6 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
           ),
           const SizedBox(height: 18),
 
-          // Pair Button
           SizedBox(
             width: double.infinity,
             height: 44,

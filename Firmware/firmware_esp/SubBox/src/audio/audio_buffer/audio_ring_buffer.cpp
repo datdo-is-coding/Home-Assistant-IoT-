@@ -1,8 +1,3 @@
-/**
- * @file audio_ring_buffer.cpp
- * @brief Thread-Safe PSRAM-Backed Circular Audio Buffer Implementation
- */
-
 #include "audio_ring_buffer.h"
 #include "esp_log.h"
 #include <algorithm>
@@ -32,13 +27,12 @@ bool AudioRingBuffer::init() {
 
     size_t bytes = m_capacity * sizeof(int16_t);
 
-    // Attempt allocation in 16MB Octal PSRAM first
     m_buffer = static_cast<int16_t*>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (m_buffer) {
         m_allocated_in_psram = true;
         ESP_LOGI(TAG, "Allocated %u KB audio ring buffer in PSRAM", (unsigned)(bytes / 1024));
     } else {
-        // Fallback to internal SRAM if PSRAM unavailable in test environment
+
         m_buffer = static_cast<int16_t*>(malloc(bytes));
         m_allocated_in_psram = false;
         if (m_buffer) {

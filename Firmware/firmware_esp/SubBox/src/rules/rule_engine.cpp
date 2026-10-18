@@ -1,8 +1,3 @@
-/**
- * @file rule_engine.cpp
- * @brief Deterministic Local Automation Rule Engine Implementation
- */
-
 #include "rule_engine.h"
 #include "esp_log.h"
 
@@ -10,8 +5,8 @@ static const char* TAG = "RULE_ENGINE";
 
 RuleEngine::RuleEngine(std::shared_ptr<ActionBoxRegistry> registry)
     : m_registry(registry) {
-    m_config.current_overload_ma = 10000; // 10A default limit
-    m_config.temp_fan_auto_on_c = 32.0f;  // 32 degC fan trigger
+    m_config.current_overload_ma = 10000;
+    m_config.temp_fan_auto_on_c = 32.0f;
     m_config.auto_fan_enabled = true;
     m_config.overcurrent_trip_enabled = true;
 }
@@ -39,7 +34,7 @@ void RuleEngine::evaluate(float ambient_temp_c) {
     std::vector<ActionBoxNode> nodes = m_registry->getAllNodes();
 
     for (const auto& node : nodes) {
-        // RULE 1: IF current > limit THEN relay OFF
+
         if (m_config.overcurrent_trip_enabled && node.relay_state && (node.current_ma > m_config.current_overload_ma)) {
             ESP_LOGE(TAG, "🚨 [RULE TRIGGER] Overcurrent on %s (%lu mA > %lu mA) -> FORCING RELAY OFF!",
                      node.node_id.c_str(), (unsigned long)node.current_ma, (unsigned long)m_config.current_overload_ma);
@@ -53,7 +48,6 @@ void RuleEngine::evaluate(float ambient_temp_c) {
             }
         }
 
-        // RULE 2: IF device fault THEN report event
         if (node.has_fault) {
             ESP_LOGW(TAG, "⚠️ [RULE TRIGGER] Hardware fault detected on %s: %s",
                      node.node_id.c_str(), node.fault_msg.c_str());
@@ -64,7 +58,6 @@ void RuleEngine::evaluate(float ambient_temp_c) {
             }
         }
 
-        // RULE 3: IF temperature > threshold THEN FAN ON
         if (m_config.auto_fan_enabled && ambient_temp_c > 0.0f && (ambient_temp_c >= m_config.temp_fan_auto_on_c)) {
             if (node.device == DeviceType::FAN && !node.relay_state) {
                 ESP_LOGI(TAG, "🌡️ [RULE TRIGGER] Ambient temp %.1fC >= %.1fC -> AUTO TURNING ON FAN (%s)!",

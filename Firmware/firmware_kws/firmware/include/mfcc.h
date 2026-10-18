@@ -11,7 +11,7 @@ public:
     ~MFCCExtractor();
 
     bool init();
-    // Trích xuất ma trận (99 x 13) từ mảng audio 16,000 mẫu float
+
     void extract(const float* audio_in, float* mfcc_out);
 
 private:
@@ -28,4 +28,4 @@ private:
     void rfft(const float* input, float* real_out, float* imag_out);
 };
 
-#endif // MFCC_H
+#endif

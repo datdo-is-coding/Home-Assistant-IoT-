@@ -28,6 +28,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        CoreProvisioningBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "sic/session").setMethodCallHandler { call, result ->
             val prefs = getSharedPreferences("sic_session", MODE_PRIVATE)
             try {

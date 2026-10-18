@@ -1,8 +1,3 @@
-/**
- * @file audio_ring_buffer.h
- * @brief Thread-Safe PSRAM-Backed Circular Audio Buffer for PCM Streams
- */
-
 #pragma once
 
 #include <stdint.h>

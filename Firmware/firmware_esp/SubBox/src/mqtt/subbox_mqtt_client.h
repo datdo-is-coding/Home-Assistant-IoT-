@@ -1,8 +1,3 @@
-/**
- * @file subbox_mqtt_client.h
- * @brief ESP-IDF MQTT Client for SubBox <-> Raspberry Pi 4 Hub
- */
-
 #pragma once
 
 #include <string>
@@ -21,6 +16,7 @@ public:
     void stop();
     bool isConnected() const { return m_connected; }
 
+    bool publishCore(const uint8_t* data, size_t length);
     bool publishState(const std::string& json_payload);
     bool publishEvent(const std::string& event_type, const std::string& json_payload);
     bool publishVoiceRequest(const std::string& origin_node_id, const std::string& transcript);

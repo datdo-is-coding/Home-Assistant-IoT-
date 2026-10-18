@@ -36,21 +36,20 @@ esp_err_t trigger_manager_init(void)
 
 trigger_source_t trigger_manager_poll(void)
 {
-    /* 1. Check USB incoming command */
+
     char cmd = usb_stream_poll_cmd();
     if (cmd == 'r' || cmd == 'R') {
         ESP_LOGI(TAG, "📩 USB Command: START RECORDING ('%c')", cmd);
         return TRIGGER_USB_CMD;
     }
 
-    /* 2. Check Physical Buttons with debounce (200ms) */
     int64_t now = esp_timer_get_time();
     bool cur_but1 = (gpio_get_level(BUT1_GPIO) == 0);
     bool cur_boot = (gpio_get_level(BOOT_GPIO) == 0);
 
     bool triggered = false;
     if ((cur_but1 && !s_last_but1_state) || (cur_boot && !s_last_boot_state)) {
-        if ((now - s_last_press_time) > 200000) { /* 200ms debounce */
+        if ((now - s_last_press_time) > 200000) {
             triggered = true;
             s_last_press_time = now;
         }
@@ -74,14 +73,13 @@ bool trigger_manager_poll_stop(void)
         return true;
     }
 
-    /* Check if button pressed again to stop */
     int64_t now = esp_timer_get_time();
     bool cur_but1 = (gpio_get_level(BUT1_GPIO) == 0);
     bool cur_boot = (gpio_get_level(BOOT_GPIO) == 0);
 
     bool pressed_again = false;
     if ((cur_but1 && !s_last_but1_state) || (cur_boot && !s_last_boot_state)) {
-        if ((now - s_last_press_time) > 400000) { /* 400ms after start */
+        if ((now - s_last_press_time) > 400000) {
             pressed_again = true;
             s_last_press_time = now;
         }

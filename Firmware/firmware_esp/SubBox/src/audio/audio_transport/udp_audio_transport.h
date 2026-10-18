@@ -1,8 +1,3 @@
-/**
- * @file udp_audio_transport.h
- * @brief High-Speed UDP Implementation of AudioTransport for ActionBox Audio
- */
-
 #pragma once
 
 #include "audio_transport.h"
@@ -38,7 +33,6 @@ private:
     std::function<void(const AudioPacket&)> m_rx_callback;
     std::mutex m_callback_mutex;
 
-    // Node ID -> last known IPv4 address mapping
     std::map<std::string, struct sockaddr_in> m_node_endpoints;
     std::mutex m_endpoints_mutex;
 };

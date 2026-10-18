@@ -1,8 +1,3 @@
-/**
- * @file audio_packet.h
- * @brief Network Audio Packet Definitions for ActionBox <-> SubBox Transmission
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -16,34 +11,42 @@ extern "C" {
 #define AUDIO_PROTOCOL_VERSION          1
 
 typedef enum {
-    AUDIO_CODEC_RAW_PCM                 = 0x00,  /**< 16-bit Signed Little-Endian PCM */
-    AUDIO_CODEC_OPUS                    = 0x01,  /**< Compressed Opus audio */
-    AUDIO_CODEC_ADPCM                   = 0x02   /**< IMA-ADPCM */
+    AUDIO_CODEC_RAW_PCM                 = 0x00,
+    AUDIO_CODEC_OPUS                    = 0x01,
+    AUDIO_CODEC_ADPCM                   = 0x02
 } AudioCodecType;
 
 typedef enum {
-    AUDIO_MSG_TYPE_STREAM_START         = 0x20,  /**< WakeNet / Speech onset trigger */
-    AUDIO_MSG_TYPE_STREAM_CHUNK         = 0x21,  /**< Active audio payload chunk */
-    AUDIO_MSG_TYPE_STREAM_END           = 0x22,  /**< VAD silence / max duration end */
-    AUDIO_MSG_TYPE_DOWNLINK_TTS         = 0x23   /**< SubBox -> ActionBox TTS / Chime audio */
+    AUDIO_MSG_TYPE_STREAM_START         = 0x20,
+    AUDIO_MSG_TYPE_STREAM_CHUNK         = 0x21,
+    AUDIO_MSG_TYPE_STREAM_END           = 0x22,
+    AUDIO_MSG_TYPE_DOWNLINK_TTS         = 0x23
 } AudioMsgType;
+
+#define MSG_TYPE_KEYWORD_EVENT 0x25
+
+typedef struct __attribute__((packed)) {
+    uint8_t  msg_type;
+    uint8_t  seq;
+    uint8_t  keyword_id;
+    uint8_t  confidence_pct;
+    uint32_t session_id;
+    uint32_t rel_time_ms;
+} ActionBoxKeywordEventPacket;
 
 #pragma pack(push, 1)
 
-/**
- * @brief Universal Audio Packet Header & Payload
- */
 typedef struct {
-    uint8_t  version;                            /**< Protocol version (AUDIO_PROTOCOL_VERSION) */
-    uint8_t  msg_type;                           /**< AudioMsgType */
-    char     source_node_id[32];                 /**< Originating ActionBox ID (e.g. "AB_BEDROOM_01") */
-    uint16_t sequence_num;                       /**< Monotonic sequence number for loss detection */
-    uint32_t timestamp_ms;                       /**< Millisecond timestamp */
-    uint8_t  codec;                              /**< AudioCodecType */
-    uint16_t sample_rate;                        /**< Sample rate in Hz (e.g. 16000) */
-    uint8_t  channels;                           /**< Channel count (1 = Mono) */
-    uint16_t payload_len;                        /**< Actual audio bytes in payload */
-    uint8_t  payload[SUBBOX_AUDIO_MAX_PACKET_PAYLOAD]; /**< Raw audio sample data */
+    uint8_t  version;
+    uint8_t  msg_type;
+    char     source_node_id[32];
+    uint16_t sequence_num;
+    uint32_t timestamp_ms;
+    uint8_t  codec;
+    uint16_t sample_rate;
+    uint8_t  channels;
+    uint16_t payload_len;
+    uint8_t  payload[SUBBOX_AUDIO_MAX_PACKET_PAYLOAD];
 } AudioPacket;
 
 #pragma pack(pop)

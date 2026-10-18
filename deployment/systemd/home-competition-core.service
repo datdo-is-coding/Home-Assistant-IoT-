@@ -1,0 +1,25 @@
+[Unit]
+Description=Home Competition Core V1
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=homecompetition
+Group=homecompetition
+WorkingDirectory=/opt/home-competition/Gateway
+EnvironmentFile=/etc/home-competition/core.env
+ExecStart=/opt/home-competition/.venv/bin/python -m gateway.core_v1 --data /var/lib/home-competition serve
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/home-competition
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

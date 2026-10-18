@@ -75,29 +75,24 @@ void main() {
       final repo = GatewaySmartHomeRepository(client);
       addTearDown(repo.dispose);
 
-      // 1. Initial vocabulary contains 'den'
       var vocab = await repo.getVocabulary();
       expect(vocab.length, 2);
       final ch1Item = vocab.firstWhere((v) => v.deviceId == 'livingroom-node01::ch1');
       expect(ch1Item.aliases, contains('den'));
       expect(ch1Item.aliases.contains('o_cam'), false);
 
-      // 2. Add alias 'o_cam' successfully
       await repo.addAlias('livingroom-node01::ch1', 'o_cam');
 
-      // Verify payload sent over the wire
       expect(aliasRequests.length, 1);
       expect(aliasRequests[0]['device_id'], 'livingroom-node01');
       expect(aliasRequests[0]['channel'], 'ch1');
       expect(aliasRequests[0]['alias'], 'o_cam');
       expect(aliasRequests[0]['action'], 'add');
 
-      // Verify canonical state in repo
       vocab = await repo.getVocabulary();
       var updatedItem = vocab.firstWhere((v) => v.deviceId == 'livingroom-node01::ch1');
       expect(updatedItem.aliases, contains('o_cam'));
 
-      // 3. Remove alias 'o_cam'
       await repo.removeAlias('livingroom-node01::ch1', 'o_cam');
       expect(aliasRequests.length, 2);
       expect(aliasRequests[1]['alias'], 'o_cam');
@@ -107,19 +102,16 @@ void main() {
       updatedItem = vocab.firstWhere((v) => v.deviceId == 'livingroom-node01::ch1');
       expect(updatedItem.aliases.contains('o_cam'), false);
 
-      // 4. Test Gateway Rejection / Network failure rollback
       shouldFail = true;
       await expectLater(
         repo.addAlias('livingroom-node01::ch1', 'o_cam_failed'),
         throwsA(isA<GatewayException>()),
       );
 
-      // Crucial: alias must NOT remain in vocabulary when gateway failed!
       vocab = await repo.getVocabulary();
       final failedItem = vocab.firstWhere((v) => v.deviceId == 'livingroom-node01::ch1');
       expect(failedItem.aliases.contains('o_cam_failed'), false);
 
-      // 5. Test diagnostic endpoint
       final diag = await client.getVoiceVocabularyDiagnostics();
       expect(diag['total_active_hotwords'], 45);
     });

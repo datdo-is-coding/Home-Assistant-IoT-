@@ -1,8 +1,3 @@
-/**
- * @file ws_asr.h
- * @brief High-Performance WebSocket Streaming ASR Client for Pi 4 (Sherpa-ONNX)
- */
-
 #pragma once
 
 #include "asr_engine.h"
@@ -33,11 +28,6 @@ public:
     const char* getFinalResult() const override;
     void reset() override;
 
-    /**
-     * @brief Wait for the final speech-to-text transcript from Pi 4
-     * @param timeout_ms Maximum time to wait for Pi 4 transcription
-     * @return true if transcript received, false on timeout
-     */
     bool waitForFinalResult(uint32_t timeout_ms = 2500);
 
     bool isConnected() const { return m_connected.load(); }
@@ -61,6 +51,7 @@ private:
     esp_websocket_client_handle_t m_client;
     std::atomic<bool> m_connected;
     std::atomic<bool> m_streaming;
+    std::atomic<bool> m_receiving_tts{false};
 
     mutable std::mutex m_mutex;
     CommandResultCallback m_cmd_result_cb;
@@ -71,6 +62,6 @@ private:
     std::atomic<bool> m_has_partial;
     SemaphoreHandle_t m_result_sem;
 
-    int16_t m_send_buf[480]; // 480 samples = 30ms = 960 bytes
+    int16_t m_send_buf[480];
     size_t  m_send_buf_count;
 };

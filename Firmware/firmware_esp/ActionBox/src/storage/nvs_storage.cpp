@@ -1,8 +1,3 @@
-/**
- * @file nvs_storage.cpp
- * @brief Thread-safe Persistent Configuration Storage Implementation
- */
-
 #include "nvs_storage.h"
 #include "board_pins.h"
 #include "app_config.h"
@@ -165,17 +160,14 @@ void nvs_storage_record_relay_state(uint8_t channel, RelayState state) {
     if (channel < 1 || channel > BOARD_RELAY_CHANNEL_COUNT) return;
     uint8_t idx = channel - 1;
 
-    /* Only record if channel is configured for restore-last mode */
     if (s_cached_config.startup_modes[idx] != STARTUP_MODE_RESTORE_LAST) {
         return;
     }
 
-    /* Check if actually changed */
     if (s_cached_config.last_states[idx] == state) {
         return;
     }
 
-    /* Cooldown check to prevent flash exhaustion during rapid toggle tests (min 10s gap) */
     int64_t now_us = esp_timer_get_time();
     int64_t elapsed_ms = (now_us - s_last_relay_save_us) / 1000;
     if (elapsed_ms < 10000) {

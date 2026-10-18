@@ -28,12 +28,12 @@ services:
       TZ: Asia/Ho_Chi_Minh
       PGTZ: Asia/Ho_Chi_Minh
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_data:/var/lib/postgresql/data
 
-  # 3. Web UI quản lý Database (Adminer) - Truy cập qua http://localhost:8080
+  # 3. Web UI quản lý Database (Adminer) - Truy cập qua http://localhost:8080 (chỉ trên localhost)
   adminer:
     image: adminer:latest
     container_name: iot_adminer
@@ -41,7 +41,7 @@ services:
     environment:
       TZ: Asia/Ho_Chi_Minh
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       - postgres
 

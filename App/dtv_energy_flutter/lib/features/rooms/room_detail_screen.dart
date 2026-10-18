@@ -32,7 +32,6 @@ class RoomDetailScreen extends ConsumerWidget {
     final roomDevices = allDevices.where((d) => d.roomId == roomId).toList();
     final activeCount = roomDevices.where((d) => d.isOn).length;
 
-    // Grouping
     final lights = roomDevices.where((d) => d.type == DeviceType.light).toList();
     final climate = roomDevices.where((d) => d.type == DeviceType.fan || d.type == DeviceType.airConditioner).toList();
     final sockets = roomDevices.where((d) => d.type == DeviceType.socket).toList();
@@ -107,7 +106,7 @@ class RoomDetailScreen extends ConsumerWidget {
           : CustomScrollView(
               physics: const BouncingScrollPhysics(),
               slivers: [
-                // Header section
+
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                   sliver: SliverToBoxAdapter(
@@ -159,7 +158,6 @@ class RoomDetailScreen extends ConsumerWidget {
                           ],
                         ),
 
-                        // Room Environmental Telemetry Bar (if available)
                         if (room.temperature != null || room.humidity != null) ...[
                           const SizedBox(height: 16),
                           Container(
@@ -257,7 +255,6 @@ class RoomDetailScreen extends ConsumerWidget {
                     ),
                   ),
 
-                // Device Categories
                 if (lights.isNotEmpty) ...[
                   _buildCategoryHeader('Chiếu sáng · Lights (${lights.length})'),
                   _buildDeviceGrid(context, ref, lights),

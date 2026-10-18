@@ -1,8 +1,3 @@
-/**
- * @file sound_player.cpp
- * @brief Zero-Latency Acoustic Feedback & I2S Speaker Driver for SubBox Implementation
- */
-
 #include "sound_player.h"
 #include "board_pins.h"
 #include "config/subbox_config.h"
@@ -16,6 +11,7 @@
 #include "freertos/semphr.h"
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "esp_timer.h"
 
 static const char* TAG = "SOUND_PLAYER";
 
@@ -23,7 +19,7 @@ static const char* TAG = "SOUND_PLAYER";
 #define M_PI 3.14159265358979323846
 #endif
 
-#define SOUND_SAMPLE_RATE       SUBBOX_AUDIO_SAMPLE_RATE /* 16000 Hz */
+#define SOUND_SAMPLE_RATE       SUBBOX_AUDIO_SAMPLE_RATE
 #define SOUND_DMA_FRAME_SAMPLES 256
 
 SoundPlayer& SoundPlayer::instance() {
@@ -34,6 +30,8 @@ SoundPlayer& SoundPlayer::instance() {
 SoundPlayer::SoundPlayer()
     : m_initialized(false),
       m_playing(false),
+      m_streaming_pcm(false),
+      m_last_chunk_time_us(0),
       m_i2s_handle(nullptr),
       m_queue(nullptr),
       m_task_handle(nullptr),
@@ -71,7 +69,6 @@ esp_err_t SoundPlayer::init() {
     m_mutex = xSemaphoreCreateMutex();
     if (!m_mutex) return ESP_ERR_NO_MEM;
 
-    // 1. Configure Amplifier Shutdown (SD) Pin
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
@@ -83,9 +80,8 @@ esp_err_t SoundPlayer::init() {
         ESP_LOGE(TAG, "Failed to configure SD GPIO: %s", esp_err_to_name(err));
         return err;
     }
-    enableAmp(false); // Default mute to prevent idle hiss
+    enableAmp(false);
 
-    // 2. Configure I2S Channel for MAX98357A
     i2s_chan_config_t chan_cfg = {
         .id = I2S_NUM_1,
         .role = I2S_ROLE_MASTER,
@@ -119,7 +115,6 @@ esp_err_t SoundPlayer::init() {
         },
     };
 
-    // Duplicate mono audio to both left & right slots so MAX98357A receives audio regardless of SD pin resistor
     std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
 
     err = i2s_channel_init_std_mode(tx_handle, &std_cfg);
@@ -134,7 +129,6 @@ esp_err_t SoundPlayer::init() {
         return err;
     }
 
-    // 3. Create Asynchronous Playback Queue & Worker Task
     m_queue = xQueueCreate(4, sizeof(SoundType));
     if (!m_queue) {
         ESP_LOGE(TAG, "Failed to allocate sound player queue");
@@ -156,7 +150,7 @@ esp_err_t SoundPlayer::init() {
 }
 
 void SoundPlayer::enableAmp(bool enable) {
-    // MAX98357A SD_MODE: Active LOW shutdown. High = Enabled, Low = Mute/Shutdown
+
     gpio_set_level(BOARD_PIN_SPEAKER_SD, enable ? 1 : 0);
 }
 
@@ -169,9 +163,8 @@ void SoundPlayer::generateTone(std::vector<int16_t>& out, float freq_hz, float d
 
     float angular_freq = 2.0f * (float)M_PI * freq_hz / (float)SOUND_SAMPLE_RATE;
     float decay_rate = decay / (float)samples;
-    float max_ampl = volume * 28000.0f; // Scale to ~85% peak without clipping
+    float max_ampl = volume * 28000.0f;
 
-    // Smooth 5ms attack to eliminate clicks
     size_t attack_samples = static_cast<size_t>(0.005f * SOUND_SAMPLE_RATE);
     if (attack_samples == 0) attack_samples = 1;
 
@@ -200,6 +193,7 @@ bool SoundPlayer::isPlaying() const {
 
 void SoundPlayer::stop() {
     m_playing = false;
+    m_streaming_pcm = false;
     enableAmp(false);
 }
 
@@ -210,21 +204,22 @@ void SoundPlayer::playRawInternal(const int16_t* pcm, size_t samples) {
 
     m_playing = true;
     enableAmp(true);
-    vTaskDelay(pdMS_TO_TICKS(10)); // Allow amp to wake cleanly
+    vTaskDelay(pdMS_TO_TICKS(10));
 
     size_t bytes_to_write = samples * sizeof(int16_t);
     size_t bytes_written = 0;
 
     i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, pdMS_TO_TICKS(2000));
 
-    // Pad with brief silence to let DMA ringbuffer drain completely
     int16_t silence_buf[SOUND_DMA_FRAME_SAMPLES] = {0};
     size_t pad_written = 0;
     i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, pdMS_TO_TICKS(100));
 
-    vTaskDelay(pdMS_TO_TICKS(30)); // Settle time before muting amp
-    enableAmp(false);
-    m_playing = false;
+    vTaskDelay(pdMS_TO_TICKS(30));
+    if (!m_streaming_pcm) {
+        enableAmp(false);
+        m_playing = false;
+    }
 }
 
 bool SoundPlayer::playPcm(const int16_t* pcm, size_t samples) {
@@ -240,16 +235,79 @@ bool SoundPlayer::playPcm(const int16_t* pcm, size_t samples) {
     return true;
 }
 
+bool SoundPlayer::startPcmStream() {
+    if (!m_initialized) return false;
+
+    auto mutex = static_cast<SemaphoreHandle_t>(m_mutex);
+    if (!mutex || xSemaphoreTake(mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return false;
+    }
+
+    m_playing = true;
+    m_streaming_pcm = true;
+    m_last_chunk_time_us = esp_timer_get_time();
+    enableAmp(true);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    xSemaphoreGive(mutex);
+    return true;
+}
+
+bool SoundPlayer::streamPcmChunk(const int16_t* pcm, size_t samples) {
+    if (!m_initialized || !pcm || samples == 0 || !m_i2s_handle) {
+        return false;
+    }
+
+    auto mutex = static_cast<SemaphoreHandle_t>(m_mutex);
+    if (!mutex || xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return false;
+    }
+
+    auto tx_handle = static_cast<i2s_chan_handle_t>(m_i2s_handle);
+    size_t bytes_to_write = samples * sizeof(int16_t);
+    size_t bytes_written = 0;
+    esp_err_t err = i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, pdMS_TO_TICKS(500));
+    m_last_chunk_time_us = esp_timer_get_time();
+    xSemaphoreGive(mutex);
+    return (err == ESP_OK);
+}
+
+void SoundPlayer::finishPcmStream() {
+    if (!m_initialized) {
+        m_playing = false;
+        m_streaming_pcm = false;
+        return;
+    }
+
+    auto mutex = static_cast<SemaphoreHandle_t>(m_mutex);
+    if (mutex && xSemaphoreTake(mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        if (m_i2s_handle) {
+            auto tx_handle = static_cast<i2s_chan_handle_t>(m_i2s_handle);
+            int16_t silence_buf[SOUND_DMA_FRAME_SAMPLES] = {0};
+            size_t pad_written = 0;
+            i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, pdMS_TO_TICKS(100));
+        }
+        vTaskDelay(pdMS_TO_TICKS(30));
+        enableAmp(false);
+        m_playing = false;
+        m_streaming_pcm = false;
+        xSemaphoreGive(mutex);
+    } else {
+        enableAmp(false);
+        m_playing = false;
+        m_streaming_pcm = false;
+    }
+}
+
 void SoundPlayer::playbackTask(void* pvParameters) {
     auto* self = static_cast<SoundPlayer*>(pvParameters);
     SoundType type;
     std::vector<int16_t> buffer;
-    buffer.reserve(SOUND_SAMPLE_RATE); // 1s buffer
+    buffer.reserve(SOUND_SAMPLE_RATE);
 
     ESP_LOGI(TAG, "SubBox Sound Player Task started on Core 1.");
 
     while (1) {
-        if (xQueueReceive(static_cast<QueueHandle_t>(self->m_queue), &type, portMAX_DELAY) == pdTRUE) {
+        if (xQueueReceive(static_cast<QueueHandle_t>(self->m_queue), &type, pdMS_TO_TICKS(100)) == pdTRUE) {
             auto mutex = static_cast<SemaphoreHandle_t>(self->m_mutex);
             if (xSemaphoreTake(mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
                 continue;
@@ -259,14 +317,14 @@ void SoundPlayer::playbackTask(void* pvParameters) {
 
             switch (type) {
                 case SoundType::WAKE: {
-                    // "Hi ESP" wake sound: crisp, harmonic, bright double-tone (A5 -> E6)
+
                     self->generateTone(buffer, 880.0f,  0.060f, 0.45f, 4.0f);
                     self->generateTone(buffer, 1318.5f, 0.090f, 0.50f, 3.5f);
                     break;
                 }
 
                 case SoundType::SUCCESS: {
-                    // Command confirmed: pleasant ascending major triad (D5 -> G5 -> D6)
+
                     self->generateTone(buffer, 587.33f,  0.075f, 0.45f, 3.5f);
                     self->generateTone(buffer, 783.99f,  0.080f, 0.48f, 3.2f);
                     self->generateTone(buffer, 1174.66f, 0.160f, 0.52f, 2.5f);
@@ -274,7 +332,7 @@ void SoundPlayer::playbackTask(void* pvParameters) {
                 }
 
                 case SoundType::ERROR: {
-                    // Command unrecognized or failed: polite descending double blip (A4 -> E4)
+
                     self->generateTone(buffer, 440.0f, 0.080f, 0.45f, 4.0f);
                     self->generateSilence(buffer, 0.035f);
                     self->generateTone(buffer, 329.63f, 0.140f, 0.45f, 3.2f);
@@ -282,7 +340,7 @@ void SoundPlayer::playbackTask(void* pvParameters) {
                 }
 
                 case SoundType::BOOTUP: {
-                    // Boot ready chime: welcoming C-major chord progression
+
                     self->generateTone(buffer, 523.25f,  0.090f, 0.40f, 3.0f);
                     self->generateTone(buffer, 659.25f,  0.090f, 0.42f, 3.0f);
                     self->generateTone(buffer, 783.99f,  0.100f, 0.45f, 2.8f);
@@ -296,6 +354,11 @@ void SoundPlayer::playbackTask(void* pvParameters) {
             }
 
             xSemaphoreGive(mutex);
+        }
+
+        if (self->m_streaming_pcm && (esp_timer_get_time() - self->m_last_chunk_time_us > 800000LL)) {
+            ESP_LOGW(TAG, "PCM stream timeout (>800ms inactive), finishing stream automatically");
+            self->finishPcmStream();
         }
     }
 }

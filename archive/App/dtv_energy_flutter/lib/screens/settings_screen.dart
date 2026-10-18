@@ -39,10 +39,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadConfig() async {
     setState(() => _isTesting = true);
 
-    // Test server connection
     final online = await _service.testServerConnection();
 
-    // Get ESP IPs from server
     String s3Ip = "192.168.1.11";
     String wroomIp = "192.168.1.12";
     bool espOnline = false;
@@ -105,7 +103,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(children: [
 
-          // ── CONNECTION DIAGRAM ─────────────────────
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -130,15 +127,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
           ),
-          // ── THEME SELECTOR CARD ───
+
           _themeSelectorCard(),
           const SizedBox(height: 14),
 
-          // ── SOUNDSCAPES ACOUSTIC EFFECTS ───
           _soundscapesCard(),
           const SizedBox(height: 14),
 
-          // ── RUST SERVER URL (only config app needs) ───
           _buildCard(
             icon: Icons.dns,
             title: "Rust Core Server",
@@ -163,7 +158,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 14),
 
-          // ── ESP32 IPs (managed ON SERVER, displayed here) ───
           _buildCard(
             icon: Icons.sensors,
             title: "ESP32 Nodes (cấu hình trên server)",
@@ -192,7 +186,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 14),
 
-          // ── NOTIFICATION PUSH TEST ───
           _buildCard(
             icon: Icons.notifications_active_rounded,
             title: "🔔 Push Notifications (Cảnh Báo System & TinyML)",
@@ -227,7 +220,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 20),
 
-          // ── TEST BUTTON ───
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -246,7 +238,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
 
-          // ── SYSTEM INFO ───
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -365,7 +356,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // === THEME SELECTOR CARD ===
   Widget _themeSelectorCard() {
     return ListenableBuilder(
       listenable: ThemeService(),

@@ -2,14 +2,12 @@
 
 #include "driver/gpio.h"
 
-// GPIO numbers, not ESP32-S3-WROOM-1 module pad numbers.
-// Source: IoT_Board_V2 schematic and the supplied MCU pinout.
 #define BOARD_RELAY_CHANNEL_COUNT       3
 #define BOARD_RELAY_TYPE_MONOSTABLE     0
 #define BOARD_RELAY_TYPE_LATCHING_DUAL  1
 #define BOARD_RELAY_DRIVE_TYPE          BOARD_RELAY_TYPE_LATCHING_DUAL
 #define BOARD_RELAY_ACTIVE_LEVEL        1
-// HKE3-LT-S: AO3400 gate HIGH for 50 ms, then LOW (confirmed by board designer).
+
 #define BOARD_RELAY_LATCH_PULSE_MS      50
 #define BOARD_PIN_RELAY_CH1_SET         GPIO_NUM_16
 #define BOARD_PIN_RELAY_CH1_RESET       GPIO_NUM_15
@@ -28,7 +26,6 @@
 #define BOARD_LED_ACTIVE_LEVEL         1
 #define BOARD_PIN_LED_VOICE            BOARD_PIN_LED_CH2
 
-// Poll one RX at a time on UART1; UART0 remains available for debug.
 #define BOARD_BL0942_MULTIPLEX_RX       1
 #define BOARD_BL0942_UART_NUM_CH1       UART_NUM_1
 #define BOARD_BL0942_UART_BAUDRATE      4800
@@ -48,7 +45,6 @@
 #define BOARD_PIN_MIC_DIN              GPIO_NUM_8
 #define BOARD_MIC_I2S_PORT             I2S_NUM_0
 
-// Reserved peripherals; IR/I2C application drivers are not enabled.
 #define BOARD_PIN_IR_RX                GPIO_NUM_39
 #define BOARD_PIN_IR_TX                GPIO_NUM_40
 #define BOARD_PIN_I2C_SDA              GPIO_NUM_41

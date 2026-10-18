@@ -23,7 +23,6 @@ class DeviceCard extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     final colors = theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
-    // Accent color based on device type
     final Color accentColor = switch (device.type) {
       DeviceType.light => colors.lightAccent,
       DeviceType.fan => colors.fanAccent,
@@ -74,7 +73,7 @@ class DeviceCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Row 1: Squircle Icon (Direct toggle on tap) + Favorite & Chevron
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -142,7 +141,6 @@ class DeviceCard extends StatelessWidget {
                     ],
                   ),
 
-                  // Middle Block: Device Name & Subtitle
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -172,7 +170,6 @@ class DeviceCard extends StatelessWidget {
                     ],
                   ),
 
-                  // Row 4: Status Indicator Dot & Scaled Switch
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.center,

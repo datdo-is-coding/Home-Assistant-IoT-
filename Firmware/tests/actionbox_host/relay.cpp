@@ -47,7 +47,7 @@ int main() {
     }
     all_coils_low();
     assert(led_driver_init() == ESP_OK);
-    led_set_pattern(3, LED_PATTERN_ON); // no LED3 exists on this PCB
+    led_set_pattern(3, LED_PATTERN_ON);
     led_driver_tick();
     for (int ch = 1; ch <= 3; ++ch) {
         assert(relay_on(ch) == ESP_OK);
@@ -74,8 +74,6 @@ int main() {
     assert(relay_get_state(3) != RELAY_STATE_ON);
     all_coils_low();
 
-    // A task-context emergency arriving during a SET must wait for that pulse,
-    // then RESET every channel.
     std::thread on([] { relay_on(1); });
     bool set_active = false;
     for (int i = 0; i < 1000 && !set_active; ++i) {
@@ -87,8 +85,7 @@ int main() {
     on.join();
     for (int ch = 1; ch <= 3; ++ch) assert(relay_get_state(ch) == RELAY_STATE_OFF);
     all_coils_low();
-    // An ON that started before the emergency, but has not acquired the mutex,
-    // must not capture the new emergency generation and turn back on afterwards.
+
     hold_deferred_take = true;
     esp_err_t pending_result = ESP_OK;
     std::thread pending([&] { defer_next_take = true; pending_result = relay_on(2); });
@@ -98,7 +95,6 @@ int main() {
     pending.join();
     assert(pending_result != ESP_OK && relay_get_state(2) == RELAY_STATE_OFF);
 
-    // The same cancellation must hold across the inrush stagger wait.
     assert(relay_on(1) == ESP_OK);
     std::thread stagger([&] { pending_result = relay_on(2); });
     vTaskDelay(10);

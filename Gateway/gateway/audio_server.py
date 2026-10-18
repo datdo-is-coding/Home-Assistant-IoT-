@@ -45,18 +45,17 @@ import config
 
 logger = logging.getLogger("audio_server")
 
-
 class StreamArbiter:
     """Đo lường năng lượng âm thanh (RMS) đa node để định vị phòng người dùng đang đứng."""
 
     def __init__(self, gateway=None):
         self.gateway = gateway
-        # node_id -> {"rms_values": [...], "start_time": float}
+
         self.active_streams: dict = {}
 
     def register_start(self, node_id: str):
         now = time.time()
-        # Dọn các stream cũ hơn 5 giây
+
         self.active_streams = {nid: d for nid, d in self.active_streams.items() if (now - d["start_time"]) < 5.0}
         self.active_streams[node_id] = {"rms_values": [], "start_time": now}
 
@@ -96,7 +95,6 @@ class StreamArbiter:
                 return room
         return None
 
-
 class AudioServer:
     """WebSocket server handling ESP32 two-way audio streaming."""
 
@@ -106,14 +104,14 @@ class AudioServer:
         self.port = config.WS_AUDIO_PORT
         self.server = None
         self._running = False
-        # node_id -> websocket, cho phép gửi relay command trực tiếp trên socket audio
+
         self._ws_nodes: dict = {}
-        # Tập hợp tất cả các websocket loa ESP32 vật lý đang hoạt động
+
         self._active_speakers: set = set()
         self._playback_lock = asyncio.Lock()
-        # ponytail: one recognizer worker; add independent model workers only after profiling.
+
         self._asr_lock = asyncio.Lock()
-        self._active_voice_session = None  # {"node_id": str, "timestamp": float}
+        self._active_voice_session = None
         self.arbiter = StreamArbiter(gateway=self.gateway)
 
     def _is_ws_alive(self, ws) -> bool:
@@ -121,26 +119,111 @@ class AudioServer:
         if ws is None:
             return False
         try:
-            # websockets >= 10.x uses .open; older versions use not .closed
+
             if hasattr(ws, 'open'):
                 return bool(ws.open)
             if hasattr(ws, 'closed'):
                 return not bool(ws.closed)
-            return True  # fallback: assume alive
+            return True
         except Exception:
             return False
+
+    def _extract_token(self, websocket, path=None) -> Optional[str]:
+        """Extract Bearer token from headers or query parameters."""
+        headers = None
+        if hasattr(websocket, "request_headers"):
+            headers = websocket.request_headers
+        elif hasattr(websocket, "request") and hasattr(websocket.request, "headers"):
+            headers = websocket.request.headers
+        elif hasattr(websocket, "headers"):
+            headers = websocket.headers
+
+        if headers:
+            auth_header = headers.get("Authorization") or headers.get("authorization")
+            if auth_header:
+                parts = auth_header.strip().split()
+                if len(parts) == 2 and parts[0].lower() == "bearer":
+                    return parts[1]
+                elif len(parts) == 1:
+                    return parts[0]
+            token_h = headers.get("X-API-Token") or headers.get("token") or headers.get("Token")
+            if token_h:
+                return token_h.strip()
+
+        q_path = path or getattr(websocket, "path", "")
+        if not q_path and hasattr(websocket, "request"):
+            q_path = getattr(websocket.request, "path", "")
+        if q_path and "?" in q_path:
+            import urllib.parse
+            qs = urllib.parse.parse_qs(q_path.split("?", 1)[1])
+            token_val = qs.get("token") or qs.get("access_token")
+            if token_val:
+                return token_val[0]
+
+        return None
+
+    def _is_token_valid(self, token: Optional[str], node_id: Optional[str] = None) -> bool:
+        """Kiểm tra token có khớp với WS_AUDIO_TOKEN hoặc WS_AUDIO_TOKENS."""
+        if not token:
+            return False
+
+        global_tok = getattr(config, "WS_AUDIO_TOKEN", "")
+        if global_tok and token == global_tok:
+            return True
+
+        tokens = getattr(config, "WS_AUDIO_TOKENS", {})
+        if isinstance(tokens, dict):
+            if node_id and tokens.get(node_id) == token:
+                return True
+            if token in tokens:
+                bound_id = tokens[token]
+                if not node_id or bound_id == node_id:
+                    return True
+            if not node_id and token in tokens.values():
+                return True
+            if node_id and token in tokens.values():
+                for nid, tok in tokens.items():
+                    if tok == token and nid == node_id:
+                        return True
+        elif isinstance(tokens, (list, set, tuple)):
+            if token in tokens:
+                return True
+
+        return False
 
     async def start(self):
         """Start the WebSocket server."""
         self._running = True
         logger.info(f"Starting Audio WebSocket server on {self.host}:{self.port}")
+
+        ssl_context = None
+        cert_file = getattr(config, "WS_AUDIO_TLS_CERT", "")
+        key_file = getattr(config, "WS_AUDIO_TLS_KEY", "")
+        if cert_file and key_file:
+            import os, ssl
+            if os.path.isfile(cert_file) and os.path.isfile(key_file):
+                try:
+                    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+                    logger.info(f"Enabled TLS for Audio WebSocket server using {cert_file}")
+                except Exception as e:
+                    logger.error(f"Failed to load TLS certificates: {e}")
+            else:
+                logger.warning(f"WS_AUDIO_TLS_CERT or KEY file not found: {cert_file}, {key_file}")
+
+        serve_kwargs = {
+            "ping_interval": 20,
+            "ping_timeout": 30,
+            "max_size": 10 * 1024 * 1024
+        }
+        if ssl_context:
+            serve_kwargs["ssl"] = ssl_context
+
         self.server = await websockets.serve(
             self._handle_client,
             self.host,
             self.port,
-            ping_interval=20,
-            ping_timeout=30,
-            max_size=10 * 1024 * 1024  # 10MB max message size
+            **serve_kwargs
         )
         logger.info("Audio WebSocket server running and ready for ESP32 connections")
 
@@ -154,11 +237,23 @@ class AudioServer:
 
     async def _handle_client(self, websocket, path=None):
         """Handle an active ESP32 WebSocket connection."""
-        client_addr = websocket.remote_address
+        client_addr = getattr(websocket, "remote_address", "unknown")
         logger.info(f"🔗 ESP32 client connected from {client_addr}")
+
+        auth_required = bool(getattr(config, "WS_AUDIO_TOKEN", "") or getattr(config, "WS_AUDIO_TOKENS", {}))
+        extracted_token = self._extract_token(websocket, path)
+        is_authenticated = False
+        authenticated_token = None
+
+        if not auth_required:
+            is_authenticated = True
+        elif extracted_token and self._is_token_valid(extracted_token):
+            is_authenticated = True
+            authenticated_token = extracted_token
 
         client_node_id = None
         websocket.has_speaker = True
+        websocket.authenticated = is_authenticated
 
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
@@ -168,20 +263,65 @@ class AudioServer:
         record_start_time = 0.0
         total_frames = 0
         client_mac = None
-        installed = {}  # channel -> device_fullname for WS-commandable node
+        installed = {}
+
+        async def _bind_client_node(target_node_id: str) -> bool:
+            nonlocal client_node_id
+            if not target_node_id:
+                return False
+            if client_node_id and client_node_id != target_node_id:
+                logger.warning(f"Socket already bound to '{client_node_id}', cannot re-bind to '{target_node_id}' from {client_addr}")
+                return False
+
+            old_ws = self._ws_nodes.get(target_node_id)
+            if old_ws and old_ws is not websocket and self._is_ws_alive(old_ws):
+                logger.warning(f"Closing existing active connection for node '{target_node_id}' due to new connection from {client_addr}")
+                self._active_speakers.discard(old_ws)
+                try:
+                    if hasattr(old_ws, "close"):
+                        await old_ws.close(1000, "Superseded by new connection")
+                except Exception:
+                    pass
+
+            client_node_id = target_node_id
+            self._ws_nodes[target_node_id] = websocket
+            websocket.node_id = target_node_id
+            return True
 
         try:
             async for message in websocket:
                 if isinstance(message, str):
-                    # ─── Text Control Message ───
+
                     try:
                         cmd = json.loads(message)
                         msg_type = cmd.get("type", "")
-                        # Compact protocol (protocol_spec.md): {"t":"..."} 
+
                         compact_type = cmd.get("t")
 
-                        # ── COMPACT: HELLO / register / provision handshake ──
                         if compact_type == "hello":
+                            hello_token = cmd.get("token") or cmd.get("auth_token")
+                            hello_id = cmd.get("id")
+
+                            if auth_required and not is_authenticated:
+                                if hello_token and self._is_token_valid(hello_token, node_id=hello_id):
+                                    is_authenticated = True
+                                    authenticated_token = hello_token
+                                    websocket.authenticated = True
+                                else:
+                                    logger.warning(f"Unauthorized hello from {client_addr}: token missing or invalid")
+                                    await websocket.send(json.dumps({"t": "error", "error": "unauthorized"}))
+                                    if hasattr(websocket, "close"):
+                                        await websocket.close(1008, "Unauthorized")
+                                    return
+
+                            if auth_required and is_authenticated and hello_id and authenticated_token:
+                                if not self._is_token_valid(authenticated_token, node_id=hello_id):
+                                    logger.warning(f"Token forbidden for node '{hello_id}' from {client_addr}")
+                                    await websocket.send(json.dumps({"t": "error", "error": "forbidden"}))
+                                    if hasattr(websocket, "close"):
+                                        await websocket.close(1008, "Forbidden")
+                                    return
+
                             client_mac = (cmd.get("mac") or "").upper()
                             handled = None
                             if self.gateway and hasattr(self.gateway, "registry"):
@@ -189,14 +329,24 @@ class AudioServer:
                                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                     self.gateway.broadcast_event("node_hello", cmd)
                             node_id = handled.get("node_id") if handled else None
-                            if not node_id and cmd.get("id"):
-                                node_id = cmd.get("id")
+                            if not node_id and hello_id:
+                                node_id = hello_id
 
                             if node_id:
-                                client_node_id = node_id
-                                self._ws_nodes[client_node_id] = websocket
-                                is_spk = cmd.get("speaker") is not False and "subbox" not in str(node_id).lower()
+                                bound_ok = await _bind_client_node(node_id)
+                                if not bound_ok:
+                                    logger.warning(f"Failed to bind node identity '{node_id}' from {client_addr}")
+                                    await websocket.send(json.dumps({"t": "error", "error": "conflict"}))
+                                    if hasattr(websocket, "close"):
+                                        await websocket.close(1008, "Identity conflict")
+                                    return
+                                is_subbox = "subbox" in str(node_id).lower() or str(node_id).upper().startswith("SB") or (cmd.get("audio_relay") is True and cmd.get("speaker") is not False)
+                                if is_subbox:
+                                    websocket.is_subbox = True
+                                    websocket.has_speaker = True
+                                is_spk = getattr(websocket, "has_speaker", False) or cmd.get("speaker") is True or ("actionbox" not in str(node_id).lower() and not str(node_id).upper().startswith("AB") and cmd.get("speaker") is not False)
                                 websocket.has_speaker = is_spk
+                                websocket.node_id = node_id
                                 websocket.asr_only = cmd.get("asr_only") is True
                                 websocket.audio_relay = cmd.get("audio_relay") is True
                                 if is_spk:
@@ -210,7 +360,7 @@ class AudioServer:
                                 logger.info(f"✅ Node '{node_id}' registered for WS relay + speaker broadcast (pool: {len(self._active_speakers)})")
                                 await websocket.send(json.dumps({"t": "hello_ok", "id": node_id}))
                             elif handled and handled.get("action") == "cfg_mismatch":
-                                # re-provision
+
                                 if self.gateway and hasattr(self.gateway, "mqtt"):
                                     cfg = self.gateway.registry.get_provision_payload(node_id)
                                     if cfg:
@@ -224,9 +374,14 @@ class AudioServer:
                                 logger.warning(f"hello_ignored: {cmd}")
                             continue
 
-                        # ── COMPACT: relay ACK ──
                         elif compact_type == "ack":
+                            if not is_authenticated:
+                                logger.warning(f"Rejected ACK from unauthenticated socket {client_addr}")
+                                continue
                             nid = cmd.get("id")
+                            if not client_node_id or nid != client_node_id:
+                                logger.warning(f"Rejected spoofed ACK: socket node_id='{client_node_id}', payload id='{nid}' from {client_addr}")
+                                continue
                             rl = cmd.get("rl")
                             if self.gateway and nid:
                                 self.gateway.mqtt.record_compact_ack(nid, cmd)
@@ -238,14 +393,17 @@ class AudioServer:
                                     self.gateway.broadcast_event("node_status",
                                         {"node_id": nid, "rl_state": rl, "seq": cmd.get("seq"),
                                          "ch1": rl[0] if len(rl)>0 else None,
-                                         "ch2": rl[1] if len(rl)>1 else None})
+                                         "ch2": rl[1] if len(rl)>1 else None,
+                                         "ch3": rl[2] if len(rl)>2 else None})
                                 logger.info(f"ACK {nid} rl={rl} seq={cmd.get('seq')}")
                             continue
 
-                        # ── COMPACT: node requests config (mac-based) ──
                         elif compact_type == "need_cfg":
+                            if not is_authenticated:
+                                logger.warning(f"Rejected need_cfg from unauthenticated socket {client_addr}")
+                                continue
                             mac = (cmd.get("mac") or "").upper()
-                            # find node by mac in registry
+
                             found = None
                             if self.gateway:
                                 nid = self.gateway.registry.find_node_by_mac(mac) if hasattr(self.gateway.registry, "find_node_by_mac") else None
@@ -258,8 +416,21 @@ class AudioServer:
                                 await websocket.send(json.dumps({"t": "pending", "mac": mac}))
                             continue
 
-                        # ── LEGACY: start / stop / ping (giữ nguyên) ──
                         if msg_type == "start":
+                            if not is_authenticated:
+                                logger.warning(f"Rejected start from unauthenticated socket {client_addr}")
+                                await websocket.send(json.dumps({"type": "error", "error": "unauthorized"}))
+                                continue
+
+                            start_nid = cmd.get("node_id")
+                            if client_node_id and start_nid and start_nid != client_node_id:
+                                logger.warning(f"Rejected start with mismatched node_id '{start_nid}' (socket bound to '{client_node_id}') from {client_addr}")
+                                continue
+                            if not client_node_id and start_nid:
+                                bound_ok = await _bind_client_node(start_nid)
+                                if not bound_ok:
+                                    continue
+
                             websocket.asr_only = cmd.get("asr_only") is True
                             websocket.audio_relay = cmd.get("audio_relay") is True
                             if self._playback_lock.locked():
@@ -276,18 +447,32 @@ class AudioServer:
                             recording = True
                             record_start_time = time.monotonic()
                             total_frames = 0
-                            if cmd.get("node_id"):
-                                client_node_id = cmd.get("node_id")
                             curr_node = client_node_id or "node_voice"
                             self._ws_nodes[curr_node] = websocket
-                            if cmd.get("speaker") is False or "subbox" in str(curr_node).lower():
+                            if not getattr(websocket, "is_subbox", False):
+                                websocket.node_id = curr_node
+                            is_dedicated_mic = (
+                                "actionbox" in str(curr_node).lower()
+                                or str(curr_node).upper().startswith("AB")
+                            )
+                            if is_dedicated_mic:
+                                websocket.current_source = curr_node
+                                if not getattr(websocket, "is_subbox", False):
+                                    websocket.has_speaker = False
+                                    self._active_speakers.discard(websocket)
+                                else:
+                                    websocket.has_speaker = True
+                                    self._active_speakers.add(websocket)
+                            elif cmd.get("speaker") is True or getattr(websocket, "has_speaker", False):
+                                websocket.has_speaker = True
+                                self._active_speakers.add(websocket)
+                            elif cmd.get("speaker") is False:
                                 websocket.has_speaker = False
                                 self._active_speakers.discard(websocket)
                             elif getattr(websocket, "has_speaker", True):
                                 self._active_speakers.add(websocket)
                             self.arbiter.register_start(curr_node)
 
-                            # Setup Opus decoder if needed
                             if codec == "opus" and HAS_OPUS:
                                 decoder = opuslib.Decoder(sample_rate, 1)
 
@@ -315,7 +500,6 @@ class AudioServer:
                             elapsed = now_ts - record_start_time
                             curr_node = client_node_id or "node_voice"
 
-                            # 1. Nếu đã có phiên giọng nói đang xử lý từ node khác trong 3.5s qua, suppress ngay để tránh xung đột
                             if self._active_voice_session and (now_ts - self._active_voice_session.get("timestamp", 0)) < 3.5:
                                 active_nid = self._active_voice_session.get("node_id")
                                 if active_nid and active_nid != curr_node:
@@ -346,7 +530,6 @@ class AudioServer:
                                 pcm_chunks.clear()
                                 continue
 
-                            # Khóa phiên giọng nói cho node chiếm ưu thế
                             self._active_voice_session = {"node_id": curr_node, "timestamp": now_ts}
 
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
@@ -355,7 +538,6 @@ class AudioServer:
                                 "type": "status", "state": "processing"
                             }))
 
-                            # Process the collected audio
                             if pcm_chunks:
                                 full_pcm = np.concatenate(pcm_chunks)
                                 await self._process_audio(
@@ -382,7 +564,7 @@ class AudioServer:
                         logger.warning(f"Invalid text frame: {message[:100]}")
 
                 elif isinstance(message, bytes) and recording:
-                    # ─── Binary Audio Data ───
+
                     total_frames += 1
 
                     if codec == "opus" and decoder:
@@ -396,7 +578,7 @@ class AudioServer:
                         except Exception as e:
                             logger.debug(f"Opus decode error: {e}")
                     else:
-                        # Raw PCM: 16-bit signed little-endian mono
+
                         raw_i16 = np.frombuffer(message, dtype=np.int16)
                         pcm_float = raw_i16.astype(np.float32) / 32768.0
                         pcm_chunks.append(pcm_float)
@@ -408,7 +590,6 @@ class AudioServer:
                             if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
                                 self.gateway.broadcast_event("audio_meter", {"rms": rms, "frames": total_frames})
 
-                    # ─── Server-side max duration check ───
                     elapsed = time.monotonic() - record_start_time
                     if elapsed > config.VAD_MAX_DURATION_S:
                         logger.info(
@@ -430,20 +611,17 @@ class AudioServer:
                             )
                         pcm_chunks.clear()
 
-        except websockets.exceptions.ConnectionClosed as e:
-            logger.info(f"ESP32 client disconnected: {client_addr} (code={e.code}, reason='{e.reason}')")
+        except Exception as e:
+            if websockets and hasattr(websockets, "exceptions") and isinstance(e, getattr(websockets.exceptions, "ConnectionClosed", ())):
+                logger.info(f"ESP32 client disconnected: {client_addr} (code={getattr(e, 'code', None)}, reason='{getattr(e, 'reason', '')}')")
+            else:
+                logger.error(f"Error handling WebSocket client {client_addr}: {e}")
             self._active_speakers.discard(websocket)
-            # remove node from ws registry
             for nid, ws in list(self._ws_nodes.items()):
                 if ws is websocket:
                     del self._ws_nodes[nid]
-            # Dọn dead sockets khỏi _active_speakers
             self._active_speakers = {ws for ws in self._active_speakers if self._is_ws_alive(ws)}
             logger.info(f"WS node still connected: {list(self._ws_nodes.keys())}, active speakers: {len(self._active_speakers)}")
-        except Exception as e:
-            self._active_speakers.discard(websocket)
-            self._active_speakers = {ws for ws in self._active_speakers if self._is_ws_alive(ws)}
-            logger.error(f"Error handling WebSocket client {client_addr}: {e}")
 
     def has_ws(self, node_id: str) -> bool:
         """Check if node has a stable WS audio connection (relay over WS available)."""
@@ -460,8 +638,8 @@ class AudioServer:
         ws = self._ws_nodes.get(node_id)
         if not self.has_ws(node_id):
             return False
-        ch = {"ch1": 1, "ch2": 2}.get(channel, 0)
-        if ch not in (1, 2):
+        ch = {"ch1": 1, "ch2": 2, "ch3": 3, 1: 1, 2: 2, 3: 3}.get(channel, 0)
+        if ch not in (1, 2, 3):
             return False
         s = 1 if action in ("turn_on", "open", "on") else 0
         payload = json.dumps({"t": "rl", "ch": ch, "s": s, "seq": seq})
@@ -471,7 +649,7 @@ class AudioServer:
             return True
         except Exception as e:
             logger.warning(f"WS relay to {node_id} failed: {e}")
-            # dọn socket hỏng
+
             self._ws_nodes.pop(node_id, None)
             return False
 
@@ -500,8 +678,6 @@ class AudioServer:
             logger.error("Gateway ASR engine not available")
             return
 
-        # ─── Step 1: Speech-to-Text with confidence scoring ───
-        # One model invocation at a time; reject overload instead of accumulating PCM.
         if self._asr_lock.locked():
             await websocket.send(json.dumps({"type": "transcript", "text": "", "accepted": False,
                                              "reason": "asr_busy"}))
@@ -512,7 +688,7 @@ class AudioServer:
             try:
                 text, confidence = await asyncio.shield(inference)
             except asyncio.CancelledError:
-                # A cancelled socket cannot release the model while its thread is running.
+
                 await inference
                 raise
 
@@ -525,7 +701,6 @@ class AudioServer:
             await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
             return
 
-        # If confidence is very low, ask user to repeat (don't blindly execute)
         from asr_engine import ASREngine
         if confidence < ASREngine.CONFIDENCE_LOW:
             logger.warning(f"ASR confidence too low ({confidence:.2f}): '{text}' — asking user to repeat")
@@ -551,22 +726,22 @@ class AudioServer:
         if getattr(websocket, "asr_only", False):
             return
 
-        # ─── Step 2-4: Process command through Gateway ───
         result = await self.gateway.process_voice_command(
             text, client_node_id=client_node_id, detected_room=detected_room
         )
         follow_up = result.get("follow_up", False)
-        await websocket.send(json.dumps({
-            "type": "command_result",
-            "verify": result.get("verify"),
-            "voice_reply": result.get("voice_reply"),
-            "follow_up": follow_up,
-        }))
-
-        # ─── Step 5: Stream audio back to ESP32 speaker (Unicast to caller) ───
         tts_audio = result.get("tts_audio")
         tts_format = result.get("tts_format", "pcm")
         voice_reply = result.get("voice_reply")
+        has_tts = bool(tts_audio or voice_reply)
+        await websocket.send(json.dumps({
+            "type": "command_result",
+            "verify": result.get("verify"),
+            "voice_reply": voice_reply,
+            "has_tts": has_tts,
+            "follow_up": follow_up,
+        }))
+
         if tts_audio and tts_format == "pcm":
             await self._send_pcm_stream(websocket, tts_audio, follow_up=follow_up)
         elif tts_audio and tts_format == "mp3":
@@ -594,7 +769,7 @@ class AudioServer:
                 if alive:
                     targets = [alive[0]]
         else:
-            # Broadcast tới tất cả các loa đang hoạt động
+
             targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
             if not targets and self._ws_nodes:
                 targets = [ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)]
@@ -622,42 +797,64 @@ class AudioServer:
 
     async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False, broadcast: bool = False):
         """Synthesize text to PCM and stream to ESP32 speaker(s) — unicast by default."""
-        if not getattr(websocket, "has_speaker", True) and not broadcast:
-            logger.info("Caller node has no speaker — skipping TTS audio stream")
-            return
-
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available")
             return
 
-        # Synthesize to PCM (16kHz, 16-bit, mono) — directly playable by ESP32 I2S
-        pcm_audio = await self.gateway.tts.synthesize_pcm(
-            text, sample_rate=config.AUDIO_SAMPLE_RATE
-        )
+        is_subbox = "subbox" in str(getattr(websocket, "node_id", "")).lower() or str(getattr(websocket, "node_id", "")).upper().startswith("SB")
+        has_spk = getattr(websocket, "has_speaker", False) or is_subbox
 
-        if pcm_audio:
-            targets = []
-            if broadcast and self._active_speakers:
-                targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
-            elif websocket and self._is_ws_alive(websocket):
-                targets = [websocket]
+        targets = []
+        if broadcast and self._active_speakers:
+            targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
+        elif has_spk and websocket and self._is_ws_alive(websocket):
+
+            targets = [websocket]
+        else:
+
+            subbox_spks = [
+                ws for ws in self._active_speakers
+                if self._is_ws_alive(ws) and ("subbox" in str(getattr(ws, "node_id", "")).lower() or str(getattr(ws, "node_id", "")).upper().startswith("SB"))
+            ]
+            if subbox_spks:
+                targets = [subbox_spks[0]]
             elif self._active_speakers:
                 alive = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
                 if alive:
                     targets = [alive[0]]
 
-            if targets:
-                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket)
+        if not targets:
+            logger.info("No speaker target found for voice reply — skipping TTS audio stream")
+            return
+
+        pcm_audio = await self.gateway.tts.synthesize_pcm(
+            text, sample_rate=config.AUDIO_SAMPLE_RATE
+        )
+
+        if pcm_audio:
+            await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket)
         else:
-            # Fallback: try sending MP3 if PCM conversion failed
+
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")
             mp3_audio = await self.gateway.tts.synthesize(text)
-            if mp3_audio and websocket and self._is_ws_alive(websocket):
-                await self._send_audio_stream_mp3(websocket, mp3_audio, follow_up=follow_up)
+            if mp3_audio:
+                for ws in targets:
+                    await self._send_audio_stream_mp3(ws, mp3_audio, follow_up=follow_up)
 
     async def _send_pcm_stream(self, websocket, pcm_bytes: bytes, follow_up: bool = False):
         """Single speaker wrapper for _broadcast_pcm_stream."""
-        await self._broadcast_pcm_stream([websocket], pcm_bytes, follow_up=follow_up)
+        is_subbox = "subbox" in str(getattr(websocket, "node_id", "")).lower() or str(getattr(websocket, "node_id", "")).upper().startswith("SB")
+        has_spk = getattr(websocket, "has_speaker", False) or is_subbox
+        if has_spk and websocket and self._is_ws_alive(websocket):
+            await self._broadcast_pcm_stream([websocket], pcm_bytes, follow_up=follow_up, initiator_ws=websocket)
+        else:
+            subbox_spks = [
+                ws for ws in self._active_speakers
+                if self._is_ws_alive(ws) and ("subbox" in str(getattr(ws, "node_id", "")).lower() or str(getattr(ws, "node_id", "")).upper().startswith("SB"))
+            ]
+            target = subbox_spks[0] if subbox_spks else next((ws for ws in self._active_speakers if self._is_ws_alive(ws)), None)
+            if target:
+                await self._broadcast_pcm_stream([target], pcm_bytes, follow_up=follow_up, initiator_ws=websocket)
 
     async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None):
         """
@@ -666,8 +863,7 @@ class AudioServer:
         Pacing is calibrated: 8 pre-buffer chunks (~512ms) then 70% real-time pacing (~45ms)
         so ESP32 512KB PSRAM DMA buffer never underflows.
         """
-        targets = [ws for ws in targets if getattr(ws, "has_speaker", True)
-                   and not getattr(ws, "audio_relay", False) and self._is_ws_alive(ws)]
+        targets = [ws for ws in targets if (getattr(ws, "has_speaker", False) or (getattr(ws, "has_speaker", True) and not getattr(ws, "audio_relay", False))) and self._is_ws_alive(ws)]
         if not targets:
             return
         async with self._playback_lock:
@@ -686,13 +882,11 @@ class AudioServer:
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
 
-            # Thông báo cho TẤT CẢ các ESP32 trong nhà tắt mic / mute wake word để chống tự kích hoạt (echo suppression)
             busy_msg = json.dumps({"type": "speaker_busy", "busy": True})
-            all_ws = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
-            if all_ws:
-                await asyncio.gather(*[ws.send(busy_msg) for ws in all_ws], return_exceptions=True)
+            all_nodes = list({ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)})
+            if all_nodes:
+                await asyncio.gather(*[ws.send(busy_msg) for ws in all_nodes], return_exceptions=True)
 
-            # Send start marker to all targets simultaneously
             start_msg = json.dumps({
                 "type": "audio_start",
                 "format": "pcm",
@@ -710,12 +904,10 @@ class AudioServer:
                 if not valid_targets:
                     return
 
-            # Chờ ESP32 parse JSON audio_start và chuyển state sang PLAYING
             await asyncio.sleep(0.030)
 
-            # Send binary PCM chunks with robust playback pacing
             chunks_sent = 0
-            bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH  # 32,000 bytes/sec
+            bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH
             for i in range(0, total_len, chunk_size):
                 chunk = pcm_bytes[i:i + chunk_size]
                 results = await asyncio.gather(*[ws.send(chunk) for ws in valid_targets], return_exceptions=True)
@@ -729,17 +921,13 @@ class AudioServer:
                         break
 
                 chunks_sent += 1
-                # Pre-buffer first 16 chunks (~32KB = 1s audio) with 2ms spacing to let ESP32
-                # accumulate enough data before amp enables (it waits for ≥4KB).
-                # After pre-buffer, pace at 80% real-time (~51ms per 2KB chunk) to maintain
-                # steady flow without underflow or overflow on ESP32's 512KB PSRAM buffer.
+
                 if chunks_sent <= 16:
                     await asyncio.sleep(0.002)
                 else:
                     chunk_duration = len(chunk) / bytes_per_sec
                     await asyncio.sleep(chunk_duration * 0.80)
 
-            # Send end marker: only initiator_ws gets follow_up=True, others get follow_up=False
             tasks = []
             for ws in valid_targets:
                 ws_follow_up = follow_up if (ws == initiator_ws or initiator_ws is None) else False
@@ -758,36 +946,32 @@ class AudioServer:
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
 
-            # Mở lại mic cho toàn bộ các node sau khi loa phát xong
             free_msg = json.dumps({"type": "speaker_busy", "busy": False})
-            all_ws = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
-            if all_ws:
-                await asyncio.gather(*[ws.send(free_msg) for ws in all_ws], return_exceptions=True)
+            all_nodes = list({ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)})
+            if all_nodes:
+                await asyncio.gather(*[ws.send(free_msg) for ws in all_nodes], return_exceptions=True)
 
     async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes, follow_up: bool = False):
         """
         Fallback: Stream MP3 audio data back to ESP32.
         ESP32 would need an MP3 decoder for this path.
         """
-        if not getattr(websocket, "has_speaker", True) or getattr(websocket, "audio_relay", False):
+        if not getattr(websocket, "has_speaker", False) and (not getattr(websocket, "has_speaker", True) or getattr(websocket, "audio_relay", False)):
             return
         total_len = len(audio_bytes)
         chunk_size = config.WS_SEND_CHUNK_SIZE
 
-        # Send start marker
         await websocket.send(json.dumps({
             "type": "audio_start",
             "format": "mp3",
             "size": total_len,
         }))
 
-        # Send binary chunks
         for i in range(0, total_len, chunk_size):
             chunk = audio_bytes[i:i + chunk_size]
             await websocket.send(chunk)
             await asyncio.sleep(0.005)
 
-        # Send end marker
         await websocket.send(json.dumps({
             "type": "audio_end",
             "follow_up": follow_up,

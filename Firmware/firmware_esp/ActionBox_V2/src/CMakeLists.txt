@@ -19,7 +19,9 @@ idf_component_register(
         "storage"
         "system"
         "audio"
+        "audio/kws"
     REQUIRES
+        hc_core
         nvs_flash
         esp_wifi
         esp_event

@@ -115,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Brand Logo & Glow
+
                 Container(
                   width: 72,
                   height: 72,
@@ -162,7 +162,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 const SizedBox(height: 32),
 
-                // Glassmorphism Card
                 Container(
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
@@ -183,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Mode Selector (Account vs API Key)
+
                       Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
@@ -242,7 +241,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 18),
 
-                      // Gateway URL
                       const Text(
                         'ĐỊA CHỈ GATEWAY',
                         style: TextStyle(
@@ -261,7 +259,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 14),
 
                       if (!_isApiKeyMode) ...[
-                        // Username
+
                         const Text(
                           'TÊN ĐĂNG NHẬP',
                           style: TextStyle(
@@ -279,7 +277,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         const SizedBox(height: 14),
 
-                        // Password
                         const Text(
                           'MẬT KHẨU',
                           style: TextStyle(
@@ -297,7 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           isPassword: true,
                         ),
                       ] else ...[
-                        // API Key Input
+
                         const Text(
                           'AETHERIA API KEY',
                           style: TextStyle(
@@ -315,7 +312,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ],
 
-                      // Error message if any
                       if (_errorMessage != null) ...[
                         const SizedBox(height: 12),
                         Container(
@@ -342,7 +338,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       const SizedBox(height: 14),
 
-                      // Remember Me
                       Row(
                         children: [
                           SizedBox(
@@ -364,7 +359,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Submit Button
                       SizedBox(
                         width: double.infinity,
                         height: 48,
@@ -405,7 +399,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
 
                 const SizedBox(height: 24),
-                // Footer
+
                 const Text(
                   'Tài khoản mặc định: admin / admin123\nAPI Key được mã hóa và bảo vệ trong bộ nhớ máy',
                   textAlign: TextAlign.center,

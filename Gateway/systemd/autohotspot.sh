@@ -5,7 +5,6 @@ export LC_ALL=C
 HOTSPOT='Aetheria-Hotspot'
 log() { logger -t AETHERIA-AUTOHOTSPOT -- "$*"; }
 
-# Never disrupt a connection that already carries traffic, including SSH.
 if nmcli -t -f DEVICE,STATE device status | grep -Eq '^(eth0|wlan0):connected$'; then
     log 'Network already connected; leaving connections unchanged.'
     exit 0

@@ -1,16 +1,3 @@
-/**
- * @file main.cpp
- * @brief Production Entry Point for ESP32-S3 SubBox / SubGateway
- *
- * System Role:
- * - Local Brain & Audio Hub of one room
- * - Does NOT directly use a microphone; receives audio streams from ActionBoxes
- * - Selects best active speech signal among up to 4 ActionBoxes in room
- * - Relays microphone PCM to Pi4, which owns ASR and voice command extraction
- * - Executes explicit gateway commands over ESP-NOW; no local voice fallback
- * - Routes audio responses / TTS back to originating ActionBox speaker
- */
-
 #include <stdio.h>
 #include <string.h>
 #include <memory>
@@ -47,6 +34,11 @@
 #include "mqtt/subbox_mqtt_client.h"
 #include "system/task_manager.h"
 #include "system/dev_console.h"
+#include "hc_runtime.h"
+#include "hc_ota.h"
+#include "hc_provisioning.h"
+static MqttClient* hc_mqtt=nullptr;
+static bool hc_uplink(const uint8_t* data,size_t length) { return hc_mqtt && hc_mqtt->publishCore(data,length); }
 
 static const char *TAG = "SUBBOX_MAIN";
 
@@ -65,13 +57,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         subbox_led_set_mqtt_connected(false);
         s_wifi_retry_count++;
         ESP_LOGW(TAG, "Wi-Fi disconnected (attempt %d/5)...", s_wifi_retry_count);
-        if (s_wifi_retry_count >= 5 && !wifi_provisioning_is_active()) {
-            ESP_LOGW(TAG, "⚠️ Wi-Fi unreachable after 5 attempts -> Launching SoftAP Captive Portal!");
-            wifi_provisioning_start();
-        }
-        if (!wifi_provisioning_is_active()) {
-            esp_wifi_connect();
-        }
+        if (!hc_provisioning_active() && ((const char*)arg)[0]) esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_wifi_retry_count = 0;
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
@@ -132,8 +118,9 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
                                                         NULL));
 
     wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
+
+    memcpy(wifi_config.sta.ssid, ssid, strnlen(ssid, sizeof(wifi_config.sta.ssid)));
+    memcpy(wifi_config.sta.password, pass, strnlen(pass, sizeof(wifi_config.sta.password)));
     wifi_config.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -145,10 +132,9 @@ static void wifi_init_sta(const char* ssid, const char* pass) {
 }
 
 extern "C" void app_main(void) {
-    /* 0. Initialize Status LED (LED1: GPIO 48) */
+
     subbox_led_init();
 
-    /* 1. Initialize NVS Storage */
     ESP_ERROR_CHECK(NVSManager::init());
 
     SubBoxPersistentConfig cfg;
@@ -157,29 +143,25 @@ extern "C" void app_main(void) {
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG, "Audio relay PSRAM available: %u KB; local ASR/NLU disabled", (unsigned)(free_psram / 1024));
 
-    /* 2. Print Startup Banner */
     print_banner(cfg);
 
-    /* 3. Initialize Wi-Fi Station or Launch Provisioning */
-    if (strlen(cfg.wifi_ssid) == 0 || strcmp(cfg.wifi_ssid, "Aetheria-Gateway-Setup") == 0) {
-        ESP_LOGW(TAG, "No valid Wi-Fi credentials in NVS (Fresh Setup or old defaults). Using defaults from config...");
-        strncpy(cfg.wifi_ssid, SUBBOX_DEFAULT_WIFI_SSID, sizeof(cfg.wifi_ssid) - 1);
-        strncpy(cfg.wifi_pass, SUBBOX_DEFAULT_WIFI_PASS, sizeof(cfg.wifi_pass) - 1);
-        strncpy(cfg.mqtt_broker_uri, SUBBOX_DEFAULT_MQTT_BROKER_URI, sizeof(cfg.mqtt_broker_uri) - 1);
-        strncpy(cfg.ws_gateway_uri, SUBBOX_DEFAULT_WS_GATEWAY_URI, sizeof(cfg.ws_gateway_uri) - 1);
-        NVSManager::saveConfig(cfg);
+    hc_provisioned_config enrollment{};
+    esp_err_t enrollment_result=hc_provisioning_load(&enrollment);
+    if(enrollment_result==ESP_OK && enrollment.subbox){
+        snprintf(cfg.subbox_id,sizeof(cfg.subbox_id),"%lu",(unsigned long)enrollment.node_id);
+        snprintf(cfg.wifi_ssid,sizeof(cfg.wifi_ssid),"%s",enrollment.wifi_ssid);
+        snprintf(cfg.wifi_pass,sizeof(cfg.wifi_pass),"%s",enrollment.wifi_password);
+        snprintf(cfg.mqtt_broker_uri,sizeof(cfg.mqtt_broker_uri),"%s",enrollment.mqtt_uri);
+    }else if(cfg.wifi_ssid[0]==0){
+        cfg.wifi_ssid[0]=cfg.wifi_pass[0]=cfg.mqtt_broker_uri[0]=0;
+        ESP_LOGW(TAG,"Factory/unavailable enrollment: hold BOOT 3s for secure commissioning");
+    }else{
+        ESP_LOGI(TAG,"Factory enrollment absent: continuing with loaded NVS credentials (SSID '%s')",cfg.wifi_ssid);
     }
+    memset(&enrollment,0,sizeof(enrollment));
+    wifi_init_sta(cfg.wifi_ssid,cfg.wifi_pass);
+    ESP_ERROR_CHECK(hc_provisioning_button_init(true));
 
-    if (strlen(cfg.wifi_ssid) == 0) {
-        ESP_LOGW(TAG, "No Wi-Fi credentials in NVS (Fresh Setup). Starting SoftAP Provisioning immediately!");
-        wifi_init_sta("", "");
-        wifi_provisioning_start();
-    } else {
-        wifi_init_sta(cfg.wifi_ssid, cfg.wifi_pass);
-    }
-
-    /* 4. Instantiate Core Subsystems */
-    /* Initialize SubBox Acoustic Sound Player (MAX98357A I2S Speaker) */
     if (SoundPlayer::instance().init() == ESP_OK) {
         SoundPlayer::instance().play(SoundType::BOOTUP);
     }
@@ -194,7 +176,6 @@ extern "C" void app_main(void) {
         SUBBOX_VAD_MAX_SPEECH_DURATION_MS
     );
 
-    // Pi4 owns voice recognition and commands. A failed connection never invents a local command.
     auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id);
     if (!asr->init()) ESP_LOGE(TAG, "Pi4 audio relay unavailable; voice control disabled until configured/restarted");
 
@@ -221,15 +202,12 @@ extern "C" void app_main(void) {
     auto mqtt = std::make_shared<MqttClient>(cfg.mqtt_broker_uri, cfg.subbox_id);
     command_router->setMqttClient(mqtt);
 
-    // Forward incoming network audio packets directly into AudioManager arbitrator
     transport->registerRxCallback([audio_mgr](const AudioPacket& pkt) {
         audio_mgr->ingestAudioPacket(pkt);
     });
 
-    /* 5. Start Audio Transport Receiver */
     if (!transport->init()) subbox_led_set_error(true);
 
-    /* 6. Start Multi-Core FreeRTOS Pipeline */
     auto task_mgr = std::make_shared<TaskManager>(
         audio_mgr, transport, audio_router, tts_mgr,
         context_mgr, registry, command_router, rule_engine,
@@ -237,10 +215,11 @@ extern "C" void app_main(void) {
     );
     if (!task_mgr->init()) subbox_led_set_error(true);
 
-    /* 7. Start MQTT Client (Asynchronous reconnect loop) */
+    hc_mqtt=mqtt.get();
+    ESP_ERROR_CHECK(hc_runtime_init(true,hc_uplink,nullptr,nullptr));
     mqtt->init();
+    hc_ota_health_ready();
 
-    /* 8. Start Development Console & Testing Harness */
     auto console = std::make_shared<DevConsole>(
         asr, audio_mgr, context_mgr, registry, command_router, room_mgr
     );

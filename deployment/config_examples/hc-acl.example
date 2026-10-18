@@ -1,0 +1,11 @@
+user hc-gateway
+topic read hc/v1/subbox/+/up
+topic write hc/v1/subbox/+/down
+topic write hc/v1/gateway/availability
+
+# Generate one block per SubBox with its assigned numeric node ID and UNIQUE login.
+# Example ID 1 is illustrative, not a shipped identity.
+user hc-subbox-1
+topic write hc/v1/subbox/1/up
+topic read hc/v1/subbox/1/down
+topic read hc/v1/gateway/availability

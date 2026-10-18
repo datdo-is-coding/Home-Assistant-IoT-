@@ -1,8 +1,3 @@
-/**
- * @file task_manager.cpp
- * @brief Production FreeRTOS Task Architecture Implementation
- */
-
 #include "task_manager.h"
 #include "app_config.h"
 #include "board_pins.h"
@@ -13,6 +8,7 @@
 #include "safety_supervisor.h"
 #include "device_manager.h"
 #include "espnow_transport.h"
+#include "hc_runtime.h"
 #include "nvs_storage.h"
 
 #include <string.h>
@@ -45,13 +41,6 @@ static TaskHandle_t s_network_task_handle = NULL;
 static TaskHandle_t s_safety_task_handle = NULL;
 static TaskHandle_t s_telemetry_task_handle = NULL;
 
-/* ========================================================================= */
-/*                              TASK IMPLEMENTATIONS                         */
-/* ========================================================================= */
-
-/**
- * @brief Task: button_task (Scans buttons non-blocking every 10ms)
- */
 static void button_task(void *pvParameters) {
     ESP_LOGI(TAG, "button_task started.");
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -63,9 +52,6 @@ static void button_task(void *pvParameters) {
     }
 }
 
-/**
- * @brief Task: sensor_task (Continuously polls BL0942 UART every 100ms)
- */
 static void sensor_task(void *pvParameters) {
     ESP_LOGI(TAG, "sensor_task started.");
     TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -87,9 +73,6 @@ static void sensor_task(void *pvParameters) {
     }
 }
 
-/**
- * @brief Task: safety_task (Highest priority: Evaluates measurements & limits)
- */
 static void safety_task(void *pvParameters) {
     ESP_LOGI(TAG, "safety_task started.");
     safety_register_calling_task_wdt();
@@ -104,9 +87,6 @@ static void safety_task(void *pvParameters) {
     }
 }
 
-/**
- * @brief Task: relay_task (Processes actuation commands from queue)
- */
 static void relay_task(void *pvParameters) {
     ESP_LOGI(TAG, "relay_task started.");
     ActionBoxCommand cmd;
@@ -116,7 +96,6 @@ static void relay_task(void *pvParameters) {
             ActionBoxResponse resp;
             device_manager_execute_command(&cmd, &resp);
 
-            /* If command was initiated over network, serialize response and transmit */
             char resp_json[512];
             if (protocol_serialize_response(&resp, resp_json, sizeof(resp_json)) == ESP_OK) {
                 task_manager_post_network_tx(NULL, (const uint8_t*)resp_json, strlen(resp_json));
@@ -125,30 +104,40 @@ static void relay_task(void *pvParameters) {
     }
 }
 
-/**
- * @brief Task: network_task (Handles inbound & outbound ESP-NOW packets)
- */
 static void network_task(void *pvParameters) {
     ESP_LOGI(TAG, "network_task started.");
     NetworkPacket rx_pkt;
     NetworkPacket tx_pkt;
 
     while (1) {
-        /* Check for inbound packet from SubBox */
+
         if (xQueueReceive(s_network_rx_queue, &rx_pkt, pdMS_TO_TICKS(50)) == pdTRUE) {
 
-            /* Null-terminate payload for JSON parsing */
+            if (hc_runtime_enabled()) continue;
+
             char json_buf[512];
             size_t copy_len = (rx_pkt.len < sizeof(json_buf) - 1) ? rx_pkt.len : (sizeof(json_buf) - 1);
             memcpy(json_buf, rx_pkt.payload, copy_len);
             json_buf[copy_len] = '\0';
 
-            /* Check if this is a SubBox heartbeat broadcast */
             if (strstr(json_buf, "\"heartbeat\"") != NULL || strstr(json_buf, "\"subbox_id\"") != NULL) {
-                safety_feed_network_watchdog();
-                if (!espnow_transport_is_paired()) {
+                if (espnow_transport_is_paired()) {
+                    uint8_t paired_mac[6] = {0};
+                    if (espnow_transport_get_subbox_mac(paired_mac) && memcmp(rx_pkt.mac, paired_mac, 6) != 0) {
+                        ESP_LOGW(TAG, "Heartbeat dropped from non-paired MAC %02X:%02X:%02X:%02X:%02X:%02X",
+                                 rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
+                        continue;
+                    }
+                } else if (espnow_transport_is_pairing_mode()) {
+                    ESP_LOGI(TAG, "Pairing mode active: pairing with SubBox MAC %02X:%02X:%02X:%02X:%02X:%02X",
+                             rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
                     espnow_transport_pair_subbox(rx_pkt.mac);
+                    espnow_transport_set_pairing_mode(false);
+                } else {
+                    ESP_LOGD(TAG, "Heartbeat ignored: ActionBox not paired and pairing mode inactive");
+                    continue;
                 }
+                safety_feed_network_watchdog();
                 cJSON *hb_root = cJSON_Parse(json_buf);
                 if (hb_root) {
                     const auto* wifi = cJSON_GetObjectItemCaseSensitive(hb_root, "wifi");
@@ -172,14 +161,28 @@ static void network_task(void *pvParameters) {
             ActionBoxCommand cmd;
             esp_err_t err = protocol_parse_command(json_buf, &cmd);
             if (err == ESP_OK) {
+                bool is_relay_cmd = (cmd.cmd == CMD_TYPE_TURN_ON || cmd.cmd == CMD_TYPE_TURN_OFF || cmd.cmd == CMD_TYPE_TOGGLE);
+                if (is_relay_cmd) {
+                    uint8_t paired_mac[6] = {0};
+                    if (!espnow_transport_is_paired() || !espnow_transport_get_subbox_mac(paired_mac)) {
+                        ESP_LOGW(TAG, "Rejected relay command: ActionBox is not paired with a trusted SubBox!");
+                        continue;
+                    }
+                    if (memcmp(rx_pkt.mac, paired_mac, 6) != 0) {
+                        ESP_LOGW(TAG, "Rejected relay command from untrusted MAC %02X:%02X:%02X:%02X:%02X:%02X (expected %02X:%02X:%02X:%02X:%02X:%02X)!",
+                                 rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5],
+                                 paired_mac[0], paired_mac[1], paired_mac[2], paired_mac[3], paired_mac[4], paired_mac[5]);
+                        continue;
+                    }
+                }
                 safety_feed_network_watchdog();
-                /* 1. Idempotency check: duplicate packet retransmission detection */
+
                 char cached_resp[512] = {0};
                 if (protocol_is_duplicate_request(cmd.request_id, cmd.session_id, cached_resp, sizeof(cached_resp))) {
                     ESP_LOGD(TAG, "Duplicate request %lu detected. Returning cached response.", cmd.request_id);
                     espnow_transport_send_to(rx_pkt.mac, (const uint8_t*)cached_resp, strlen(cached_resp));
                 } else {
-                    /* Fresh request: execute directly and report ACK */
+
                     ActionBoxResponse resp;
                     uint32_t cmd_time = (uint32_t)(esp_timer_get_time() / 1000);
                     device_manager_execute_command(&cmd, &resp);
@@ -189,7 +192,6 @@ static void network_task(void *pvParameters) {
                         espnow_transport_send_to(rx_pkt.mac, (const uint8_t*)resp_json, strlen(resp_json));
                     }
 
-                    /* After GPIO ACK, wait settle_ms, read BL0942 power and transmit LOAD_REPORT */
                     if (resp.success && (cmd.cmd == CMD_TYPE_TURN_ON || cmd.cmd == CMD_TYPE_TURN_OFF)) {
                         uint32_t settle = (cmd.settle_ms >= 100 && cmd.settle_ms <= 2000) ? cmd.settle_ms : 500;
                         vTaskDelay(pdMS_TO_TICKS(settle));
@@ -201,33 +203,24 @@ static void network_task(void *pvParameters) {
                         }
                     }
                 }
-
-                /* If SubBox was unpaired, pair with this sender */
-                if (!espnow_transport_is_paired()) {
-                    espnow_transport_pair_subbox(rx_pkt.mac);
-                }
             }
         }
 
-        /* Check for outbound packets waiting to be sent */
         if (xQueueReceive(s_network_tx_queue, &tx_pkt, 0) == pdTRUE) {
             espnow_transport_send_to(tx_pkt.mac, tx_pkt.payload, tx_pkt.len);
         }
     }
 }
 
-/**
- * @brief Task: telemetry_task (Periodic heartbeat reporting and LED animation)
- */
 static void telemetry_task(void *pvParameters) {
     ESP_LOGI(TAG, "telemetry_task started.");
     TickType_t xLastTelemetryTime = xTaskGetTickCount();
     const TickType_t xTelemetryPeriod = pdMS_TO_TICKS(TELEMETRY_REPORT_INTERVAL_MS);
 
     while (1) {
-        // LED2 remains reserved for voice capture. LED1 reports the failing hop.
+
         const bool fault = relay_get_fault(1) != RELAY_FAULT_NONE || relay_get_fault(2) != RELAY_FAULT_NONE;
-        const int code = fault ? 4 : (safety_is_network_timed_out() ? 1 : s_upstream_error.load());
+        const int code = fault ? 4 : (hc_runtime_enabled() ? (hc_runtime_online()?0:1) : (safety_is_network_timed_out() ? 1 : s_upstream_error.load()));
         static int previous = -1;
         if (code != previous) {
             previous = code;
@@ -236,21 +229,18 @@ static void telemetry_task(void *pvParameters) {
         }
         led_set_pattern(1, code == 0 ? LED_PATTERN_BLINK_FAST : static_cast<LedPattern>(LED_PATTERN_ERROR_1 + code - 1));
 
-        /* Run LED animation tick non-blocking */
         led_driver_tick();
 
         TickType_t now = xTaskGetTickCount();
         if ((now - xLastTelemetryTime) >= xTelemetryPeriod) {
             xLastTelemetryTime = now;
 
-            /* Check if network is disconnected / timed out: hop channel to scan for SubBox */
-            if (safety_is_network_timed_out()) {
+            if (!hc_runtime_enabled() && safety_is_network_timed_out()) {
                 espnow_transport_hop_channel();
             }
 
-            /* Serialize and send periodic telemetry */
             char telem_json[APP_TELEMETRY_BUFFER_SIZE];
-            if (protocol_serialize_telemetry(telem_json, sizeof(telem_json)) == ESP_OK) {
+            if (!hc_runtime_enabled() && protocol_serialize_telemetry(telem_json, sizeof(telem_json)) == ESP_OK) {
                 espnow_transport_send((const uint8_t*)telem_json, strlen(telem_json));
                 ESP_LOGI(TAG, "Telemetry: %s", telem_json);
             }
@@ -260,15 +250,10 @@ static void telemetry_task(void *pvParameters) {
     }
 }
 
-/* Callback from ESP-NOW driver when packet arrives */
 static void on_espnow_packet_received(const uint8_t *mac_addr, const uint8_t *data, int len) {
     if (!data || len <= 0 || len > 250) return;
     task_manager_post_network_rx(mac_addr, data, (size_t)len);
 }
-
-/* ========================================================================= */
-/*                         PUBLIC INITIALIZATION API                         */
-/* ========================================================================= */
 
 esp_err_t task_manager_init(void) {
     ESP_LOGI(TAG, "Creating FreeRTOS inter-task communication queues...");
@@ -283,7 +268,6 @@ esp_err_t task_manager_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    /* Hook ESP-NOW receive callback to task_manager queue */
     espnow_transport_register_rx_callback(on_espnow_packet_received);
 
     ESP_LOGI(TAG, "Spawning ActionBox FreeRTOS tasks...");

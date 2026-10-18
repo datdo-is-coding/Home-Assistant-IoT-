@@ -80,14 +80,12 @@ DEVICE_DISPLAY_NAMES = {
     "all": "tất cả thiết bị"
 }
 
-
 def get_room_name(room_id: Optional[str]) -> str:
     """Chuyển room_id snake_case (phong_ngu) thành tên tiếng Việt tự nhiên (phòng ngủ)."""
     if not room_id:
         return ""
     r = str(room_id).lower().strip()
     return ROOM_DISPLAY_NAMES.get(r, r.replace("_", " "))
-
 
 def get_device_name(device_id_or_info: Any) -> str:
     """Chuyển device_id/ch_info thành tên tiếng Việt tự nhiên (quạt trần, đèn ngủ)."""
@@ -110,7 +108,6 @@ def get_device_name(device_id_or_info: Any) -> str:
         s = parts[-1]
     return DEVICE_DISPLAY_NAMES.get(s, s.replace("_", " "))
 
-
 def clean_voice_text(text: str) -> str:
     """
     Rà soát và thay thế toàn bộ mã ID tiếng Anh/snake_case còn sót trong văn bản
@@ -119,19 +116,16 @@ def clean_voice_text(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Thay thế fullname kiểu 'phong_ngu_master-pnm_node01-den_ngu'
     def _sub_fullname(match):
         part = match.group(1).split("-")[-1]
         return DEVICE_DISPLAY_NAMES.get(part, part.replace("_", " "))
     text = re.sub(r"\b([a-z0-9_]+-[a-z0-9_]+-[a-z0-9_]+)\b", _sub_fullname, text)
 
-    # 2. Thay thế room_id dài trước, ngắn sau để tránh match tiền tố
     for r_id in sorted(ROOM_DISPLAY_NAMES.keys(), key=lambda x: -len(x)):
         if r_id in ("unknown",): continue
         r_name = ROOM_DISPLAY_NAMES[r_id]
         text = re.sub(rf"\b{r_id}\b", r_name, text)
 
-    # 3. Thay thế device_id
     for d_id in sorted(DEVICE_DISPLAY_NAMES.keys(), key=lambda x: -len(x)):
         if len(d_id) > 2 and d_id in text:
             d_name = DEVICE_DISPLAY_NAMES[d_id]

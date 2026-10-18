@@ -19,7 +19,6 @@ import websockets
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-# Global State
 state = {
     "t1_connected": False,
     "t2_connected": False,
@@ -65,7 +64,6 @@ def broadcast(msg_dict):
             dead.add(ws)
     clients.difference_update(dead)
 
-# T1 Worker: COM8
 def t1_worker():
     ser = None
     while True:
@@ -78,23 +76,21 @@ def t1_worker():
 
             line = ser.readline().decode('utf-8', errors='replace').strip()
             if line:
-                # Energy: Mic Diagnostic: ... Energy=77279
+
                 m_energy = re.search(r'Energy=(\d+)', line)
                 if m_energy:
                     val = int(m_energy.group(1))
                     state["vad_energy"] = val
                     broadcast({"type": "energy", "value": val})
                 else:
-                    # Print interesting lines to stdout
+
                     print(f"📡 [T1_COM8] {line}", flush=True)
 
-                # Voice Streaming Started
                 if "Voice streaming started" in line or "AUDIO_START sent" in line:
                     state["is_streaming_audio"] = True
                     broadcast({"type": "stream_state", "active": True, "dir": "t1_to_t2"})
                     broadcast({"type": "packet", "from": "T1", "to": "T2", "kind": "AUDIO_START", "desc": "🎙️ Wake VAD Trigger"})
 
-                # Voice Streaming Stopped
                 m_stop = re.search(r'Voice stream ending.*?chunks=(\d+).*?bytes=(\d+)', line)
                 if m_stop:
                     state["is_streaming_audio"] = False
@@ -103,11 +99,9 @@ def t1_worker():
                     broadcast({"type": "stream_state", "active": False, "chunks": chunks, "bytes": bytes_count})
                     broadcast({"type": "packet", "from": "T1", "to": "T2", "kind": "AUDIO_END", "desc": f"🛑 Audio End ({chunks} chk)"})
 
-                # Hello sent
                 if "HELLO sent" in line:
                     broadcast({"type": "packet", "from": "T1", "to": "T2", "kind": "HELLO", "desc": "📡 Mesh Heartbeat (Unicast)"})
 
-                # Relay State change on T1
                 m_relay = re.search(r'RL1: (\w+), RL2: (\w+)', line)
                 if m_relay:
                     r1 = (m_relay.group(1).upper() == "ON")
@@ -127,7 +121,6 @@ def t1_worker():
             broadcast({"type": "status", "t1": False})
             time.sleep(1.0)
 
-# T2 Worker: COM9 (Read + Write from Queue)
 def t2_worker():
     ser = None
     while True:
@@ -138,7 +131,6 @@ def t2_worker():
                 broadcast({"type": "status", "t2": True})
                 print("✅ [T2_COM9] Connected successfully.", flush=True)
 
-            # Write pending commands
             while not t2_cmd_queue.empty():
                 cmd = t2_cmd_queue.get_nowait()
                 try:
@@ -147,7 +139,6 @@ def t2_worker():
                 except Exception as ex:
                     print(f"⚠️ [T2_COM9] Command write failed: {ex}", flush=True)
 
-            # Read response lines
             line = ser.readline().decode('utf-8', errors='replace').strip()
             if line:
                 print(f"📟 [T2_COM9] {line}", flush=True)
@@ -194,8 +185,6 @@ def t2_worker():
             broadcast({"type": "status", "t2": False})
             time.sleep(1.0)
 
-
-# Fast Threading HTTP Server
 class DashboardHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path in ['/', '/index.html']:
@@ -213,10 +202,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-# Bidirectional WebSocket Handler
 async def ws_handler(websocket):
     clients.add(websocket)
-    # Send snapshot on connect
+
     await websocket.send(json.dumps({
         "type": "init",
         "state": state
@@ -264,14 +252,11 @@ def main():
     print("  🚀 AETHERIA OS — ESP32 LIVE MESH VISUALIZER (T1 & T2)")
     print("================================================================")
 
-    # Start Serial Background Workers
     threading.Thread(target=t1_worker, daemon=True).start()
     threading.Thread(target=t2_worker, daemon=True).start()
 
-    # Start HTTP Server
     threading.Thread(target=run_http, daemon=True).start()
 
-    # Auto open browser
     def auto_open_browser():
         time.sleep(1.0)
         print("🌐 Opening Web Visualizer in browser: http://localhost:8080 ...", flush=True)
@@ -282,8 +267,6 @@ def main():
 
     threading.Thread(target=auto_open_browser, daemon=True).start()
 
-
-    # Run WebSocket Event Loop
     try:
         asyncio.run(run_ws())
     except KeyboardInterrupt:

@@ -4,7 +4,7 @@ Bao gồm 64 ca kiểm thử trên 7 chiều đánh giá thực tế.
 """
 
 TEST_CASES = [
-    # ── 1. Direct Explicit Commands (Lệnh trực tiếp chuẩn hóa) ──
+
     {
         "id": "DIR_01",
         "category": "Direct",
@@ -60,7 +60,7 @@ TEST_CASES = [
         "expected_action": "turn_on",
         "expected_device": "den",
         "expected_location": "phong_khach",
-        "should_resolve": False,  # Chưa có node phòng khách
+        "should_resolve": False,
         "description": "Đồng nghĩa mở = bật tại phòng khách"
     },
     {
@@ -116,7 +116,6 @@ TEST_CASES = [
         "description": "Tắt quạt phòng bếp"
     },
 
-    # ── 2. Natural Language / Implicit Intent (Ngữ cảnh ẩn) ──
     {
         "id": "NAT_01",
         "category": "Implicit",
@@ -232,7 +231,6 @@ TEST_CASES = [
         "description": "Trời sáng -> tắt đèn"
     },
 
-    # ── 3. Vietnamese Dialects & Colloquialisms (Khẩu ngữ địa phương) ──
     {
         "id": "DIAL_01",
         "category": "Dialect",
@@ -348,12 +346,11 @@ TEST_CASES = [
         "description": "Quạt trần = quạt"
     },
 
-    # ── 4. Negation & Adversarial Traps (Phủ định & Câu bẫy ngữ nghĩa) ──
     {
         "id": "NEG_01",
         "category": "Negation",
         "input": "đừng tắt đèn phòng ngủ nhé",
-        "expected_action": None,  # Không được sinh turn_off
+        "expected_action": None,
         "expected_device": None,
         "expected_location": None,
         "should_resolve": False,
@@ -363,7 +360,7 @@ TEST_CASES = [
         "id": "NEG_02",
         "category": "Negation",
         "input": "không bật quạt phòng ngủ đâu",
-        "expected_action": None,  # Không được sinh turn_on
+        "expected_action": None,
         "expected_device": None,
         "expected_location": None,
         "should_resolve": False,
@@ -436,15 +433,14 @@ TEST_CASES = [
         "description": "Trích xuất ý định cốt lõi: tắt quạt phòng ngủ"
     },
 
-    # ── 5. Ambiguity & Missing Slots (Lệnh thiếu thông tin) ──
     {
         "id": "AMB_01",
         "category": "Ambiguity",
         "input": "bật đèn",
         "expected_action": "turn_on",
         "expected_device": "den",
-        "expected_location": None,  # Không nêu phòng
-        "should_resolve": True,     # Vì hiện chỉ có 1 phòng có đèn -> auto-resolve
+        "expected_location": None,
+        "should_resolve": True,
         "expected_node": "esp32s3_master",
         "expected_channel": "ch1",
         "description": "Thiếu vị trí phòng: bật đèn"
@@ -456,7 +452,7 @@ TEST_CASES = [
         "expected_action": "turn_off",
         "expected_device": "quat",
         "expected_location": None,
-        "should_resolve": True,     # Auto-resolve sang phòng ngủ duy nhất
+        "should_resolve": True,
         "expected_node": "esp32s3_master",
         "expected_channel": "ch2",
         "description": "Thiếu vị trí phòng: tắt quạt"
@@ -526,7 +522,6 @@ TEST_CASES = [
         "description": "Mở quạt không rõ phòng"
     },
 
-    # ── 6. Out-of-Domain & Hallucination Resistance (Bẫy ảo giác & OOD) ──
     {
         "id": "OOD_01",
         "category": "Hallucination",
@@ -628,7 +623,6 @@ TEST_CASES = [
         "description": "Lệnh nghe nhạc, không điều khiển relay"
     },
 
-    # ── 7. ASR Noise & Phonetic Errors (Nhiễu nhận dạng giọng nói) ──
     {
         "id": "NOISE_01",
         "category": "ASR_Noise",

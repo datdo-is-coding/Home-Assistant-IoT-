@@ -78,8 +78,7 @@ class ActionBoxTester:
             return pkt
 
         self.ser.write((payload + "\n").encode('utf-8'))
-        
-        # Read response
+
         start_time = time.time()
         while time.time() - start_time < 2.0:
             line = self.ser.readline().decode('utf-8', errors='replace').strip()
@@ -101,47 +100,39 @@ class ActionBoxTester:
         print("  STARTING AUTOMATED ACTIONBOX VALIDATION SUITE")
         print("=======================================================")
 
-        # Test 1: PING
         print("\n--- Test 1: PING Heartbeat ---")
         self.send_command("PING", channel=0)
         time.sleep(0.5)
 
-        # Test 2: Turn ON Channel 1
         print("\n--- Test 2: Turn ON Relay Channel 1 ---")
         self.send_command("TURN_ON", channel=1)
         time.sleep(0.5)
 
-        # Test 3: Get State Channel 1
         print("\n--- Test 3: Query State Channel 1 ---")
         self.send_command("GET_STATE", channel=1)
         time.sleep(0.5)
 
-        # Test 4: Idempotency Test (Retransmit identical TURN_ON request_id)
         print("\n--- Test 4: Idempotency Retransmission Test ---")
         print("Sending same request_id 1002 again; verify identical cached response returned...")
         self.send_command("TURN_ON", channel=1, custom_req_id=1002)
         time.sleep(0.5)
 
-        # Test 5: Read Current & Power on Channel 1
         print("\n--- Test 5: Query Current & Power Sensor (BL0942) ---")
         self.send_command("GET_CURRENT", channel=1)
         time.sleep(0.2)
         self.send_command("GET_POWER", channel=1)
         time.sleep(0.5)
 
-        # Test 6: Toggle Channel 2
         print("\n--- Test 6: Toggle Relay Channel 2 ---")
         self.send_command("TOGGLE", channel=2)
         time.sleep(0.5)
         self.send_command("TOGGLE", channel=2)
         time.sleep(0.5)
 
-        # Test 7: Turn OFF Channel 1
         print("\n--- Test 7: Turn OFF Relay Channel 1 ---")
         self.send_command("TURN_OFF", channel=1)
         time.sleep(0.5)
 
-        # Test 8: Invalid Channel Safety Rejection Test
         print("\n--- Test 8: Safety Rejection on Invalid Channel (Ch 99) ---")
         self.send_command("TURN_ON", channel=99)
         time.sleep(0.5)

@@ -17,7 +17,7 @@ class TestVocabularyAlias(unittest.TestCase):
         self.db_path = os.path.join(self.test_dir, "test_gateway.db")
         self.reg_path = os.path.join(self.test_dir, "test_registry.json")
         self.registry = RegistryManager(registry_path=self.reg_path, db_path=self.db_path)
-        # Register a test node
+
         self.registry.data["nodes"]["test-node-01"] = {
             "mac": "AA:BB:CC:DD:EE:01",
             "room": "phong_khach",
@@ -34,19 +34,17 @@ class TestVocabularyAlias(unittest.TestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_add_and_remove_alias_persistence(self):
-        # 1. Add alias
+
         ok = self.registry.add_device_alias("test-node-01", "ch1", "o_cam")
         self.assertTrue(ok)
 
         node = self.registry.get_all_nodes().get("test-node-01")
         self.assertIn("o_cam", node["channels"]["ch1"]["aliases"])
 
-        # 2. Verify persistence across registry reload
         reloaded_reg = RegistryManager(registry_path=self.reg_path, db_path=self.db_path)
         reloaded_node = reloaded_reg.get_all_nodes().get("test-node-01")
         self.assertIn("o_cam", reloaded_node["channels"]["ch1"]["aliases"])
 
-        # 3. Verify intent resolution & device matching
         allowed = self.registry.allowed_devices()
         self.assertIn("o_cam", allowed)
 
@@ -55,14 +53,12 @@ class TestVocabularyAlias(unittest.TestCase):
         self.assertEqual(matches[0][0], "test-node-01")
         self.assertEqual(matches[0][1], "ch1")
 
-        # 4. Remove alias
         ok_remove = self.registry.remove_device_alias("test-node-01", "ch1", "o_cam")
         self.assertTrue(ok_remove)
 
         node = self.registry.get_all_nodes().get("test-node-01")
         self.assertNotIn("o_cam", node["channels"]["ch1"]["aliases"])
 
-        # Verify removal persisted
         reloaded_reg2 = RegistryManager(registry_path=self.reg_path, db_path=self.db_path)
         reloaded_node2 = reloaded_reg2.get_all_nodes().get("test-node-01")
         self.assertNotIn("o_cam", reloaded_node2["channels"]["ch1"]["aliases"])
@@ -81,13 +77,12 @@ class TestVocabularyAlias(unittest.TestCase):
         self.assertIn("O CAM TEST", diag["hotwords"])
 
     def test_compound_device_id_format(self):
-        # Test adding with deviceId like "test-node-01::ch2"
+
         ok = self.registry.add_device_alias("test-node-01::ch2", None, "quat_mat")
         self.assertTrue(ok)
         node = self.registry.get_all_nodes().get("test-node-01")
         self.assertIn("quat_mat", node["channels"]["ch2"]["aliases"])
 
-        # Test removing with compound id
         ok_remove = self.registry.remove_device_alias("test-node-01::ch2", None, "quat_mat")
         self.assertTrue(ok_remove)
         node = self.registry.get_all_nodes().get("test-node-01")

@@ -1,8 +1,3 @@
-/**
- * @file audio_manager.h
- * @brief Multi-Source Audio Stream Manager & Best-Signal Selector for ActionBoxes
- */
-
 #pragma once
 
 #include <string>
@@ -26,7 +21,7 @@ struct ActionBoxAudioChannel {
     float       latest_rms;
     int64_t     latest_energy;
     bool        is_speaking;
-    float       signal_quality; // 0.0 - 1.0 score
+    float       signal_quality;
     std::shared_ptr<AudioRingBuffer> stream_buffer;
 };
 
@@ -37,42 +32,18 @@ public:
 
     bool init();
 
-    /**
-     * @brief Ingest incoming audio packet from any ActionBox
-     * @param packet Audio packet received from network transport
-     */
     void ingestAudioPacket(const AudioPacket& packet);
 
-    /**
-     * @brief Periodic processing tick (called by audio_manager_task)
-     * Performs source selection arbitration, VAD evaluation, and feeds active stream to ASR
-     */
     void process();
 
-    /**
-     * @brief Register callback for when an utterance is finalized by ASR
-     * @param cb Callback receiving (origin_node_id, decoded_transcript)
-     */
     void registerUtteranceCallback(std::function<void(const std::string& node_id, const std::string& text)> cb);
 
-    /**
-     * @brief Get ActionBox node ID that initiated the last voice command
-     */
     std::string getLastInputNodeId() const;
 
-    /**
-     * @brief Get currently locked active audio source (or empty if idle)
-     */
     std::string getActiveSourceNodeId() const;
 
-    /**
-     * @brief Retrieve snapshot of channel statistics for diagnostic CLI
-     */
     std::map<std::string, ActionBoxAudioChannel> getChannelSnapshots() const;
 
-    /**
-     * @brief Force reset of all audio streams and arbitrator
-     */
     void reset();
 
 private:

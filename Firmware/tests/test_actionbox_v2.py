@@ -7,7 +7,6 @@ import unittest
 HERE = Path(__file__).resolve().parent
 SRC = HERE.parent / "firmware_esp/ActionBox_V2/src"
 
-
 class ActionBoxV2Test(unittest.TestCase):
     def run_driver(self, name, sources, v2=True, json=False):
         source_root = SRC if v2 else HERE.parent / "firmware_esp/ActionBox/src"
@@ -22,7 +21,7 @@ class ActionBoxV2Test(unittest.TestCase):
                 path.write_text('#include "host_idf.h"\n')
             (root / "driver/gpio.h").write_text('#include "host_idf.h"\n' +
                 "\n".join(f"constexpr int GPIO_NUM_{i} = {i};" for i in range(49)))
-            # This wrapper is repeatedly included by real driver headers.
+
             with (root / "driver/gpio.h").open("r+") as file:
                 content = file.read()
                 file.seek(0)
@@ -54,7 +53,6 @@ class ActionBoxV2Test(unittest.TestCase):
         self.run_driver("integration.cpp", ["storage/nvs_storage.cpp", "protocol/actionbox_protocol.cpp",
                         "safety/safety_supervisor.cpp", "drivers/relay/relay_driver.cpp",
                         "drivers/led/led_driver.cpp"], json=True)
-
 
 if __name__ == "__main__":
     unittest.main()

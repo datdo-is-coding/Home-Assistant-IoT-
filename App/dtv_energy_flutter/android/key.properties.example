@@ -1,0 +1,8 @@
+# Keystore signing configuration for AETHERIA OS / SIC Home Android release builds
+# Copy this file to key.properties and configure with your real keystore details:
+# cp key.properties.example key.properties
+
+storePassword=your_keystore_password
+keyPassword=your_key_password
+keyAlias=your_key_alias
+storeFile=/path/to/your/upload-keystore.jks

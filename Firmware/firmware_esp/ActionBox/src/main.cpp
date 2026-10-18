@@ -1,12 +1,3 @@
-/**
- * @file main.cpp
- * @brief Production Entry Point for ESP32-S3 ActionBox Smart-Home Actuator Node
- * 
- * Hardware Role:
- * - Low-level actuator node (Relay control, Current sensing, Local buttons, Safety supervisor)
- * - FreeRTOS task model, ESP-NOW communication with SubBox, NVS storage
- */
-
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -69,7 +60,6 @@ static void hardware_disable_speaker(void) {
     ESP_LOGI(TAG, "Speaker disabled by policy: Forcing MAX98357 amplifier into hardware shutdown (SP_SD: IO%d -> LOW)",
              BOARD_PIN_SPEAKER_SD);
 
-    /* 1. Drive SP_SD (GPIO 2) LOW to force MAX98357 amplifier into shutdown */
     gpio_config_t sd_conf = {};
     sd_conf.mode = GPIO_MODE_OUTPUT;
     sd_conf.pin_bit_mask = (1ULL << BOARD_PIN_SPEAKER_SD);
@@ -78,7 +68,6 @@ static void hardware_disable_speaker(void) {
     gpio_config(&sd_conf);
     gpio_set_level(BOARD_PIN_SPEAKER_SD, 0);
 
-    /* 2. Configure I2S audio lines (IO17, IO18, IO21) as floating/pull-down inputs so they consume 0 power */
     uint64_t i2s_mask = (1ULL << BOARD_PIN_SPEAKER_BCLK) |
                         (1ULL << BOARD_PIN_SPEAKER_LRC) |
                         (1ULL << BOARD_PIN_SPEAKER_DOUT);
@@ -91,45 +80,34 @@ static void hardware_disable_speaker(void) {
 }
 
 extern "C" void app_main(void) {
-    /* 0. Enforce hardware shutdown on speaker amplifier */
+
     hardware_disable_speaker();
 
-    /* 1. Initialize Persistent Storage (NVS) */
     ESP_ERROR_CHECK(nvs_storage_init());
 
-    /* 2. Initialize Protocol Layer & Idempotency Cache */
     protocol_init();
 
-    /* 3. Initialize Hardware Drivers */
     ESP_ERROR_CHECK(relay_driver_init());
     ESP_ERROR_CHECK(bl0942_driver_init());
     ESP_ERROR_CHECK(button_driver_init());
     ESP_ERROR_CHECK(led_driver_init());
 
-    /* 4. Initialize Local Safety Supervisor (Configures TWDT) */
     ESP_ERROR_CHECK(safety_supervisor_init());
 
-    /* 5. Apply Startup Relay States (Restores last state or safe OFF from NVS) */
     safety_apply_startup_state();
 
-    /* 6. Initialize Wi-Fi & ESP-NOW Network Transport */
     ESP_ERROR_CHECK(espnow_transport_init());
 
-    /* 6.1 Initialize Voice Capture & VAD Subsystem (INMP441 I2S + 1.5s Silence VAD) */
     ESP_ERROR_CHECK(voice_capture_init());
 
-    /* 7. Display System Banner */
     print_banner();
 
-    /* 8. Initialize Device Manager Coordinator */
     ESP_ERROR_CHECK(device_manager_init());
 
-    /* 9. Initialize FreeRTOS Task Architecture & Queues */
     ESP_ERROR_CHECK(task_manager_init());
 
     ESP_LOGI(TAG, "ActionBox system is fully operational. Awaiting commands / local button presses.");
 
-    /* Main task can yield or sleep; background tasks handle all operational logic */
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));
         ESP_LOGD(TAG, "System heartbeat [Heap free: %lu bytes, Min: %lu bytes]",

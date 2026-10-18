@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-# Thêm đường dẫn gateway vào sys.path
 GATEWAY_DIR = Path(__file__).resolve().parent.parent / "gateway"
 if str(GATEWAY_DIR) not in sys.path:
     sys.path.insert(0, str(GATEWAY_DIR))
@@ -24,11 +23,9 @@ from registry_manager import RegistryManager, slug
 from intent_engine import IntentEngine
 import config
 
-
 def format_table_row(cols: List[str], widths: List[int]) -> str:
     parts = [col.ljust(w) for col, w in zip(cols, widths)]
     return " | ".join(parts)
-
 
 class BenchmarkRunner:
     def __init__(self, mode: str = "local", output_dir: Optional[str] = None):
@@ -42,12 +39,11 @@ class BenchmarkRunner:
         """Chạy kiểm thử một câu khẩu lệnh duy nhất."""
         user_text = tc["input"]
         t0 = time.time()
-        
-        # Chọn engine kiểm thử
+
         raw_intent = None
         error_msg = None
         engine_name = "Unknown"
-        
+
         try:
             if self.mode == "local":
                 engine_name = "Qwen2.5-3B (Local)"
@@ -60,10 +56,9 @@ class BenchmarkRunner:
                 engine_name = getattr(self.intent_engine, "active_engine", "Hybrid")
         except Exception as e:
             error_msg = str(e)
-            
+
         latency = time.time() - t0
 
-        # Phân tích kết quả trích xuất
         pred_action = None
         pred_device = None
         pred_location = None
@@ -76,18 +71,15 @@ class BenchmarkRunner:
             pred_action = cmd.get("action")
             pred_device = cmd.get("device")
             pred_location = cmd.get("location")
-            
-            # Chuẩn hoá slug để so khớp
+
             pred_device = slug(pred_device) if pred_device else None
             pred_location = slug(pred_location) if pred_location else None
 
-            # Phân giải Registry Resolver (Lớp 2)
             lookup = self.registry.find_node_by_device(pred_device, pred_location)
             if lookup:
                 pred_node, pred_channel = lookup
                 resolved = True
 
-        # So khớp Ground Truth
         exp_action = tc.get("expected_action")
         exp_device = tc.get("expected_device")
         exp_location = tc.get("expected_location")
@@ -95,27 +87,22 @@ class BenchmarkRunner:
         exp_node = tc.get("expected_node")
         exp_channel = tc.get("expected_channel")
 
-        # Tiêu chí chấm điểm
         action_match = (pred_action == exp_action)
-        
-        # Device match: chấp nhận biến thể hoặc alias (den_ngu match den, quat_ngu match quat)
+
         device_match = False
         if pred_device == exp_device:
             device_match = True
         elif pred_device and exp_device and (exp_device in pred_device or pred_device in exp_device):
             device_match = True
 
-        # Location match: chấp nhận biến thể (phong_ngu match phong_ngu_master)
         location_match = False
         if pred_location == exp_location:
             location_match = True
         elif pred_location and exp_location and (exp_location in pred_location or pred_location in exp_location):
             location_match = True
 
-        # Strict Intent Match (Cả 3 thuộc tính đồng thời đúng)
         strict_intent_match = action_match and device_match and location_match
 
-        # Resolver Match (Đích đến phần cứng đúng)
         resolver_match = False
         if exp_resolve:
             resolver_match = resolved and (pred_node == exp_node) and (pred_channel == exp_channel)
@@ -164,11 +151,9 @@ class BenchmarkRunner:
         """Chạy toàn bộ hoặc một phần bộ benchmark."""
         cases = TEST_CASES
 
-        # Lọc danh mục nếu được chỉ định
         if category and category.lower() != "all":
             cases = [tc for tc in cases if tc["category"].lower() == category.lower()]
 
-        # Chế độ Quick: Chọn đại diện 2 mẫu cho mỗi nhóm danh mục (tổng ~14 test cases)
         if quick:
             by_cat = {}
             for tc in cases:
@@ -178,7 +163,6 @@ class BenchmarkRunner:
                 selected.extend(cat_cases[:2])
             cases = selected
 
-        # Giới hạn số lượng nếu có
         if limit and limit > 0:
             cases = cases[:limit]
 
@@ -210,7 +194,6 @@ class BenchmarkRunner:
                 widths
             ))
 
-        # ── Tổng hợp thống kê số liệu ──
         summary = self._calculate_metrics(results, latencies)
         self._print_summary(summary)
         self._save_reports(summary, results)
@@ -227,7 +210,6 @@ class BenchmarkRunner:
         strict_intent = sum(1 for r in results if r["scores"]["strict_intent_match"])
         correct_resolver = sum(1 for r in results if r["scores"]["resolver_match"])
 
-        # Phân tích theo từng danh mục
         categories = {}
         for r in results:
             cat = r["category"]
@@ -300,13 +282,12 @@ class BenchmarkRunner:
 
     def _save_reports(self, summary: Dict[str, Any], results: List[Dict[str, Any]]):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # 1. JSON report
+
         json_file = self.output_dir / f"benchmark_{self.mode}_{ts}.json"
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump({"summary": summary, "results": results}, f, indent=2, ensure_ascii=False)
         print(f"📁 Đã lưu kết quả JSON chi tiết: {json_file}")
 
-        # 2. Markdown report
         md_file = self.output_dir / f"BENCHMARK_{self.mode.upper()}_{ts}.md"
         with open(md_file, "w", encoding="utf-8") as f:
             f.write(self._build_markdown(summary, results))
@@ -336,7 +317,6 @@ class BenchmarkRunner:
         for cat, d in s["by_category"].items():
             lines.append(f"| **{cat}** | {d['total']} | {d['strict_acc']:.1f}% | {d['resolver_acc']:.1f}% | {d['avg_latency']:.2f}s |")
 
-        # Thống kê các ca thất bại (Error Analysis)
         failures = [r for r in results if not r["scores"]["strict_intent_match"] or not r["scores"]["resolver_match"]]
         if failures:
             lines.append("\n## 3. Phân Tích Các Ca Thất Bại & Ngoại Lệ (Failure Case Analysis)\n")
@@ -351,7 +331,6 @@ class BenchmarkRunner:
 
         return "\n".join(lines)
 
-
 async def main():
     parser = argparse.ArgumentParser(description="Voice NLU Benchmark Suite")
     parser.add_argument("--mode", choices=["local", "cloud", "hybrid"], default="local", help="Engine to benchmark")
@@ -362,7 +341,6 @@ async def main():
 
     runner = BenchmarkRunner(mode=args.mode)
     await runner.run_benchmark(category=args.category, quick=args.quick, limit=args.limit)
-
 
 if __name__ == "__main__":
     asyncio.run(main())

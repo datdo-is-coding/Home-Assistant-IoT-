@@ -38,7 +38,7 @@ class FeatureHomeScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            // Top App Bar / Header
+
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -97,7 +97,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Contextual Status Banner
             if (statusList.isNotEmpty)
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
@@ -106,7 +105,6 @@ class FeatureHomeScreen extends ConsumerWidget {
                 ),
               ),
 
-            // Horizontal Room Selector Chips (Optimized to eliminate nested watch calls)
             SliverPadding(
               padding: const EdgeInsets.only(left: 20, right: 20, bottom: 16),
               sliver: SliverToBoxAdapter(
@@ -144,7 +142,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Favorites / Quick Control Header
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -177,7 +174,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Adaptive Device Grid (2 columns on mobile, 3-4 on tablet)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverLayoutBuilder(
@@ -253,7 +249,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Rooms Section Header
             const SliverPadding(
               padding: EdgeInsets.fromLTRB(20, 28, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -268,7 +263,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // Room Cards List (Optimized with _RoomCardItem)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverToBoxAdapter(
@@ -300,7 +294,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // ActionBox Controllers Header
             const SliverPadding(
               padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
               sliver: SliverToBoxAdapter(
@@ -315,7 +308,6 @@ class FeatureHomeScreen extends ConsumerWidget {
               ),
             ),
 
-            // ActionBox Cards
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 36),
               sliver: SliverToBoxAdapter(

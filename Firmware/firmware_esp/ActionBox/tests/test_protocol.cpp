@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 
-// These hardware seams do not actuate GPIO or access the board's live NVS.
 static ActionBoxPersistentConfig config{};
 extern "C" const ActionBoxPersistentConfig* nvs_storage_get_cached_config() { return &config; }
 extern "C" RelayState relay_get_state(uint8_t) { return RELAY_STATE_OFF; }

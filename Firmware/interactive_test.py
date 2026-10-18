@@ -10,9 +10,9 @@ import serial
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-COLOR_T1 = "\033[96m"   # Cyan for T1 (COM8)
-COLOR_T2 = "\033[93m"   # Yellow for T2 (COM9)
-COLOR_SYS = "\033[92m"  # Green for Menu
+COLOR_T1 = "\033[96m"
+COLOR_T2 = "\033[93m"
+COLOR_SYS = "\033[92m"
 COLOR_RESET = "\033[0m"
 
 running = True
@@ -76,7 +76,6 @@ def main():
         print("❌ No serial ports available. Exiting.")
         return
 
-    # Start reader threads
     if ser_t1:
         t1_thread = threading.Thread(target=read_serial, args=(ser_t1, "T1_COM8", COLOR_T1), daemon=True)
         t1_thread.start()

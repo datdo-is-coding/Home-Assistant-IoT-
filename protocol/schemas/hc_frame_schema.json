@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HC_NOW_Frame",
+  "description": "Binary frame layout specification for Home Competition Protocol V1 over ESP-NOW",
+  "type": "object",
+  "required": [
+    "type",
+    "message_id",
+    "source",
+    "destination",
+    "boot_id",
+    "sequence",
+    "config_rev",
+    "payload"
+  ],
+  "properties": {
+    "magic": {
+      "type": "string",
+      "enum": [
+        "HC"
+      ],
+      "default": "HC"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ],
+      "default": 1
+    },
+    "type": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 29
+    },
+    "flags": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "payload_len": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 196
+    },
+    "message_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "destination": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "boot_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "config_rev": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "payload": {
+      "type": "string",
+      "contentEncoding": "hex",
+      "maxLength": 392
+    },
+    "hmac_tag": {
+      "type": "string",
+      "contentEncoding": "hex",
+      "minLength": 32,
+      "maxLength": 32
+    }
+  }
+}

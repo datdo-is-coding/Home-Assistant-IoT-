@@ -19,7 +19,6 @@ FP32_MODEL_PATH = os.path.join(MODEL_DIR, "kws_dscnn.onnx")
 INT8_MODEL_PATH = os.path.join(MODEL_DIR, "kws_dscnn_int8.onnx")
 INT8_HEADER_PATH = os.path.join(MODEL_DIR, "model_data_int8.h")
 
-# Calibration Data Reader cho quá trình Static Quantization (PTQ)
 class KWSCalibrationDataReader(CalibrationDataReader):
     def __init__(self, calibration_data, input_name="input_audio_mfcc", batch_size=1):
         self.data = calibration_data
@@ -42,7 +41,6 @@ def run_quantization():
     print("BẮT ĐẦU QUÁ TRÌNH LƯỢNG TỬ HÓA INT8 (POST-TRAINING QUANTIZATION)")
     print("="*60)
 
-    # 1. Đọc dữ liệu kiểm tra và tham số chuẩn hóa
     print("\n1. Đang nạp tập dữ liệu kiểm chuẩn (Calibration) và tập Test...")
     X_val = np.load(os.path.join(DATA_DIR, "X_val.npy"))
     X_test = np.load(os.path.join(DATA_DIR, "X_test.npy"))
@@ -62,7 +60,6 @@ def run_quantization():
     X_test = (X_test - mean) / std
     X_test = np.expand_dims(X_test, 1).astype(np.float32)
 
-    # 2. Thực hiện Lượng tử hóa INT8
     print(f"\n2. Thực hiện Static Quantization (QDQ) trên file: {FP32_MODEL_PATH}...")
     calib_reader = KWSCalibrationDataReader(X_val, input_name="input_audio_mfcc", batch_size=1)
 
@@ -86,7 +83,6 @@ def run_quantization():
         )
         print(f"-> Tạo thành công mô hình Dynamic INT8: {INT8_MODEL_PATH}")
 
-    # 3. So sánh kích thước file
     fp32_size = os.path.getsize(FP32_MODEL_PATH)
     int8_size = os.path.getsize(INT8_MODEL_PATH)
     print("\n3. SO SÁNH DUNG LƯỢNG MÔ HÌNH:")
@@ -94,27 +90,24 @@ def run_quantization():
     print(f"  + Mô hình INT8 sau lượng tử: {int8_size:,} bytes ({int8_size/1024:.2f} KB)")
     print(f"  -> Giảm: {(1 - int8_size/fp32_size)*100:.1f}% dung lượng!")
 
-    # 4. Đo đạc độ chính xác và độ trễ trên tập Test
     print("\n4. ĐO ĐẠC HIỆU NĂNG TRÊN TẬP TEST ĐỘC LẬP (355 MẪU):")
 
-    # A. Đo Float32
     sess_fp32 = ort.InferenceSession(FP32_MODEL_PATH)
     t0 = time.time()
     preds_fp32 = []
     for i in range(len(X_test)):
         out = sess_fp32.run(None, {"input_audio_mfcc": X_test[i:i+1]})[0]
         preds_fp32.append(np.argmax(out))
-    t_fp32 = (time.time() - t0) / len(X_test) * 1000  # ms per sample
+    t_fp32 = (time.time() - t0) / len(X_test) * 1000
     acc_fp32 = np.mean(np.array(preds_fp32) == y_test)
 
-    # B. Đo INT8
     sess_int8 = ort.InferenceSession(INT8_MODEL_PATH)
     t0 = time.time()
     preds_int8 = []
     for i in range(len(X_test)):
         out = sess_int8.run(None, {"input_audio_mfcc": X_test[i:i+1]})[0]
         preds_int8.append(np.argmax(out))
-    t_int8 = (time.time() - t0) / len(X_test) * 1000  # ms per sample
+    t_int8 = (time.time() - t0) / len(X_test) * 1000
     acc_int8 = np.mean(np.array(preds_int8) == y_test)
 
     print("-" * 65)
@@ -126,7 +119,6 @@ def run_quantization():
     print(f"{'Độ suy hao chính xác':<25} | {'-':>18} | {(acc_fp32 - acc_int8)*100:>13.2f}%")
     print("-" * 65)
 
-    # 5. Chi tiết từng từ khóa sau Quantization
     print("\n5. CHI TIẾT ĐỘ CHÍNH XÁC TỪNG TỪ KHÓA SAU LƯỢNG TỬ HÓA:")
     preds_int8 = np.array(preds_int8)
     for idx, cls_name in enumerate(classes):
@@ -136,17 +128,14 @@ def run_quantization():
             c_int8 = np.mean(preds_int8[mask] == y_test[mask]) * 100
             print(f"  + Lớp '{cls_name:<8s}': Float32 = {c_fp32:5.1f}%  -->  INT8 = {c_int8:5.1f}%")
 
-    # 6. Xuất mã nguồn C Header INT8 cho ESP32-S3
     print("\n6. Đang xuất file C Header nhúng cho ESP32-S3...")
     convert_file_to_c_header(INT8_MODEL_PATH, INT8_HEADER_PATH, array_name="kws_int8_model")
 
-    # Đồng thời cập nhật file model_data.h chính
     convert_file_to_c_header(INT8_MODEL_PATH, os.path.join(MODEL_DIR, "model_data.h"), array_name="kws_model")
 
     print(f"\n-> Đã cập nhật file C Header: {INT8_HEADER_PATH}")
     print(f"-> Đã cập nhật file C Header chính: {os.path.join(MODEL_DIR, 'model_data.h')}")
 
-    # 7. Lưu báo cáo so sánh ra file JSON
     quant_report = {
         "fp32_size_kb": round(fp32_size / 1024, 2),
         "int8_size_kb": round(int8_size / 1024, 2),

@@ -1,18 +1,3 @@
-/*
- * DTV Smart Home — Audio Dataset Acquisition Node
- * Target: ESP32-S3 (Native USB / COM8)
- *
- * Architecture:
- *   ├── input/
- *   │   ├── audio_input.h/c      (INMP441 + Active Channel Lock + 4th-Order Bandpass + Noise Gate)
- *   │   └── trigger_manager.h/c  (Physical Buttons BUT1/BOOT + USB Serial Command Listener)
- *   ├── output/
- *   │   ├── usb_stream.h/c       (High-speed USB Binary Framing + RIFF WAV Header Streamer)
- *   │   ├── audio_output.h/c     (MAX98357A Loa + Smart SD Muting + "Ding/Boop" Feedback)
- *   │   └── status_indicator.h/c (LED Visual Feedback: Green=Ready, Blue=Active)
- *   └── main.c                   (Event-Driven Dataset Recording Coordinator)
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,11 +16,9 @@
 
 static const char *TAG = "DATASET_NODE";
 
-/* Recording buffer in PSRAM */
 static int16_t s_record_buffer[MAX_RECORD_SAMPLES];
 static int s_recorded_samples = 0;
 
-/* Option: Set to true if you want speaker playback of recorded voice */
 #define ENABLE_SPEAKER_PLAYBACK 0
 
 static void audio_collector_task(void *arg)
@@ -52,13 +35,12 @@ static void audio_collector_task(void *arg)
     while (1) {
         switch (state) {
         case STATE_IDLE: {
-            /* 1. Read Clean Filtered Audio Frame from INPUT */
+
             if (audio_input_read_clean(frame_buf, AUDIO_FRAME_SAMPLES, &frame_rms) != ESP_OK) {
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
 
-            /* 2. Poll triggers (Hardware button BUT1/BOOT or USB commands 'r'/'R') */
             trigger_source_t trig = trigger_manager_poll();
 
             if (trig != TRIGGER_NONE) {
@@ -67,14 +49,11 @@ static void audio_collector_task(void *arg)
                 ESP_LOGW(TAG, "🎙️ [RECORD START] Triggered by %s!", src);
                 ESP_LOGI(TAG, "==================================================");
 
-                /* Sound chime prompt & set LED */
                 audio_output_play_chime(CHIME_WAKE);
                 status_indicator_set_state(STATE_RECORDING);
 
-                /* Flush stale DMA buffers to prevent echo of chime */
                 audio_input_flush_buffers();
 
-                /* Inform USB host of session start */
                 usb_stream_send_start(AUDIO_SAMPLE_RATE, 1, 16);
 
                 s_recorded_samples = 0;
@@ -84,7 +63,7 @@ static void audio_collector_task(void *arg)
                 state = STATE_RECORDING;
             } else {
                 heartbeat++;
-                if (heartbeat % 150 == 0) { /* Every ~3 seconds */
+                if (heartbeat % 150 == 0) {
                     ESP_LOGI(TAG, "🟢 [READY] Press BUT1/BOOT or send 'r' via USB to record...");
                 }
             }
@@ -92,7 +71,7 @@ static void audio_collector_task(void *arg)
         }
 
         case STATE_RECORDING: {
-            /* 1. Read clean audio frame */
+
             if (audio_input_read_clean(frame_buf, AUDIO_FRAME_SAMPLES, &frame_rms) != ESP_OK) {
                 continue;
             }
@@ -100,16 +79,13 @@ static void audio_collector_task(void *arg)
             bool is_speech = audio_input_is_speech(frame_rms);
             bool btn_down  = trigger_manager_is_button_down();
 
-            /* 2. Real-time stream frame over USB to PC/Phone */
             usb_stream_send_frame(frame_buf, AUDIO_FRAME_SAMPLES, is_speech, btn_down);
 
-            /* 3. Store into PSRAM record buffer */
             if (s_recorded_samples + AUDIO_FRAME_SAMPLES <= MAX_RECORD_SAMPLES) {
                 memcpy(&s_record_buffer[s_recorded_samples], frame_buf, AUDIO_FRAME_SAMPLES * sizeof(int16_t));
                 s_recorded_samples += AUDIO_FRAME_SAMPLES;
             }
 
-            /* 4. Track speech & silence */
             if (is_speech) {
                 speech_count++;
                 silence_count = 0;
@@ -122,7 +98,6 @@ static void audio_collector_task(void *arg)
                 }
             }
 
-            /* 5. Check Stop Triggers */
             bool stop_req = trigger_manager_poll_stop();
             bool max_len  = (s_recorded_samples >= MAX_RECORD_SAMPLES);
             bool vad_stop = (has_spoken && silence_count >= 25 && s_recorded_samples >= (AUDIO_SAMPLE_RATE * 7 / 10));
@@ -144,10 +119,8 @@ static void audio_collector_task(void *arg)
         case STATE_FINALIZE: {
             status_indicator_set_state(STATE_FINALIZE);
 
-            /* Send session end packet */
             usb_stream_send_end(s_recorded_samples);
 
-            /* Also send WAV header so host can dump directly */
             usb_stream_send_wav_header(s_recorded_samples);
 
             float duration = (float)s_recorded_samples / (float)AUDIO_SAMPLE_RATE;
@@ -182,7 +155,6 @@ void app_main(void)
     ESP_LOGI(TAG, "   High-Speed USB Streaming (Native USB / CDC on COM8)        ");
     ESP_LOGI(TAG, "==============================================================");
 
-    /* Initialize NVS */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -190,17 +162,13 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    /* 1. Initialize OUTPUT Modules */
     status_indicator_init();
     usb_stream_init();
     audio_output_init();
 
-
-    /* 2. Initialize INPUT Modules */
     audio_input_init();
     trigger_manager_init();
 
-    /* 3. Launch Coordinator Task */
     xTaskCreatePinnedToCore(audio_collector_task, "audio_collector", 8192, NULL, 5, NULL, 0);
 
     ESP_LOGI(TAG, "🚀 SYSTEM ONLINE!");

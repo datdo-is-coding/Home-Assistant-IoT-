@@ -1,9 +1,5 @@
-/**
- * @file subbox_mqtt_client.cpp
- * @brief ESP-IDF MQTT Client Implementation for Pi4 Integration
- */
-
 #include "subbox_mqtt_client.h"
+#include "hc_runtime.h"
 #include "esp_log.h"
 #include <cstring>
 #include "cJSON.h"
@@ -37,7 +33,6 @@ bool MqttClient::init() {
 
     ESP_LOGI(TAG, "Initializing MQTT connection to: %s...", m_broker_uri.c_str());
 
-    m_broker_uri = SecurityConfig::get("mqtt_uri");
     m_ca = SecurityConfig::get("ca_pem");
     m_user = SecurityConfig::get("mqtt_user");
     m_password = SecurityConfig::get("mqtt_pass");
@@ -93,6 +88,12 @@ void MqttClient::registerVoiceResponseCallback(
     m_voice_resp_callback = cb;
 }
 
+bool MqttClient::publishCore(const uint8_t* data, size_t length) {
+    if (!m_client || !m_connected) return false;
+    std::string topic="hc/v1/subbox/"+std::to_string(hc_runtime_node_id())+"/up";
+    return esp_mqtt_client_enqueue(m_client,topic.c_str(),reinterpret_cast<const char*>(data),length,1,0,true)>=0;
+}
+
 bool MqttClient::publishState(const std::string& json_payload) {
     if (!m_client || !m_connected) return false;
     int msg_id = esp_mqtt_client_publish(m_client, m_topic_state.c_str(), json_payload.c_str(), json_payload.length(), 1, 0);
@@ -131,6 +132,10 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "MQTT Connected to Pi4 Broker! Subscribing to command topics...");
             self->m_connected = true;
+            if (hc_runtime_enabled()) {
+                std::string core="hc/v1/subbox/"+std::to_string(hc_runtime_node_id())+"/down";
+                esp_mqtt_client_subscribe(self->m_client,core.c_str(),1);
+            }
             subbox_led_set_mqtt_connected(true);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_command.c_str(), 1);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_voice_resp.c_str(), 1);
@@ -143,7 +148,10 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
             break;
 
         case MQTT_EVENT_DATA:
-            // Never execute a partial MQTT message as a complete command.
+            if (event->current_data_offset==0 && event->data_len==event->total_data_len && event->data_len>=2 && event->data[0]=='H' && event->data[1]=='C') {
+                hc_runtime_receive_mqtt(reinterpret_cast<const uint8_t*>(event->data),event->data_len); break;
+            }
+
             if (event->current_data_offset == 0 && event->data_len == event->total_data_len)
                 self->onMqttData(event->topic, event->topic_len, event->data, event->data_len);
             break;

@@ -24,7 +24,6 @@ logger = logging.getLogger("asr")
 
 sherpa_onnx = None
 
-
 def _ensure_sherpa():
     global sherpa_onnx
     if sherpa_onnx is None:
@@ -36,31 +35,27 @@ def _ensure_sherpa():
             logger.error("sherpa_onnx not installed")
             raise
 
-
-# ── Smart Home Hotwords (boost ASR accuracy for IoT commands) ───────
 SMARTHOME_HOTWORDS = [
-    # Actions
+
     "BẬT", "TẮT", "MỞ", "ĐÓNG", "CÀI", "ĐẶT", "CHỈNH",
-    # Devices
+
     "ĐÈN", "QUẠT", "ĐIỀU HÒA", "MÁY LẠNH", "RÈM", "BƠM",
     "ĐÈN NGỦ", "ĐÈN TRẦN", "QUẠT TRẦN", "BÌNH NÓNG LẠNH",
     "CỬA CUỐN", "GIÀN PHƠI", "MÁY HÚT MÙI",
-    # Rooms
+
     "PHÒNG KHÁCH", "PHÒNG NGỦ", "PHÒNG BẾP", "PHÒNG TẮM",
     "PHÒNG LÀM VIỆC", "BAN CÔNG", "SÂN VƯỜN", "SÂN THƯỢNG",
     "HÀNH LANG", "PHÒNG THỜ", "PHÒNG VỆ SINH", "GARA",
-    # Common phrases
+
     "BẬT ĐÈN", "TẮT ĐÈN", "BẬT QUẠT", "TẮT QUẠT",
     "BẬT ĐIỀU HÒA", "TẮT ĐIỀU HÒA", "MỞ RÈM", "ĐÓNG RÈM",
-    # Numbers (for temperature)
+
     "ĐỘ", "MƯỜI SÁU", "MƯỜI BẢY", "MƯỜI TÁM", "HAI MƯƠI",
     "HAI LĂM", "HAI SÁU", "HAI BẢY", "HAI TÁM", "BA MƯƠI",
 ]
 
-# ── Vietnamese ASR phonetic post-corrections ────────────────────────
-# Common Zipformer/Whisper misrecognitions for Vietnamese smart home commands
 ASR_PHONETIC_CORRECTIONS = [
-    # "bật quạt" family
+
     (r"\bbất quá\b", "bật quạt"),
     (r"\bbật quá\b", "bật quạt"),
     (r"\bbật quà\b", "bật quạt"),
@@ -68,7 +63,7 @@ ASR_PHONETIC_CORRECTIONS = [
     (r"\bmở quá\b", "mở quạt"),
     (r"\btắt quá\b", "tắt quạt"),
     (r"\btắt quà\b", "tắt quạt"),
-    # "bật đèn" family
+
     (r"\bbật điên\b", "bật đèn"),
     (r"\btắt điên\b", "tắt đèn"),
     (r"\bbật đền\b", "bật đèn"),
@@ -77,23 +72,23 @@ ASR_PHONETIC_CORRECTIONS = [
     (r"\btắt đêm\b", "tắt đèn"),
     (r"\bbạt đèn\b", "bật đèn"),
     (r"\bbạt đền\b", "bật đèn"),
-    # "bạn bè" -> "bật đèn" (very common ASR confusion)
+
     (r"\bbạn bè\b", "bật đèn"),
     (r"\bbạn bè phòng\b", "bật đèn phòng"),
-    # "phòng khách" family
+
     (r"\bphong khách\b", "phòng khách"),
     (r"\bphòng khach\b", "phòng khách"),
     (r"\bphong khach\b", "phòng khách"),
     (r"\bphong khac\b", "phòng khách"),
-    # "phòng ngủ" family
+
     (r"\bphong ngu\b", "phòng ngủ"),
     (r"\bphòng ngu\b", "phòng ngủ"),
     (r"\bphong ngue\b", "phòng ngủ"),
     (r"\bphòng ngue\b", "phòng ngủ"),
-    # "phòng bếp" family
+
     (r"\bphong bep\b", "phòng bếp"),
     (r"\bphòng bep\b", "phòng bếp"),
-    # Acoustic confusions from Zipformer phonetics
+
     (r"\bban đêm không ngủ\b", "bật quạt phòng ngủ"),
     (r"\bđêm qua không ngủ\b", "bật quạt phòng ngủ"),
     (r"\bđêm qua\b", "bật quạt"),
@@ -106,16 +101,15 @@ ASR_PHONETIC_CORRECTIONS = [
     (r"\bbắt quạt\b", "bật quạt"),
     (r"\btắt qua\b", "tắt quạt"),
     (r"\btác quạt\b", "tắt quạt"),
-    # Device synonyms
+
     (r"\bquạt điện\b", "quạt"),
     (r"\bbóng đèn\b", "đèn"),
     (r"\bmáy lạnh\b", "điều hòa"),
     (r"\bmáy điều hòa\b", "điều hòa"),
     (r"\bổ cắm\b", "ổ cắm"),
-    # Common garbage / noise words the ASR hallucinates
+
     (r"\b(ừm|ơ|à|ờ|hmm|uh)\b", ""),
 ]
-
 
 class ASREngine:
     """Vietnamese speech-to-text using Sherpa-ONNX Zipformer.
@@ -126,10 +120,9 @@ class ASREngine:
     - Vietnamese phonetic post-correction for smart home commands
     """
 
-    # Confidence thresholds
-    CONFIDENCE_HIGH = 0.75      # Good recognition
-    CONFIDENCE_MEDIUM = 0.50    # Acceptable but may have errors
-    CONFIDENCE_LOW = 0.30       # Likely misheard, should clarify
+    CONFIDENCE_HIGH = 0.75
+    CONFIDENCE_MEDIUM = 0.50
+    CONFIDENCE_LOW = 0.30
 
     def __init__(self):
         self.recognizer = None
@@ -153,22 +146,19 @@ class ASREngine:
                         clean_room = room.replace("_", " ").upper()
                         words.add(clean_room)
 
-                    # Top level node properties
-                    for ch_key in ("ch1_name", "ch2_name", "rl1", "rl2", "name", "description"):
+                    for ch_key in ("ch1_name", "ch2_name", "ch3_name", "rl1", "rl2", "rl3", "name", "description"):
                         val = ninfo.get(ch_key)
                         if isinstance(val, str) and val.strip():
                             clean = re.sub(r"[^\w\sÀ-ỹ]", " ", val).strip().upper()
                             if len(clean) >= 2:
                                 words.add(clean)
 
-                    # Node level room/device aliases
                     for a in ninfo.get("aliases", []):
                         if isinstance(a, str) and a.strip():
                             clean = re.sub(r"[^\w\sÀ-ỹ]", " ", a.replace("_", " ")).strip().upper()
                             if len(clean) >= 2:
                                 words.add(clean)
 
-                    # Channel level names, types, and voice aliases
                     channels = ninfo.get("channels", {})
                     if isinstance(channels, dict):
                         for ch_id, ch in channels.items():
@@ -223,13 +213,10 @@ class ASREngine:
             logger.error(f"Missing transducer model files in {model_dir}")
             return False
 
-        # Generate hotwords file (with dynamic registry keywords)
         self._hotwords_path = self._generate_hotwords_file(registry)
 
-        # Check for BPE vocab (required for Zipformer Vietnamese BPE models)
         bpe_vocab_path = self._find_file(model_dir, "bpe.vocab")
 
-        # Try modified_beam_search with hotwords first (better accuracy)
         if self._hotwords_path:
             try:
                 logger.info(f"Loading ASR with modified_beam_search + hotwords boosting")
@@ -259,8 +246,6 @@ class ASREngine:
             except Exception as e:
                 logger.warning(f"modified_beam_search failed ({e}), falling back to greedy_search")
 
-
-        # Fallback: greedy_search (faster but no hotwords boosting)
         try:
             logger.info(f"Loading ASR with greedy_search (fallback)")
             self.recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
@@ -335,7 +320,6 @@ class ASREngine:
             elif not isinstance(pcm_samples, np.ndarray):
                 pcm_samples = np.array(pcm_samples, dtype=np.float32)
 
-            # Check audio quality (very short or silent audio = low confidence)
             duration_s = len(pcm_samples) / sr
             rms = float(np.sqrt(np.mean(pcm_samples ** 2))) if len(pcm_samples) > 0 else 0.0
 
@@ -354,12 +338,10 @@ class ASREngine:
             if not raw_text:
                 return "", 0.0
 
-            # Post-correct common Vietnamese ASR errors
             corrected = self._phonetic_correct(raw_text)
             if corrected != raw_text:
                 logger.info(f"ASR corrected: '{raw_text}' → '{corrected}'")
 
-            # Compute confidence score
             confidence = self._estimate_confidence(corrected, raw_text, duration_s, rms)
             logger.info(f"ASR result: '{corrected}' (confidence={confidence:.2f}, beam={'Y' if self._using_beam_search else 'N'})")
 
@@ -374,7 +356,7 @@ class ASREngine:
         result = text.lower().strip()
         for pattern, replacement in ASR_PHONETIC_CORRECTIONS:
             result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-        # Clean up multiple spaces
+
         result = re.sub(r"\s+", " ", result).strip()
         return result
 
@@ -386,20 +368,18 @@ class ASREngine:
         3. Correction distance (how much we had to fix)
         4. Text length vs audio duration ratio
         """
-        score = 0.5  # Base score
+        score = 0.5
 
-        # 1. Audio quality boost
         if rms > 0.05:
-            score += 0.1   # Good volume
+            score += 0.1
         elif rms < 0.01:
-            score -= 0.15  # Very quiet
+            score -= 0.15
 
         if 0.5 <= duration_s <= 8.0:
-            score += 0.05  # Normal duration
+            score += 0.05
         elif duration_s > 10.0:
-            score -= 0.1   # Too long (noise?)
+            score -= 0.1
 
-        # 2. Smart home keyword presence boost
         smarthome_keywords = {
             "bật", "tắt", "mở", "đóng", "cài", "đặt", "chỉnh",
             "đèn", "quạt", "điều hòa", "rèm", "bơm", "máy lạnh",
@@ -409,38 +389,34 @@ class ASREngine:
         text_lower = corrected_text.lower()
         keyword_hits = sum(1 for kw in smarthome_keywords if kw in text_lower)
         if keyword_hits >= 2:
-            score += 0.25  # Strong match
+            score += 0.25
         elif keyword_hits == 1:
-            score += 0.10  # Partial match
+            score += 0.10
         else:
-            score -= 0.15  # No smart home keywords at all
+            score -= 0.15
 
-        # 3. Correction penalty (had to fix a lot = less confident)
         if corrected_text.lower() != raw_text.lower():
-            # Count how many corrections were applied
+
             diff_chars = sum(1 for a, b in zip(corrected_text.lower(), raw_text.lower()) if a != b)
             diff_ratio = diff_chars / max(len(raw_text), 1)
             if diff_ratio > 0.3:
-                score -= 0.15  # Heavy correction needed
+                score -= 0.15
             elif diff_ratio > 0.1:
-                score -= 0.05  # Some correction needed
+                score -= 0.05
 
-        # 4. Suspicious patterns (common garbage outputs)
         garbage_patterns = [
-            r"^[^a-zA-ZÀ-ỹ]+$",        # No letters at all
-            r"^(.)\1{3,}",               # Repeated characters
-            r"^\s*$",                     # Empty/whitespace
+            r"^[^a-zA-ZÀ-ỹ]+$",
+            r"^(.)\1{3,}",
+            r"^\s*$",
         ]
         for gp in garbage_patterns:
             if re.match(gp, corrected_text):
                 score -= 0.3
 
-        # 5. Text too short for the audio duration
         words = len(corrected_text.split())
         if duration_s > 2.0 and words <= 1:
-            score -= 0.1  # Long audio but very few words
+            score -= 0.1
 
-        # Clamp
         return max(0.0, min(1.0, score))
 
     def _find_file(self, base_dir: str, pattern: str) -> Optional[str]:

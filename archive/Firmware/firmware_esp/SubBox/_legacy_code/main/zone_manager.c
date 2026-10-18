@@ -1,8 +1,3 @@
-/*
- * Zone Manager — Implementation
- * DTV Smart Home — T2 Zone Controller
- */
-
 #include "zone_manager.h"
 #include <string.h>
 #include "esp_log.h"

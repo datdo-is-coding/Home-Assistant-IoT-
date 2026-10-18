@@ -1,8 +1,3 @@
-/*
- * Audio Proxy — Implementation
- * DTV Smart Home — T2 Zone Controller
- */
-
 #include "audio_proxy.h"
 #include "ws_audio_client.h"
 #include "audio_feedback.h"
@@ -23,12 +18,10 @@ esp_err_t audio_proxy_init(const char *gateway_ws_uri, i2s_chan_handle_t spk_han
 {
     ESP_LOGI(TAG, "Initializing Audio Proxy (Gateway WS: %s)...", gateway_ws_uri);
 
-    /* Initialize local feedback chimes */
     if (spk_handle) {
         audio_feedback_init(spk_handle);
     }
 
-    /* Initialize Gateway WebSocket audio client */
     esp_err_t err = ws_audio_client_init(gateway_ws_uri, spk_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to init ws_audio_client: %s", esp_err_to_name(err));
@@ -50,10 +43,8 @@ void audio_proxy_on_stream_start(const uint8_t *sender_mac, uint8_t wake_word_in
              sender_mac[3], sender_mac[4], sender_mac[5],
              wake_word_index, (codec == CODEC_IMA_ADPCM) ? "ADPCM" : "RAW_PCM");
 
-    /* Play prompt Ding! feedback chime through T2's speaker */
     audio_feedback_play(AUDIO_FB_WAKEUP);
 
-    /* Start WebSocket audio stream to Gateway */
     if (!ws_audio_is_streaming()) {
         esp_err_t err = ws_audio_start_stream();
         if (err != ESP_OK) {
@@ -67,11 +58,11 @@ void audio_proxy_on_chunk(const uint8_t *sender_mac, const uint8_t *pcm_data, ui
     if (!s_is_active) return;
 
     if (s_current_codec == CODEC_IMA_ADPCM) {
-        /* Decode 4-bit ADPCM into 16-bit PCM samples */
+
         int decoded_samples = adpcm_decode(pcm_data, pcm_len, s_pcm_dec_buf, &s_adpcm_dec_state);
         ws_audio_feed_pcm(s_pcm_dec_buf, decoded_samples);
     } else {
-        /* Raw PCM 16-bit */
+
         int num_samples = pcm_len / sizeof(int16_t);
         ws_audio_feed_pcm((const int16_t *)pcm_data, num_samples);
     }
@@ -84,7 +75,6 @@ void audio_proxy_on_stream_end(const uint8_t *sender_mac, uint16_t total_chunks,
              sender_mac[3], sender_mac[4], sender_mac[5],
              total_chunks, (unsigned long)total_pcm_bytes);
 
-    /* Immediately notify Gateway that speech has ended */
     ws_audio_stop_stream();
 
     s_is_active = false;

@@ -6,7 +6,6 @@ class GoogleAssistantService {
 
   GoogleAssistantService({this.rustCoreUrl = "http://localhost:8080"});
 
-  /// Process voice query intent triggered by Google Assistant
   Future<Map<String, dynamic>> processVoiceIntent(String intent) async {
     try {
       final response = await http.post(
@@ -19,7 +18,7 @@ class GoogleAssistantService {
         return jsonDecode(response.body);
       }
     } catch (e) {
-      // Fallback response if offline
+
     }
     return {
       "speech_response": "Trạng thái điện thế hiện tại của nhà bạn là 220.5 Volts, công suất tiêu thụ 265 Watts.",

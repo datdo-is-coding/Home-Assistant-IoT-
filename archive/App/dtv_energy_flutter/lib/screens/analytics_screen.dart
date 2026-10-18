@@ -74,27 +74,22 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // === WEATHER CARD ===
+
               _buildWeatherCard(),
               const SizedBox(height: 16),
 
-              // === POWER CHART ===
               _buildChartCard("⚡ CÔNG SUẤT (W)", "power", const Color(0xFFF97316)),
               const SizedBox(height: 14),
 
-              // === VOLTAGE CHART ===
               _buildChartCard("🔌 ĐIỆN ÁP (V)", "voltage", const Color(0xFF06B6D4)),
               const SizedBox(height: 14),
 
-              // === CURRENT CHART ===
               _buildChartCard("📊 DÒNG ĐIỆN (A)", "current", const Color(0xFFF59E0B)),
               const SizedBox(height: 14),
 
-              // === STATS ===
               _buildStatsGrid(),
               const SizedBox(height: 14),
 
-              // === SAMPLE INFO ===
               Text("📈 ${_analytics.length} / 60 mẫu (polling mỗi 5s)",
                   style: const TextStyle(color: Color(0xFF64748B), fontSize: 11)),
             ],

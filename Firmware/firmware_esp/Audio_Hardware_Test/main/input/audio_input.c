@@ -14,13 +14,11 @@
 static const char *TAG = "AUDIO_IN";
 
 static i2s_chan_handle_t s_mic_rx_handle = NULL;
-static int s_mic_channel = 0; /* 0 for Left (L/R=GND), 1 for Right (L/R=VDD) */
+static int s_mic_channel = 0;
 static float s_ambient_rms = 30.0f;
 static float s_gate_threshold = 50.0f;
 static float s_gate_env = 0.0f;
 static float s_gate_gain = 0.0f;
-
-/* ─── Biquad Filter Implementation ────────────────────────────────────── */
 
 typedef struct {
     float b0, b1, b2;
@@ -46,11 +44,8 @@ static inline float biquad_step(biquad_t *f, float in)
     return out;
 }
 
-/* 4th-Order Filters */
 static biquad_t s_hpf1, s_hpf2;
 static biquad_t s_lpf1, s_lpf2;
-
-/* ─── Audio Input Initialization ─────────────────────────────────────── */
 
 esp_err_t audio_input_init(void)
 {
@@ -78,19 +73,15 @@ esp_err_t audio_input_init(void)
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_mic_rx_handle, &std_cfg));
     ESP_ERROR_CHECK(i2s_channel_enable(s_mic_rx_handle));
 
-    /* Initialize 4th-Order Linkwitz-Riley HPF @ 180Hz (Fs=16kHz) */
     biquad_init(&s_hpf1, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
     biquad_init(&s_hpf2, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
 
-    /* Initialize 4th-Order Linkwitz-Riley LPF @ 3400Hz (Fs=16kHz) */
     biquad_init(&s_lpf1, 0.2271180f, 0.4542359f, 0.2271180f, -0.2766646f, 0.1851365f);
     biquad_init(&s_lpf2, 0.2271180f, 0.4542359f, 0.2271180f, -0.2766646f, 0.1851365f);
 
-    /* Flush initial startup settling noise */
     vTaskDelay(pdMS_TO_TICKS(100));
     audio_input_flush_buffers();
 
-    /* Calibration: Detect microphone slot (Left vs Right) & calibrate noise floor */
     static int32_t s_cal_buf[AUDIO_FRAME_SAMPLES * 2];
     int64_t l_sum = 0, r_sum = 0;
     float sum_filtered_rms = 0.0f;
@@ -168,25 +159,22 @@ esp_err_t audio_input_read_clean(int16_t *out_mono, int samples, float *out_rms)
 
     int64_t sum_sq = 0;
     for (int i = 0; i < read_mono; i++) {
-        /* Extract from locked channel */
+
         int32_t raw_32 = s_raw_stereo[i * 2 + s_mic_channel];
         float in_sample = (float)(raw_32 >> 16);
 
-        /* 4th-Order Bandpass: 180Hz HPF + 3400Hz LPF */
         float s = biquad_step(&s_hpf1, in_sample);
         s = biquad_step(&s_hpf2, s);
         s = biquad_step(&s_lpf1, s);
         s = biquad_step(&s_lpf2, s);
 
-        /* Envelope Follower */
         float abs_s = fabsf(s);
         if (abs_s > s_gate_env) {
-            s_gate_env += 0.04f * (abs_s - s_gate_env);   /* Fast attack ~1.5ms */
+            s_gate_env += 0.04f * (abs_s - s_gate_env);
         } else {
-            s_gate_env += 0.001f * (abs_s - s_gate_env);  /* Smooth release ~60ms */
+            s_gate_env += 0.001f * (abs_s - s_gate_env);
         }
 
-        /* Downward Expander (Noise Gate down to true 0.0) */
         float target_gain = 0.0f;
         if (s_gate_env > s_gate_threshold * 1.5f) {
             target_gain = 1.0f;
@@ -220,4 +208,3 @@ bool audio_input_is_speech(float frame_rms)
     }
     return (frame_rms >= speech_thresh);
 }
-

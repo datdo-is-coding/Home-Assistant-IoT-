@@ -1,8 +1,3 @@
-/*
- * Audio Feedback Chime & Tone Synthesizer — Implementation
- * DTV Smart Home — ESP32-S3 Master
- */
-
 #include "audio_feedback.h"
 #include "esp_sound_assets.h"
 
@@ -36,9 +31,6 @@ void audio_feedback_unlock(void)
     }
 }
 
-/**
- * @brief Play a raw 16kHz 16-bit Mono PCM soundscape asset from flash via DMA SRAM bounce buffer.
- */
 static void play_pcm_asset(const uint8_t *pcm_data, size_t pcm_len)
 {
     if (!spk_tx_handle || !pcm_data || pcm_len == 0) return;
@@ -72,9 +64,8 @@ static void audio_feedback_task(void *arg)
 
             s_feedback_playing = true;
 
-            /* 1. Power on / unmute MAX98357A amplifier via SP_SD (GPIO 2) */
             speaker_enable(true);
-            vTaskDelay(pdMS_TO_TICKS(25)); /* Allow Amp output stage to settle smoothly */
+            vTaskDelay(pdMS_TO_TICKS(25));
 
             switch (type) {
             case AUDIO_FB_BOOTUP:
@@ -98,16 +89,14 @@ static void audio_feedback_task(void *arg)
                 break;
             }
 
-            /* 2. Flush DMA with zero samples so no DC bias or click remains */
             int16_t silence[128];
             memset(silence, 0, sizeof(silence));
             for (int i = 0; i < 4; i++) {
                 size_t written = 0;
                 i2s_channel_write(spk_tx_handle, silence, sizeof(silence), &written, pdMS_TO_TICKS(50));
             }
-            vTaskDelay(pdMS_TO_TICKS(35)); /* Allow DMA to completely clock out zero samples */
+            vTaskDelay(pdMS_TO_TICKS(35));
 
-            /* 3. Shut down / mute MAX98357A amplifier into 0.01uA sleep */
             speaker_enable(false);
 
             s_feedback_playing = false;
@@ -142,7 +131,6 @@ bool audio_feedback_is_playing(void)
     return s_feedback_playing;
 }
 
-/* ─── Disconnect Periodic Reminder Loop (FreeRTOS Timer) ────────────────── */
 #include "freertos/timers.h"
 static TimerHandle_t disconnect_timer = NULL;
 
@@ -178,4 +166,3 @@ void audio_feedback_stop_disconnect_loop(void)
         ESP_LOGI(TAG, "✅ Stopped disconnect periodic reminder loop (Connection restored)");
     }
 }
-

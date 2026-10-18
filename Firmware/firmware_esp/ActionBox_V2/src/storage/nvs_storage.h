@@ -1,8 +1,3 @@
-/**
- * @file nvs_storage.h
- * @brief Persistent Configuration Storage using ESP-IDF NVS
- */
-
 #pragma once
 
 #include <stdint.h>
@@ -37,46 +32,16 @@ typedef struct {
     uint32_t          config_version;
 } ActionBoxPersistentConfig;
 
-/**
- * @brief Initialize NVS flash partition and load configuration
- * @return ESP_OK on success
- */
 esp_err_t nvs_storage_init(void);
 
-/**
- * @brief Load persistent configuration from NVS (or writes factory defaults on first boot)
- * @param out_cfg Pointer to destination struct
- * @return ESP_OK on success
- */
 esp_err_t nvs_storage_load_config(ActionBoxPersistentConfig *out_cfg);
 
-/**
- * @brief Save modified configuration to NVS
- * Only performs write if fields have changed.
- * @param cfg Pointer to config struct
- * @return ESP_OK on success
- */
 esp_err_t nvs_storage_save_config(const ActionBoxPersistentConfig *cfg);
 
-/**
- * @brief Reset all parameters to factory defaults in NVS
- * @param out_cfg Optional destination pointer for new defaults
- * @return ESP_OK on success
- */
 esp_err_t nvs_storage_factory_reset(ActionBoxPersistentConfig *out_cfg);
 
-/**
- * @brief Update last known relay state safely with rate limiting and change check
- * Does NOT cause rapid flash wear.
- * @param channel Channel ID (1 or 2)
- * @param state New RelayState
- */
 void nvs_storage_record_relay_state(uint8_t channel, RelayState state);
 
-/**
- * @brief Read currently cached configuration pointer
- * @return Const pointer to in-memory config struct
- */
 const ActionBoxPersistentConfig* nvs_storage_get_cached_config(void);
 
 #ifdef __cplusplus

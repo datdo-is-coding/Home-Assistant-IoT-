@@ -77,7 +77,7 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
+
           Center(
             child: Container(
               width: 36,
@@ -90,7 +90,6 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
           ),
           const SizedBox(height: 18),
 
-          // Header: Name, Room, Close Button
           Row(
             children: [
               Container(
@@ -136,7 +135,6 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
           ),
           const SizedBox(height: 24),
 
-          // Hero Vertical Pill Slider only for dimmable devices
           if (widget.device.metadata['can_dim'] == true) ...[
             Container(
               height: 200,
@@ -150,7 +148,7 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
               child: Stack(
                 alignment: Alignment.bottomCenter,
                 children: [
-                  // Animated fill representing slider level
+
                   FractionallySizedBox(
                     heightFactor: _isOn ? (_currentValue / 100.0).clamp(0.05, 1.0) : 0.0,
                     widthFactor: 1.0,
@@ -222,7 +220,6 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
             ),
             const SizedBox(height: 20),
 
-            // Quick Preset Buttons (25%, 50%, 75%, 100%)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [25, 50, 75, 100].map((preset) {
@@ -254,7 +251,7 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
               }).toList(),
             ),
           ] else ...[
-            // For Smart Socket or AC: Show telemetry & power button
+
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -284,7 +281,6 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
           ],
           const SizedBox(height: 24),
 
-          // Secondary Actions / Settings Row
           Row(
             children: [
               Expanded(

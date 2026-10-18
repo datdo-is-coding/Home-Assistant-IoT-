@@ -1,8 +1,3 @@
-/**
- * @file dev_console.h
- * @brief Development Console & Interactive CLI for SubBox
- */
-
 #pragma once
 
 #include "freertos/FreeRTOS.h"

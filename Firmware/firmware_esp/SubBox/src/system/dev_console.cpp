@@ -1,8 +1,3 @@
-/**
- * @file dev_console.cpp
- * @brief Development Console & Interactive CLI Implementation
- */
-
 #include "dev_console.h"
 #include <cstdio>
 #include <cstring>
@@ -44,7 +39,7 @@ DevConsole::~DevConsole() {
 }
 
 bool DevConsole::init() {
-    // BOOT must be held for any USB configuration write.
+
     gpio_set_direction(GPIO_NUM_0, GPIO_MODE_INPUT);
     gpio_set_pull_mode(GPIO_NUM_0, GPIO_PULLUP_ONLY);
     m_running = true;
@@ -83,7 +78,7 @@ void DevConsole::runConsoleLoop() {
         } else if (line.size() < 12000 && !overflow) {
             line.push_back(static_cast<char>(c));
         } else { overflow = true; }
-        // Never echo USB input: it may contain passwords, tokens or trust keys.
+
     }
 }
 
@@ -203,9 +198,9 @@ void DevConsole::runNluUnitTests() {
     TestCase cases[] = {
         {"bật đèn phòng khách", IntentType::TURN_ON, DeviceType::LIGHT, RoomType::LIVING_ROOM},
         {"tắt quạt phòng ngủ", IntentType::TURN_OFF, DeviceType::FAN, RoomType::BEDROOM},
-        {"bật điều hòa", IntentType::TURN_ON, DeviceType::AIR_CONDITIONER, RoomType::LIVING_ROOM}, // Inherits local room
+        {"bật điều hòa", IntentType::TURN_ON, DeviceType::AIR_CONDITIONER, RoomType::LIVING_ROOM},
         {"chỉnh nhiệt độ 26 độ", IntentType::SET_TEMPERATURE, DeviceType::AIR_CONDITIONER, RoomType::LIVING_ROOM},
-        {"bật đèn phòng bếp", IntentType::TURN_ON, DeviceType::LIGHT, RoomType::KITCHEN}, // Cross-room
+        {"bật đèn phòng bếp", IntentType::TURN_ON, DeviceType::LIGHT, RoomType::KITCHEN},
         {"nếu nhiệt độ phòng khách trên 30 độ thì bật quạt", IntentType::COMPLEX, DeviceType::NONE, RoomType::LIVING_ROOM},
         {"công suất tiêu thụ của đèn", IntentType::QUERY_POWER, DeviceType::LIGHT, RoomType::LIVING_ROOM},
         {"kiểm tra trạng thái quạt", IntentType::QUERY_STATE, DeviceType::FAN, RoomType::LIVING_ROOM}
@@ -236,14 +231,12 @@ void DevConsole::runNluUnitTests() {
         }
     }
 
-    // Pronoun Reference Context Test
     printf("--- Testing Pronoun Context Resolution (\"tắt nó\") ---\n");
-    // Seed context with a fan command
+
     std::string seed = VietnameseNormalizer::normalize("bật quạt phòng ngủ");
     CommandResolution seed_res = m_context_mgr->resolve(seed, "TEST", IntentParser::parse(seed), EntityExtractor::extract(seed));
     m_context_mgr->commitResolution(seed_res);
 
-    // Follow up with "tắt nó"
     std::string follow_up = VietnameseNormalizer::normalize("tắt nó");
     CommandResolution follow_res = m_context_mgr->resolve(follow_up, "TEST", IntentParser::parse(follow_up), EntityExtractor::extract(follow_up));
 

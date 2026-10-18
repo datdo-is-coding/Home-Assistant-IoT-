@@ -1,15 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
-/// Flagship optical boot animation inspired by Huawei's iconic celestial light ring.
-///
-/// Features pure visual optics:
-/// - Pitch-black canvas (`#000000`)
-/// - Concentric breathing celestial light rings with soft Gaussian falloff
-/// - 360° rotating optical refraction arc (lens flare caustic)
-/// - Whispering orbital light particles with dynamic depth
-/// - Specular light sweep across architectural typography `S I C   H O M E`
-/// - Seamless iris bloom exit transition
 class HuaweiBootScreen extends StatefulWidget {
   const HuaweiBootScreen({
     super.key,
@@ -44,25 +35,21 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
       duration: widget.duration,
     );
 
-    // Initial central light inception & bloom (0.0 -> 0.45)
     _bloomAnimation = CurvedAnimation(
       parent: _controller,
       curve: const Interval(0.0, 0.45, curve: Curves.easeOutCubic),
     );
 
-    // Ring expansion and optical breathing (0.1 -> 0.85)
     _ringAnimation = CurvedAnimation(
       parent: _controller,
       curve: const Interval(0.1, 0.85, curve: Curves.easeInOutCubic),
     );
 
-    // Subtle typography reveal (0.35 -> 0.70)
     _textFadeAnimation = CurvedAnimation(
       parent: _controller,
       curve: const Interval(0.35, 0.70, curve: Curves.easeOut),
     );
 
-    // Specular light sweep across text (0.45 -> 0.85)
     _shimmerAnimation = Tween<double>(begin: -1.0, end: 2.0).animate(
       CurvedAnimation(
         parent: _controller,
@@ -70,7 +57,6 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
       ),
     );
 
-    // Iris bloom & exit fade (0.85 -> 1.0)
     _exitFadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _controller,
@@ -128,7 +114,7 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // Dynamic celestial ring, optical arc and particle canvas
+
                     CustomPaint(
                       painter: _OpticalBootPainter(
                         bloomProgress: _bloomAnimation.value,
@@ -137,16 +123,14 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
                       ),
                     ),
 
-                    // Central Architectural Wordmark & Emblem
                     Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Central minimal optical node
+
                           _buildCoreNode(progress),
                           const SizedBox(height: 36),
 
-                          // Typography with specular light sweep
                           Opacity(
                             opacity: _textFadeAnimation.value,
                             child: Transform.translate(
@@ -165,7 +149,6 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
                       ),
                     ),
 
-                    // Top-right subtle glass skip pill
                     if (widget.allowSkip && progress < 0.85)
                       Positioned(
                         top: 50,
@@ -247,7 +230,7 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Inner rotating fine diamond
+
                 Transform.rotate(
                   angle: progress * math.pi * 1.2,
                   child: Container(
@@ -262,7 +245,7 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
                     ),
                   ),
                 ),
-                // Central luminous photon point
+
                 Container(
                   width: 6,
                   height: 6,
@@ -325,8 +308,6 @@ class _HuaweiBootScreenState extends State<HuaweiBootScreen>
   }
 }
 
-/// Custom painter crafting ethereal Huawei-like concentric light rings,
-/// subtle particle dust, and radial halation.
 class _OpticalBootPainter extends CustomPainter {
   _OpticalBootPainter({
     required this.bloomProgress,
@@ -342,7 +323,6 @@ class _OpticalBootPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
 
-    // 1. Ambient central radial halation / aurora glow
     final bgGlowRadius = size.width * 0.7;
     final bgGlowPaint = Paint()
       ..shader = RadialGradient(
@@ -355,32 +335,27 @@ class _OpticalBootPainter extends CustomPainter {
       ).createShader(Rect.fromCircle(center: center, radius: bgGlowRadius));
     canvas.drawCircle(center, bgGlowRadius, bgGlowPaint);
 
-    // 2. Concentric harmonic light rings (expanding outwards)
     final ringPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
 
     final baseRadius = 78.0 + (ringProgress * 44.0);
 
-    // Ring 1: Primary fine ring
     ringPaint.color =
         Colors.white.withValues(alpha: 0.22 * (1.0 - ringProgress * 0.4));
     canvas.drawCircle(center, baseRadius, ringPaint);
 
-    // Ring 2: Secondary outer faint ring
     final outerRadius = baseRadius + 32.0 + (ringProgress * 24.0);
     ringPaint.color =
         Colors.white.withValues(alpha: 0.10 * (1.0 - ringProgress * 0.3));
     canvas.drawCircle(center, outerRadius, ringPaint);
 
-    // Ring 3: Subtle inner harmonic ring
     final innerRadius = baseRadius - 24.0;
     if (innerRadius > 0) {
       ringPaint.color = Colors.white.withValues(alpha: 0.15 * bloomProgress);
       canvas.drawCircle(center, innerRadius, ringPaint);
     }
 
-    // 3. Ethereal rotating arcs (like Huawei celestial lens flare with spectral dispersion)
     final arcRect = Rect.fromCircle(center: center, radius: baseRadius + 12.0);
     final arcPaint = Paint()
       ..style = PaintingStyle.stroke
@@ -406,7 +381,6 @@ class _OpticalBootPainter extends CustomPainter {
       arcPaint,
     );
 
-    // 4. Subtle orbital particle dust with prismatic hues
     const particleCount = 12;
     const particlePalette = [
       Color(0xFF38BDF8),

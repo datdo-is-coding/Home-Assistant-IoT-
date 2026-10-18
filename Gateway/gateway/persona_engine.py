@@ -21,7 +21,6 @@ import config
 logger = logging.getLogger("persona")
 TZ_VN = timezone(timedelta(hours=7))
 
-
 SONG_LIBRARY = [
     "🎶 Một con vịt xòe ra hai cái cánh, nó kêu rằng cáp cáp cáp cạp cạp cạp... Gặp hồ nước nó bì bà bì bõm, lúc lên bờ vẫy cái cánh cho khô! 🎵 Em hát vậy anh thấy có vui tai không ạ? 😊",
     "🎵 Tình tính tang tang tính tình... Cuộc đời vẫn đẹp sao, tình yêu vẫn đẹp sao! Chúc anh một ngày luôn tràn đầy niềm vui và may mắn nha! 🎶",
@@ -44,7 +43,6 @@ CARING_RESPONSES = [
     "Thấy anh vui là em cũng vui lây luôn đó! Chúc anh một buổi tối thật an lành và ấm áp nha."
 ]
 
-
 class PersonaEngine:
     """Xử lý hội thoại tự nhiên, hát, kể chuyện cười và tương tác nhân cách hóa."""
 
@@ -66,7 +64,6 @@ class PersonaEngine:
     def api_key(self, val: str):
         self.gemini_api_key = val
 
-
     def is_conversational(self, user_text: str) -> bool:
         """Kiểm tra xem câu nói có phải là câu trò chuyện, yêu cầu hát, đố vui hay tâm sự không."""
         if not user_text:
@@ -74,17 +71,17 @@ class PersonaEngine:
         t = user_text.lower().strip()
 
         chat_patterns = [
-            # Yêu cầu hát
+
             r"\b(hát|ca một bài|ngân nga|hát hò|hát bài|hát cho|hát đi|karaoke)\b",
-            # Kể chuyện cười / hài
+
             r"\b(kể chuyện cười|kể chuyện vui|nói câu gì vui|hài hước|đố vui|câu đố)\b",
-            # Hỏi danh tính / bản thân
+
             r"\b(em là ai|bạn là ai|em tên gì|bạn tên gì|bạn tên là gì|tên bạn là gì|tên của em|ai tạo ra em|em mấy tuổi|em sinh năm)\b",
-            # Chào hỏi / cảm xúc / tâm sự
+
             r"\b(chào em|xin chào|em ơi|hôm nay mệt quá|buồn quá|mệt mỏi|chán quá|em ngoan|cảm ơn em|yêu em)\b",
-            # Hỏi giờ / ngày / thời tiết
+
             r"\b(mấy giờ|bây giờ là mấy giờ|hôm nay thứ mấy|hôm nay ngày mấy|ngày bao nhiêu|thời tiết|trời hôm nay)\b",
-            # Khen ngợi
+
             r"\b(giỏi quá|thông minh quá|được đấy|hay quá|tuyệt vời)\b",
         ]
         return any(re.search(pat, t) for pat in chat_patterns)
@@ -93,7 +90,6 @@ class PersonaEngine:
         """Sinh câu trả lời thông minh qua Gemini Flash hoặc Persona Engine cục bộ."""
         api_key = getattr(config, "GEMINI_API_KEY", "").strip()
 
-        # 1. Thử gọi Cloud Gemini Flash nếu có API Key (trí tuệ không giới hạn)
         if api_key:
             try:
                 gemini_reply = await self._call_gemini(user_text, api_key)
@@ -102,7 +98,6 @@ class PersonaEngine:
             except Exception as e:
                 logger.warning(f"Gemini persona call failed: {e}")
 
-        # 2. Xử lý cục bộ bằng thư viện Persona & Hát Offline
         return self._offline_reply(user_text)
 
     async def _call_gemini(self, user_text: str, api_key: str) -> Optional[str]:
@@ -142,44 +137,35 @@ class PersonaEngine:
         t = user_text.lower().strip()
         now = datetime.now(TZ_VN)
 
-        # 1. Yêu cầu hát
         if any(w in t for w in ("hát", "ca một bài", "ngân nga", "hát hò", "karaoke")):
             return random.choice(SONG_LIBRARY)
 
-        # 2. Yêu cầu kể chuyện cười / đố vui
         if any(w in t for w in ("chuyện cười", "chuyện vui", "hài hước", "đố vui", "câu đố")):
             return random.choice(JOKE_LIBRARY)
 
-        # 3. Hỏi giờ giấc
         if any(w in t for w in ("mấy giờ", "bây giờ là mấy giờ")):
             return f"Bây giờ là {now.hour} giờ {now.minute:02d} phút."
 
-        # 4. Hỏi ngày tháng
         if any(w in t for w in ("thứ mấy", "ngày mấy", "ngày bao nhiêu")):
             days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
             day_name = days[now.weekday()]
             return f"Hôm nay là {day_name}, ngày {now.day} tháng {now.month}."
 
-        # 5. Hỏi danh tính
         if any(w in t for w in ("em là ai", "bạn là ai", "em tên gì", "bạn tên gì", "bạn tên là gì", "tên bạn là gì", "tên của em")):
             return f"Tôi là {self.name}, hệ thống điều khiển nhà thông minh của bạn."
 
         if "ai tạo ra em" in t or "ai tạo ra bạn" in t:
             return "Tôi được phát triển bởi đội ngũ kỹ thuật DTV Smart Home."
 
-        # 6. Khen ngợi
         if any(w in t for w in ("giỏi quá", "thông minh quá", "tuyệt vời", "được đấy", "hay quá")):
             return "Cảm ơn bạn. Tôi luôn sẵn sàng hỗ trợ bạn."
 
-        # 7. Tâm sự / than mệt mỏi
         if any(w in t for w in ("mệt quá", "buồn quá", "chán quá", "áp lực")):
             return random.choice(CARING_RESPONSES)
 
-        # 8. Lời cảm ơn
         if "cảm ơn" in t:
             return "Không có chi. Rất vui được hỗ trợ bạn."
 
-        # 9. Lời chào chung
         if any(w in t for w in ("chào em", "xin chào", "hello", "chào")):
             hour = now.hour
             if 5 <= hour < 12:
@@ -190,6 +176,4 @@ class PersonaEngine:
                 time_greet = "Xin chào buổi tối. Chúc bạn một buổi tối thư thái."
             return time_greet
 
-        # Mặc định thân thiện
         return "Tôi có thể hỗ trợ gì cho bạn?"
-

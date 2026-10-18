@@ -23,7 +23,6 @@ class _WeatherGlassOverlayState extends State<WeatherGlassOverlay> with SingleTi
       duration: const Duration(seconds: 10),
     )..repeat();
 
-    // Generate random raindrops
     for (int i = 0; i < 45; i++) {
       _rainDrops.add(_RainDrop(
         x: _rnd.nextDouble(),
@@ -51,7 +50,6 @@ class _WeatherGlassOverlayState extends State<WeatherGlassOverlay> with SingleTi
           children: [
             widget.child,
 
-            // Background Weather Painter
             Positioned.fill(
               child: IgnorePointer(
                 child: AnimatedBuilder(
@@ -118,7 +116,6 @@ class _WeatherAmbientPainter extends CustomPainter {
   void _paintSunnySunburst(Canvas canvas, Size size) {
     final sunCenter = Offset(size.width * 0.88, 70);
 
-    // 1. Sun Core Glow
     final corePaint = Paint()
       ..shader = RadialGradient(
         colors: [
@@ -132,7 +129,6 @@ class _WeatherAmbientPainter extends CustomPainter {
 
     canvas.drawCircle(sunCenter, 180, corePaint);
 
-    // 2. 3D Sun Lens Flares / Light Rays
     final rayPaint = Paint()
       ..color = const Color(0xFFFEF08A).withOpacity(0.08)
       ..strokeWidth = 2.5
@@ -145,7 +141,6 @@ class _WeatherAmbientPainter extends CustomPainter {
       canvas.drawLine(sunCenter, end, rayPaint);
     }
 
-    // 3. Sweeping Light Flare Bar over Glass
     final lightBarPaint = Paint()
       ..shader = LinearGradient(
         colors: [
@@ -173,7 +168,6 @@ class _WeatherAmbientPainter extends CustomPainter {
         ..strokeWidth = drop.thickness
         ..strokeCap = StrokeCap.round;
 
-      // Draw slanted rain streak
       canvas.drawLine(
         Offset(startX, startY),
         Offset(startX - 4, startY + drop.length),
@@ -181,7 +175,6 @@ class _WeatherAmbientPainter extends CustomPainter {
       );
     }
 
-    // Dynamic Lightning flash if stormy
     if (condition == 'stormy' && (progress * 10).floor() % 7 == 0 && progress % 0.08 < 0.02) {
       final flashPaint = Paint()..color = Colors.white.withOpacity(0.12);
       canvas.drawRect(Offset.zero & size, flashPaint);

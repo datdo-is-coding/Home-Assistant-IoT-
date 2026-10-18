@@ -21,7 +21,6 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger("sound_manager")
 
-
 class SoundManager:
     """Manages acoustic sound effects for the entire Smart Home Gateway ecosystem."""
 
@@ -67,7 +66,7 @@ class SoundManager:
     def __init__(self, gateway=None):
         self.gateway = gateway
         self.sound_dir = self._find_sound_dir()
-        # In-memory caches: sound_name -> bytes
+
         self._pcm_cache: Dict[str, bytes] = {}
         self._mp3_cache: Dict[str, bytes] = {}
         self._load_all_sounds()
@@ -86,7 +85,7 @@ class SoundManager:
             if os.path.isdir(c) and os.path.exists(os.path.join(c, "morning_sound.mp3")):
                 logger.info(f"🎵 Sound directory located at: {c}")
                 return os.path.abspath(c)
-        # Default fallback
+
         logger.warning("Sound directory not explicitly found, defaulting to relative ../../sound")
         return os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "sound"))
 
@@ -96,7 +95,7 @@ class SoundManager:
             return
 
         for key in self.DESCRIPTIONS.keys():
-            # 1. Load MP3
+
             mp3_path = os.path.join(self.sound_dir, f"{key}.mp3")
             if os.path.exists(mp3_path):
                 try:
@@ -105,7 +104,6 @@ class SoundManager:
                 except Exception as e:
                     logger.warning(f"Failed to read {mp3_path}: {e}")
 
-            # 2. Load pre-converted 16kHz PCM
             pcm_path = os.path.join(self.sound_dir, f"{key}.pcm")
             if os.path.exists(pcm_path):
                 try:
@@ -181,7 +179,7 @@ class SoundManager:
         audio_server = self.gateway.audio_server
 
         if websocket:
-            # Gửi đến 1 websocket cụ thể (e.g. listen_success chỉ phát trên node vừa nói)
+
             try:
                 logger.info(f"🔊 Playing sound '{sound_name}' ({len(pcm)} bytes PCM) to single speaker...")
                 await audio_server._send_pcm_stream(websocket, pcm, follow_up=False)
@@ -190,10 +188,10 @@ class SoundManager:
                 logger.error(f"Error streaming sound '{sound_name}': {e}")
                 return False
         else:
-            # Broadcast đến TẤT CẢ loa đang kết nối (đồng bộ)
+
             targets = [ws for ws in audio_server._active_speakers if audio_server._is_ws_alive(ws)]
             if not targets:
-                # Fallback: tìm node cụ thể
+
                 target_ws = audio_server._ws_nodes.get(target_node) if target_node != "all" else None
                 if not target_ws and audio_server._ws_nodes:
                     target_ws = next(iter(audio_server._ws_nodes.values()))
@@ -224,13 +222,11 @@ class SoundManager:
         Play a sound effect first (e.g. new_noti, morning_sound, wrong_sound),
         then immediately speak Lumi's voice reply!
         """
-        # 1. Play sound
+
         await self.play_sound(sound_name, target_node=target_node, websocket=websocket)
 
-        # Brief pause between sound effect and speech
         await asyncio.sleep(0.2)
 
-        # 2. Synthesize & speak voice
         if self.gateway and hasattr(self.gateway, "audio_server"):
             audio_server = self.gateway.audio_server
             if websocket:

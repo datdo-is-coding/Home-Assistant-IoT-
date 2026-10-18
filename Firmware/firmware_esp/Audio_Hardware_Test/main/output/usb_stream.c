@@ -14,19 +14,19 @@ static bool s_driver_installed = false;
 
 #pragma pack(push, 1)
 typedef struct {
-    char     riff[4];             /* "RIFF" */
-    uint32_t overall_size;        /* File size - 8 */
-    char     wave[4];             /* "WAVE" */
-    char     fmt_chunk_marker[4]; /* "fmt " */
-    uint32_t length_of_fmt;       /* 16 */
-    uint16_t format_type;         /* 1 = PCM */
-    uint16_t channels;            /* 1 = Mono */
-    uint32_t sample_rate;         /* 16000 */
-    uint32_t byterate;            /* sample_rate * channels * 2 */
-    uint16_t block_align;         /* channels * 2 */
-    uint16_t bits_per_sample;     /* 16 */
-    char     data_chunk_header[4];/* "data" */
-    uint32_t data_size;           /* num_samples * 2 */
+    char     riff[4];
+    uint32_t overall_size;
+    char     wave[4];
+    char     fmt_chunk_marker[4];
+    uint32_t length_of_fmt;
+    uint16_t format_type;
+    uint16_t channels;
+    uint32_t sample_rate;
+    uint32_t byterate;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
+    char     data_chunk_header[4];
+    uint32_t data_size;
 } wav_header_t;
 #pragma pack(pop)
 
@@ -78,7 +78,6 @@ static esp_err_t send_packet(usb_pkt_type_t type, uint8_t flags, const void *pay
     hdr.length   = payload_len;
     hdr.seq      = s_seq++;
 
-    /* Compute XOR Checksum */
     uint8_t chk = 0;
     const uint8_t *h_bytes = (const uint8_t *)&hdr;
     for (size_t i = 0; i < sizeof(usb_pkt_header_t); i++) {
@@ -91,15 +90,12 @@ static esp_err_t send_packet(usb_pkt_type_t type, uint8_t flags, const void *pay
         }
     }
 
-    /* Send Header */
     usb_serial_jtag_write_bytes(&hdr, sizeof(usb_pkt_header_t), pdMS_TO_TICKS(50));
 
-    /* Send Payload */
     if (payload && payload_len > 0) {
         usb_serial_jtag_write_bytes(payload, payload_len, pdMS_TO_TICKS(50));
     }
 
-    /* Send Checksum (1 byte) */
     usb_serial_jtag_write_bytes(&chk, 1, pdMS_TO_TICKS(20));
 
     return ESP_OK;
@@ -138,8 +134,8 @@ esp_err_t usb_stream_send_wav_header(uint32_t num_samples)
     memcpy(wav.wave, "WAVE", 4);
     memcpy(wav.fmt_chunk_marker, "fmt ", 4);
     wav.length_of_fmt = 16;
-    wav.format_type = 1; /* PCM */
-    wav.channels = 1;    /* Mono */
+    wav.format_type = 1;
+    wav.channels = 1;
     wav.sample_rate = AUDIO_SAMPLE_RATE;
     wav.byterate = AUDIO_SAMPLE_RATE * 1 * 2;
     wav.block_align = 2;
