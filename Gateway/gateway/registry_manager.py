@@ -1471,6 +1471,7 @@ class RegistryManager:
         - device_type/location có thể là None → suy luận
         - chỉ trả về node online và channel tồn tại trong registry, KHÔNG bịa
         """
+        query = slug(device_type) if device_type else ""
         dev = canon_device(device_type) if device_type else ""
         area_s = slug(area) if area else ""
 
@@ -1506,7 +1507,8 @@ class RegistryManager:
         now_utc = datetime.now(timezone.utc)
         candidates = []
         for nid, node in self.data["nodes"].items():
-            if node.get("status") != "online": continue
+            if node.get("status") != "online" or nid in self.get_pending(): continue
+            if str(nid).upper().startswith("SB") or "subbox" in str(nid).lower(): continue
 
             last_seen_str = node.get("last_seen")
             if last_seen_str and not node.get("mac"):
@@ -1521,35 +1523,18 @@ class RegistryManager:
             if not matches_room(node): continue
             for ch_id, ch in node.get("channels", {}).items():
                 if matches_channel(ch_id, ch): candidates.append((nid, ch_id))
+        if query and query not in DEVICE_CANON:
+            exact = [(nid, cid) for nid, cid in candidates
+                     if query in [slug(self.data["nodes"][nid]["channels"][cid].get("name", "")),
+                                  *[slug(a) for a in self.data["nodes"][nid]["channels"][cid].get("aliases", [])]]]
+            if exact:
+                return exact
         return candidates
 
     def find_node_by_device(self, device_type: str, area: str = None) -> Optional[Tuple[str, str]]:
         candidates = self.find_device_candidates(device_type, area)
         if len(candidates) == 1:
             return candidates[0]
-        if len(candidates) > 1:
-
-            now_utc = datetime.now(timezone.utc)
-            fresh_candidates = []
-            for nid, ch_id in candidates:
-                n = self.data["nodes"].get(nid, {})
-                last_seen_str = n.get("last_seen")
-                if last_seen_str and n.get("mac"):
-                    try:
-                        dt = datetime.fromisoformat(last_seen_str)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        if 0 <= (now_utc - dt).total_seconds() < 120:
-                            fresh_candidates.append((nid, ch_id))
-                    except Exception:
-                        pass
-            if len(fresh_candidates) == 1:
-                return fresh_candidates[0]
-
-            if not area and len(fresh_candidates) > 1:
-                unique_nodes = {nid for nid, ch in fresh_candidates}
-                if len(unique_nodes) == 1:
-                    return fresh_candidates[0]
         return None
 
     def resolve_fullname(self, node_id: str, channel: str) -> str:
@@ -1578,6 +1563,8 @@ class RegistryManager:
         devs = set()
         for n in self.data["nodes"].values():
             for ch in n.get("channels", {}).values():
+                if ch.get("name"):
+                    devs.add(slug(ch["name"]))
                 dt = slug(ch.get("device_type", ""))
                 if dt: devs.add(dt)
                 for a in ch.get("aliases", []):

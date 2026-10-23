@@ -233,6 +233,9 @@ extern "C" void app_main(void) {
         room_mgr, mqtt
     );
     if (!task_mgr->init()) subbox_led_set_error(true);
+    asr->registerFollowupCallback([task_mgr](const std::string& command) {
+        if (!task_mgr->queueGatewayCommand(command)) ESP_LOGW(TAG, "Follow-up listen queue full");
+    });
 
     hc_mqtt=mqtt.get();
     ESP_ERROR_CHECK(hc_runtime_init(true,hc_uplink,nullptr,nullptr));

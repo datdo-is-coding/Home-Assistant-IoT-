@@ -130,6 +130,7 @@ class ASREngine:
         self._initialized = False
         self._hotwords_path = None
         self._using_beam_search = False
+        self._registry = None
         self._active_hotwords = list(SMARTHOME_HOTWORDS)
 
     def _extract_registry_hotwords(self, registry=None) -> list:
@@ -201,6 +202,7 @@ class ASREngine:
             return None
 
     def initialize(self, registry=None) -> bool:
+        self._registry = registry
         _ensure_sherpa()
         model_dir = config.ASR_MODEL_DIR
 
@@ -327,7 +329,11 @@ class ASREngine:
                 logger.warning(f"Audio too short ({duration_s:.2f}s) or too quiet (RMS={rms:.4f})")
                 return "", 0.0
 
-            stream = self.recognizer.create_stream()
+            if self._using_beam_search and self._registry:
+                self._active_hotwords = sorted(set(SMARTHOME_HOTWORDS) | set(self._extract_registry_hotwords(self._registry)))
+                stream = self.recognizer.create_stream(hotwords="/".join(self._active_hotwords))
+            else:
+                stream = self.recognizer.create_stream()
             stream.accept_waveform(sr, pcm_samples)
             self.recognizer.decode_stream(stream)
 

@@ -1,0 +1,3 @@
+45ff821234d55d91c1020a825cff8579227d468db6f4b9fee72119b822086a92  Gateway/gateway/main.py
+38946ab03e0b6fc91d23a74404f7a76a4bde5afe7818259804f34c217ec0f515  Gateway/gateway/dialog_manager.py
+737121890b098d6fbe6c3c78e68fedaf0eddf6869a3f7ea0d8f277e474411f7d  Gateway/tests/test_voice_dialog_targets.py

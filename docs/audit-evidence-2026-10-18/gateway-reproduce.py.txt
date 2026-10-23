@@ -1,0 +1,144 @@
+"""Offline audit evidence. Uses fake transports; never contacts IoT hardware."""
+import asyncio
+import json
+import os
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
+
+ROOT = Path('/home/tuan/.codex/worktrees/d283/Home-Assistant-IoT-')
+TMP = Path('/tmp/iot-commercial-audit-20261018')
+(TMP/'firmware').mkdir(parents=True,exist_ok=True)
+os.environ.update(FIRMWARE_DIR=str(TMP/'firmware'), AUTH_DB=str(TMP/'repro-auth.db'),
+                  BOOTSTRAP_PASSWORD='audit-only-bootstrap-password', AI_ENABLED='false')
+sys.path.insert(0, str(ROOT/'Gateway/gateway'))
+import config
+from web_server import WebServer
+from audio_server import AudioServer
+from mqtt_handler import MQTTHandler
+from main import SmartHomeGateway
+from verify_engine import CommandVerifier, VerifyResult
+from intent_engine import IntentEngine
+from dialog_manager import DialogManager
+from ota_manager import OTAManager
+from auth_manager import AuthManager
+
+class Writer:
+    def __init__(self): self.data = bytearray()
+    def write(self, value): self.data.extend(value)
+    async def drain(self): pass
+    def close(self): pass
+
+class Socket:
+    remote_address = ('127.0.0.1', 9999)
+    open = True
+    def __init__(self, messages=()): self.messages=iter(messages); self.sent=[]
+    def __aiter__(self): return self
+    async def __anext__(self):
+        try: return next(self.messages)
+        except StopIteration: raise StopAsyncIteration
+    async def send(self, value): self.sent.append(value)
+
+async def request(server, path, body=None):
+    reader=asyncio.StreamReader(); writer=Writer()
+    data=json.dumps(body).encode() if body is not None else b''
+    method='POST' if body is not None else 'GET'
+    reader.feed_data(f'{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {len(data)}\r\n\r\n'.encode()+data)
+    reader.feed_eof()
+    await server._handle_client(reader, writer)
+    return bytes(writer.data).decode()
+
+async def main():
+    auth=SimpleNamespace(authenticate_token=lambda token: None)
+    server=WebServer(SimpleNamespace(auth=auth))
+    proc=SimpleNamespace(returncode=0, communicate=AsyncMock(return_value=(b'ok',b'')))
+    with patch('asyncio.create_subprocess_exec',new=AsyncMock(return_value=proc)) as process:
+        response=await request(server,'/api/wifi/connect',{'ssid':'AUDIT_FAKE_NETWORK','password':'unused'})
+        await asyncio.sleep(0)
+        assert '200 OK' in response and process.await_count >= 1
+        print('R1 unauthenticated Wi-Fi request invokes nmcli:', process.await_args_list[0].args)
+
+    mqtt=MQTTHandler()
+    gateway=SimpleNamespace(mqtt=mqtt)
+    audio=AudioServer(gateway)
+    with patch.object(config,'WS_AUDIO_TOKEN','configured-test-secret'), patch.object(config,'WS_AUDIO_TOKENS',{'AB1':'other-test-secret'}):
+        sock=Socket([json.dumps({'t':'ack','id':'AB1','rl':[1,0],'seq':456})])
+        await audio._handle_client(sock)
+    assert ('AB1',456) in mqtt.command_acks
+    print('R2 WebSocket accepted ACK without hello/token:', mqtt.command_acks[('AB1',456)])
+
+    m=SimpleNamespace(command_acks={},load_reports={},get_current_power=lambda node: 0)
+    async def send(node, channel, action, seq):
+        m.command_acks[(node,seq)]={'status':'OK','state':'ON','channel':1}
+        m.load_reports[(node,seq)]={'channel':2,'command_ms':2000,'sample':{'valid':True,'timestamp_ms':1,'power_w':0}}
+        return True
+    m.send_command=send
+    r=SimpleNamespace(get_rated_watts=lambda *args:100,
+                      get_all_nodes=lambda:{'AB1':{'channels':{'ch1':{'load_verification':{'on_min_w':10,'off_max_w':1,'max_age_ms':1000}}}}})
+    result,*_=await CommandVerifier(m,r).verify_command('AB1','ch1','turn_on',seq=88)
+    assert result.value == 'confirmed_load'
+    print('R3 wrong-channel/stale/zero-power sample reported:',result.value)
+
+    m.load_reports.clear()
+    async def ack_only(node,channel,action,seq):
+        m.command_acks[(node,seq)]={'status':'OK','state':'ON','channel':1}
+        return True
+    m.send_command=ack_only
+    result,*_=await CommandVerifier(m,r).verify_command('AB1','ch1','turn_on',seq=89)
+    print('R4 ACK before delayed LOAD_REPORT returns immediately:',result.value)
+
+    nodes={'AB1':{'relay_state':[0,0,1]}}
+    reg=SimpleNamespace(get_all_nodes=lambda:nodes,update_heartbeat=Mock(),
+                        update_relay_state=lambda n,s:nodes[n].update(relay_state=s))
+    gw=SmartHomeGateway.__new__(SmartHomeGateway); gw.registry=reg
+    await gw._on_subbox_actionbox('home/subbox/SB1/event/actionbox',{'node_id':'AB1','channels':[
+        {'channel':1,'state':'OFF'},{'channel':2,'state':'OFF'},{'channel':3,'state':'ON'}]})
+    assert nodes['AB1']['relay_state'] == [0,0]
+    print('R5 three-channel telemetry overwrites state with:', nodes['AB1']['relay_state'])
+
+    ota=OTAManager(); ota.save_firmware('audit.bin',b'not-a-firmware')
+    server.gateway.ota=ota
+    response=await request(server,'/api/ota/download/audit.bin')
+    assert '401 Unauthorized' in response
+    print('R6 generated OTA download URL without credentials:',response.splitlines()[0])
+    wrong=Socket(); audio=SimpleNamespace(_ws_nodes={'DIFFERENT_NODE':wrong},_active_speakers={wrong},_is_ws_alive=lambda ws:True)
+    ota.gateway=SimpleNamespace(audio_server=audio)
+    result=await ota.trigger_via_mqtt('TARGET_OFFLINE','audit.bin','127.0.0.2')
+    await asyncio.sleep(0)
+    assert wrong.sent and result['success']
+    print('R7 OTA TARGET_OFFLINE sends firmware to DIFFERENT_NODE:',json.loads(wrong.sent[0]))
+    ota.gateway=SimpleNamespace(mqtt=SimpleNamespace(publish=AsyncMock(return_value=False)))
+    result=await ota.trigger_via_mqtt('AB1','audit.bin','127.0.0.2')
+    assert result['success']
+    print('R8 MQTT publish=False still returns OTA success:',result['success'])
+
+    auth=AuthManager()
+    key=auth.login('admin',config.BOOTSTRAP_PASSWORD)['api_key']
+    auth.logout(key)
+    assert auth.authenticate_token(key)
+    print('R9 logout permanent API key leaves it valid: True')
+
+    gw=SmartHomeGateway.__new__(SmartHomeGateway)
+    gw.intent=IntentEngine(); gw.dialog=DialogManager()
+    gw.registry=SimpleNamespace(find_node_by_device=lambda *args:('AB1','ch1'),
+        resolve_fullname=lambda *args:'đèn phòng khách',next_seq=lambda *args:7)
+    gw.verifier=CommandVerifier(None,gw.registry)
+    gw.tts=SimpleNamespace(synthesize=AsyncMock(return_value=None),synthesize_pcm=AsyncMock(return_value=None))
+    for outcome in (VerifyResult.ACK_ONLY,VerifyResult.CONFIRMED_LOAD):
+        gw.verifier.verify_command=AsyncMock(return_value=(outcome,0,50,50))
+        result=await gw.process_voice_command('bật đèn phòng khách',client_node_id='SB1')
+        assert 'không xác nhận' in result['voice_reply']
+        print('R12 voice result',outcome.value,'=>',result['voice_reply'])
+
+    nodes={'SECRET_NODE':{'channels':{'ch1':{'name':'Private device','aliases':['secret_alias']}}}}
+    gw.registry=SimpleNamespace(get_all_nodes=lambda:nodes)
+    gw.auth=SimpleNamespace(authenticate_token=lambda token:{'id':5,'role':'member'},get_user_devices=lambda uid:[])
+    server=WebServer(gw)
+    reader=asyncio.StreamReader(); writer=Writer()
+    reader.feed_data(b'GET /api/voice/vocabulary HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer fake\r\n\r\n'); reader.feed_eof()
+    await server._handle_client(reader,writer)
+    assert b'SECRET_NODE' in writer.data and b'secret_alias' in writer.data
+    print('R13 member assigned no devices sees another device vocabulary: True')
+
+asyncio.run(main())

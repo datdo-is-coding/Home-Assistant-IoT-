@@ -62,6 +62,9 @@ def slug(s: Optional[str]) -> str:
     return s
 
 DEVICE_ALIASES: Dict[str, List[str]] = {
+    "den_tran": ["đèn trần", "den_tran"],
+    "den_chinh": ["đèn chính", "den_chinh"],
+    "quat_tran": ["quạt trần", "quat_tran"],
     "light": [
         "đèn", "bóng đèn", "đèn điện", "ánh sáng", "light", "den", "bong_den",
         "đèn trần", "den_tran", "đèn chùm", "đèn tuýp", "đèn led", "đèn bàn", "đèn học"
@@ -602,6 +605,22 @@ class FastPathEngine:
       AMBIGUOUS (< 0.60): Thiếu slot, chuyển Context Resolver hoặc hỏi lại.
     """
 
+    def __init__(self, registry=None):
+        self.registry = registry
+
+    def _registered_device_names(self):
+        if not self.registry:
+            return []
+        pending = self.registry.get_pending()
+        names = []
+        for nid, node in self.registry.get_all_nodes().items():
+            if nid in pending or str(nid).upper().startswith("SB") or "subbox" in str(nid).lower():
+                continue
+            for channel in node.get("channels", {}).values():
+                names.extend(name for name in [channel.get("name", ""), *channel.get("aliases", [])]
+                             if isinstance(name, str) and len(name.strip()) >= 2)
+        return names
+
     def extract(self, norm: NormalizedText) -> Optional[IntentResult]:
         text = norm.text
         if not text:
@@ -727,15 +746,23 @@ class FastPathEngine:
         return None, 0.0
 
     def _extract_device(self, text: str) -> Tuple[Optional[str], float]:
-        for canon, aliases in DEVICE_ALIASES.items():
-            for a in aliases:
-                pattern = r"\b" + re.escape(a) + r"\b"
-                if re.search(pattern, text):
-                    dev = "light" if canon in ("den", "bong_den") else canon
-                    return dev, 0.98
+        normalized = " " + slug(text).replace("_", " ") + " "
+        names = [slug(name) for name in self._registered_device_names()
+                 if " " + slug(name).replace("_", " ") + " " in normalized]
+        if names:
+            return max(names, key=len), 0.98
+        matches = [(len(alias), canon) for canon, aliases in DEVICE_ALIASES.items()
+                   for alias in aliases if re.search(r"\b" + re.escape(alias) + r"\b", text)]
+        if matches:
+            _, canon = max(matches, key=lambda item: item[0])
+            return canon, 0.98
         return None, 0.0
 
     def _extract_room(self, text: str) -> Tuple[Optional[str], float]:
+        for name in sorted(self._registered_device_names(), key=len, reverse=True):
+            text = re.sub(r"\b" + re.escape(name) + r"\b", "", text, flags=re.IGNORECASE)
+        # "ngủ" in "đèn ngủ" describes the lamp, not its room.
+        text = re.sub(r"\b(?:đèn ngủ|đèn đầu giường|den ngu)\b", "", text)
         for canon, aliases in ROOM_ALIASES.items():
             for a in aliases:
                 pattern = r"\b" + re.escape(a) + r"\b"
@@ -865,7 +892,7 @@ class IntentEngine:
         self.active_engine = "Fast-Path"
 
         self.normalizer = ASRNormalizer()
-        self.fast_path = FastPathEngine()
+        self.fast_path = FastPathEngine(self.registry)
         self.context_manager = IntentContextManager(
             ttl_seconds=getattr(config, "CONTEXT_TTL", 60.0)
         )
@@ -874,6 +901,7 @@ class IntentEngine:
 
     def set_registry(self, registry):
         self.registry = registry
+        self.fast_path.registry = registry
         self.validator.set_registry(registry)
 
     def _is_potential_command(self, text: str) -> bool:

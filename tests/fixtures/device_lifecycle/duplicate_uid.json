@@ -1,0 +1,18 @@
+{
+  "device_uid": "ab2_duplicate_007",
+  "existing_uids": [
+    "ab2_duplicate_007",
+    "other_node_008"
+  ],
+  "board_model": "actionbox_v2",
+  "board_revision": "v2.0",
+  "protocol_version": 2,
+  "capabilities": [
+    "relay",
+    "energy_meter"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 1,
+  "boot_id": "boot_dup_5a34",
+  "config_revision": 1
+}

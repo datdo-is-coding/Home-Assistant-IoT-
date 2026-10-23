@@ -1,0 +1,46 @@
+"""Synthetic local-only probe; creates a temporary SQLite DB, no IoT transport."""
+import asyncio
+import os
+from pathlib import Path
+import sqlite3
+import sys
+import tempfile
+import threading
+import time
+
+ROOT = Path('/home/tuan/.codex/worktrees/d283/Home-Assistant-IoT-')
+
+with tempfile.TemporaryDirectory(prefix='iot-sqlite-audit-') as directory:
+    tmp = Path(directory)
+    (tmp / 'firmware').mkdir()
+    os.environ.update(FIRMWARE_DIR=str(tmp / 'firmware'),
+                      GATEWAY_DB=str(tmp / 'gateway.db'),
+                      REGISTRY_FILE=str(tmp / 'registry.json'))
+    sys.path.insert(0, str(ROOT / 'Gateway/gateway'))
+    from registry_manager import RegistryManager
+
+    registry = RegistryManager()
+    ready = threading.Event()
+
+    def hold_write_lock():
+        with sqlite3.connect(registry.db_path) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            ready.set()
+            time.sleep(0.25)
+
+    async def probe():
+        worker = threading.Thread(target=hold_write_lock)
+        worker.start()
+        ready.wait(timeout=2)
+        assert ready.is_set(), 'Failed to establish test write lock'
+        timer = asyncio.create_task(asyncio.sleep(0.01))
+        await asyncio.sleep(0)
+        started = time.perf_counter()
+        registry.save()
+        await timer
+        elapsed = (time.perf_counter() - started) * 1000
+        worker.join(timeout=2)
+        print(f'SQLite write lock: 250 ms; asyncio timer requested: 10 ms; observed: {elapsed:.1f} ms')
+        print('Synthetic development-host probe; not a Raspberry Pi benchmark or production SLO.')
+
+    asyncio.run(probe())

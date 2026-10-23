@@ -7,9 +7,11 @@ và sinh câu hỏi làm rõ (clarification question) kèm cờ follow-up để 
 import time
 import re
 import logging
+from copy import deepcopy
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
+from registry_manager import ROOM_ALIASES
 from display_names import get_room_name, get_device_name, clean_voice_text
 
 logger = logging.getLogger("dialog_manager")
@@ -32,6 +34,8 @@ class DialogSession:
     pending_intent: Dict[str, Any]
     missing_slot: str
     detected_room: Optional[str] = None
+    candidates: list = field(default_factory=list)
+    clarification_attempts: int = 0
     created_at: float = field(default_factory=time.time)
     timeout_seconds: float = 15.0
 
@@ -104,73 +108,23 @@ class DialogManager:
                 logger.info(f"❓ Clarification needed (dieu_hoa temperature): {question}")
                 return True, question, "value", intent
 
-        if self.registry and location and device:
-            room_nodes = self.registry.get_rooms().get(location, [])
-            matching_channels = []
-            for nid in room_nodes:
-                node = self.registry.get_all_nodes().get(nid, {})
-                for ch_id, ch in node.get("channels", {}).items():
-                    if isinstance(ch, str):
-                        dt = _slug(ch)
-                        aliases = []
-                        fullname = ch
-                        ch_dict = {"device_type": dt, "fullname": fullname}
-                    else:
-                        dt = _slug(ch.get("device_type", ""))
-                        aliases = [_slug(a) for a in ch.get("aliases", [])]
-                        fullname = ch.get("fullname", dt)
-                        ch_dict = ch
-
-                    if device == dt or device in dt or any(device in a for a in aliases) or (device in ("light", "den") and "den" in dt):
-                        friendly_dev = get_device_name(ch_dict)
-                        if not friendly_dev or friendly_dev in ("đèn", "quạt"):
-                            ch_num = ch_id[-1] if ch_id else "1"
-                            friendly_dev = f"{friendly_dev or 'thiết bị'} {ch_num}"
-                        if friendly_dev not in matching_channels:
-                            matching_channels.append(friendly_dev)
-
-            if len(matching_channels) >= 2:
-
-                ch_names = " hay ".join(matching_channels[:2])
-                act_vn = "bật" if action == "turn_on" else "tắt"
-                r_name = get_room_name(location)
-                question = clean_voice_text(f"Bạn muốn {act_vn} {ch_names} {('ở ' + r_name) if r_name else ''}?")
-                session = DialogSession(
-                    node_id=client_key, client_id=client_key,
-                    pending_intent=intent, missing_slot="channel", detected_room=location
-                )
-                self._sessions[client_key] = session
-                logger.info(f"❓ Clarification needed (channel ambiguity in {location}): {question}")
+        if self.registry and device and device != "all" and not cmd.get("node_id") and "targets" not in cmd:
+            candidates = self.registry.find_device_candidates(device, location)
+            if len(candidates) > 1:
+                nodes = self.registry.get_all_nodes()
+                labels = []
+                for nid, cid in candidates:
+                    node = nodes[nid]
+                    room = _slug(node.get("room", ""))
+                    room = next((key for key, aliases in ROOM_ALIASES.items() if room in aliases), room)
+                    labels.append(f"{get_device_name(node['channels'][cid])} ở {get_room_name(room)}, "
+                                  f"kênh {cid[-1]} bo {nid[-4:]}")
+                action_name = "bật" if action == "turn_on" else "tắt"
+                question = f"Bạn muốn {action_name} " + " hay ".join(labels[:3]) + "?"
+                self._sessions[client_key] = DialogSession(
+                    node_id=client_key, client_id=client_key, pending_intent=intent,
+                    missing_slot="channel", detected_room=location, candidates=candidates[:3])
                 return True, question, "channel", intent
-
-        if not location and device and self.registry:
-
-            rooms_with_device = set()
-            for nid, node in self.registry.get_all_nodes().items():
-                if node.get("status") != "online":
-                    continue
-                nr = node.get("room", "")
-                for ch_id, ch in node.get("channels", {}).items():
-                    dt = _slug(ch.get("device_type", ""))
-                    aliases = [_slug(a) for a in ch.get("aliases", [])]
-                    if device == dt or device in dt or any(device in a for a in aliases):
-                        if nr and nr != "unknown":
-                            rooms_with_device.add(nr)
-
-            if len(rooms_with_device) > 1:
-
-                room_names = [get_room_name(r) for r in sorted(rooms_with_device)]
-                room_list_str = ", ".join(room_names)
-                dev_vn = get_device_name(device)
-                act_vn = "bật" if action == "turn_on" else "tắt"
-                question = clean_voice_text(f"Bạn muốn {act_vn} {dev_vn} ở phòng nào ({room_list_str})?")
-                session = DialogSession(
-                    node_id=client_key, client_id=client_key,
-                    pending_intent=intent, missing_slot="location", detected_room=None
-                )
-                self._sessions[client_key] = session
-                logger.info(f"❓ Clarification needed (location ambiguity): {question}")
-                return True, question, "location", intent
 
         return False, None, None, intent
 
@@ -182,7 +136,7 @@ class DialogManager:
           - Đang thiếu 'location' (phòng) -> Người dùng nói "phòng ngủ" -> gán location=phong_ngu
           - Đang thiếu 'channel' (loại đèn) -> Người dùng nói "đèn trần" -> gán device=den_tran
         """
-        intent = session.pending_intent
+        intent = deepcopy(session.pending_intent)
         cmd = intent.setdefault("command", {})
         missing = session.missing_slot
         norm_text = follow_up_text.lower().strip()
@@ -239,6 +193,35 @@ class DialogManager:
             cmd["location"] = found_room
 
         elif missing == "channel":
+            if session.candidates and self.registry:
+                nodes = self.registry.get_all_nodes()
+                answer = _slug(norm_text)
+                action_match = re.match(r"^(bat|mo|tat|dong)_", answer)
+                if action_match:
+                    cmd["action"] = "turn_on" if action_match[1] in ("bat", "mo") else "turn_off"
+                    answer = answer[action_match.end():]
+                if answer in ("ca_hai", "ca_2", "ca_hai_cai", "hai_cai") and len(session.candidates) == 2:
+                    cmd["targets"] = list(session.candidates)
+                    return intent
+                current = set(self.registry.find_device_candidates(None, cmd.get("location")))
+                matches = []
+                ordinal = {"cai_dau_tien": 0, "thu_nhat": 0, "mot": 0, "1": 0,
+                           "cai_thu_hai": 1, "thu_hai": 1, "hai": 1, "2": 1,
+                           "cai_thu_ba": 2, "thu_ba": 2, "ba": 2, "3": 2}.get(answer)
+                for nid, cid in session.candidates:
+                    if (nid, cid) not in current:
+                        continue
+                    ch = nodes[nid]["channels"][cid]
+                    names = [_slug(ch.get("name", "")), *[_slug(a) for a in ch.get("aliases", [])]]
+                    if answer in names or answer in (_slug(nid), _slug(nid[-4:])):
+                        matches.append((nid, cid))
+                if ordinal is not None and ordinal < len(session.candidates):
+                    choice = session.candidates[ordinal]
+                    matches = [choice] if choice in current else []
+                if len(matches) == 1:
+                    cmd["node_id"], cmd["channel"] = matches[0]
+                return intent
+
 
             if any(w in norm_text for w in ("ngủ", "đầu giường", "bàn", "den ngu")):
                 cmd["device"] = "den_ngu" if "den" in cmd.get("device", "") or cmd.get("device") == "light" else "quat_ban"

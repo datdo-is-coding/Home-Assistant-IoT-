@@ -1,0 +1,13 @@
+{
+  "device_uid": "unk_fixture_004",
+  "board_model": "quantum_box_v99",
+  "board_revision": "v99.0",
+  "protocol_version": 2,
+  "capabilities": [
+    "relay"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 1,
+  "boot_id": "boot_unk_2d78",
+  "config_revision": 1
+}

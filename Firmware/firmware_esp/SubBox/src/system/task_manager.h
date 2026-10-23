@@ -65,6 +65,7 @@ public:
 
     bool queueUtterance(const std::string& origin_node_id, const std::string& text);
     bool queueCommand(const CommandResolution& res);
+    bool queueGatewayCommand(const std::string& command);
     bool queueResponse(const std::string& target_node_id, const std::string& text);
 
 private:

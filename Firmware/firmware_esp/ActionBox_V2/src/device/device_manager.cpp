@@ -94,6 +94,11 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
     esp_err_t exec_err = ESP_OK;
 
     switch (cmd->cmd) {
+        case CMD_TYPE_LISTEN_FOLLOWUP:
+            out_resp->success = voice_capture_request_followup();
+            strncpy(out_resp->status, out_resp->success ? "OK" : "ERROR", sizeof(out_resp->status) - 1);
+            strncpy(out_resp->state, out_resp->success ? "LISTENING" : "IDLE", sizeof(out_resp->state) - 1);
+            return out_resp->success ? ESP_OK : ESP_ERR_INVALID_STATE;
         case CMD_TYPE_TURN_ON: {
             exec_err = relay_on(cmd->channel);
             if (exec_err == ESP_OK) {

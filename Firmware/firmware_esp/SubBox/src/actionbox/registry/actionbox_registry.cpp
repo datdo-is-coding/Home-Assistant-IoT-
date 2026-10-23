@@ -15,7 +15,7 @@ bool ActionBoxRegistry::registerNode(const ActionBoxNode& node) {
     m_nodes[node.node_id].last_seen_ms = (uint32_t)(esp_timer_get_time() / 1000);
     m_nodes[node.node_id].is_online = true;
 
-    ESP_LOGI(TAG, "Registered ActionBox: %s [Room: %s, Device: %s, Ch: %u, Spk: %d, Mic: %d]",
+    ESP_LOGD(TAG, "Registered ActionBox: %s [Room: %s, Device: %s, Ch: %u, Spk: %d, Mic: %d]",
              node.node_id.c_str(), roomToString(node.room), deviceToString(node.device),
              node.channel, node.has_speaker, node.has_microphone);
     return true;

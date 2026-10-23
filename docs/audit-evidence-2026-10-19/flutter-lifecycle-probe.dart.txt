@@ -1,0 +1,99 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:dtv_energy_flutter/features/actionbox/add_device_flow.dart';
+import 'package:dtv_energy_flutter/providers/smart_home_providers.dart';
+import 'package:dtv_energy_flutter/repositories/smart_home_repository.dart';
+import 'package:dtv_energy_flutter/services/gateway_client.dart';
+
+Map<String,dynamic> snapshot({int count=1}) => {'nodes':{
+  for(var i=0;i<count;i++) 'AB$i':{'status':'online','room':'livingroom','relay_state':[0,0],
+    'channels':{'ch1':{'device_type':'light'},'ch2':{'device_type':'fan'}}}},
+  'pending':{'PENDING':{'device_id':'PENDING','mac':'AA:BB:CC:DD:EE:99'}}};
+http.Response me() => http.Response('{"authenticated":true,"user":{"role":"admin"}}',200);
+
+void main() {
+  testWidgets('F1 wizard allows no selection and shows success before a provisioning request', (tester) async {
+    var posts=0;
+    final client=GatewayClient(persistSession:false,client:MockClient((request) async {
+      if(request.method=='POST') posts++;
+      return request.url.path=='/api/auth/me'?me():http.Response(jsonEncode(snapshot()),200);
+    }));
+    await client.loginWithKey(url:'http://audit.invalid',key:'fake');
+    await tester.pumpWidget(ProviderScope(overrides:[gatewayClientProvider.overrideWith((ref)=>client)],
+      child:const MaterialApp(home:AddDeviceFlowScreen())));
+    await tester.tap(find.text('Bắt đầu quét thiết bị'));
+    await tester.pump(); await tester.pump(const Duration(milliseconds:400));
+    await tester.tap(find.text('Tiếp tục'));
+    await tester.pump(); await tester.pump(const Duration(milliseconds:400));
+    expect(find.text('Đang kết nối an toàn'),findsOneWidget);
+    await tester.tap(find.text('Tiếp tục'));
+    await tester.pump(); await tester.pump(const Duration(milliseconds:400));
+    expect(find.text('Kết nối thành công!'),findsOneWidget);
+    expect(posts,0);
+    print('F1 no selected device, success screen visible, POST count=$posts');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  test('F2 unchanged refresh rebuilds all devices and emits all six streams twice',() async {
+    final client=GatewayClient(persistSession:false,client:MockClient((req) async =>
+      req.url.path=='/api/auth/me'?me():http.Response(jsonEncode(snapshot(count:40)),200)));
+    await client.loginWithKey(url:'http://audit.invalid',key:'fake');
+    final repo=GatewaySmartHomeRepository(client);
+    final streams=<String,Stream<dynamic>>{'devices':repo.watchDevices(),'rooms':repo.watchRooms(),
+      'boxes':repo.watchActionBoxes(),'vocabulary':repo.watchVocabulary(),'scenes':repo.watchScenes(),
+      'automations':repo.watchAutomations()};
+    final counts=<String,int>{for(final name in streams.keys) name:0};
+    final subs=streams.entries.map((e)=>e.value.listen((_){counts[e.key]=counts[e.key]!+1;})).toList();
+    await Future<void>.delayed(Duration.zero);
+    for(final name in counts.keys) counts[name]=0;
+    final before=await repo.getDevices();
+    await client.refresh(); await Future<void>.delayed(Duration.zero);
+    final after=await repo.getDevices();
+    expect(counts.values,everyElement(2));
+    expect(identical(before.first,after.first),false);
+    expect(after.length,80);
+    print('F2 identical snapshot, 40 boards/80 current channels: $counts; all Device objects recreated');
+    for(final s in subs) await s.cancel();
+    repo.dispose(); client.dispose();
+  });
+
+  test('F3 delayed command from old Gateway session overwrites new session state',() async {
+    final delayed=Completer<http.Response>();
+    final client=GatewayClient(persistSession:false,client:MockClient((req) async {
+      if(req.url.path=='/api/auth/me') return me();
+      if(req.url.path=='/api/relay') return delayed.future;
+      return http.Response(jsonEncode(snapshot()),200);
+    }));
+    await client.loginWithKey(url:'http://gateway-a.invalid',key:'session-a');
+    final command=client.relay('AB0','ch1',true);
+    await Future<void>.delayed(Duration.zero);
+    await client.loginWithKey(url:'http://gateway-b.invalid',key:'session-b');
+    expect(client.nodes['AB0']['relay_state'][0],1);
+    delayed.complete(http.Response('{"success":true,"verify":"ack_only"}',200));
+    await command;
+    expect(client.serverUrl,'http://gateway-b.invalid');
+    expect(client.nodes['AB0']['relay_state'][0],1);
+    print('F3 Gateway B snapshot OFF overwritten ON by pending/response belonging to Gateway A');
+    client.dispose();
+  });
+
+  test('F4 failed refresh leaves repository devices online',() async {
+    var fail=false;
+    final client=GatewayClient(persistSession:false,client:MockClient((req) async {
+      if(fail) throw http.ClientException('offline');
+      return req.url.path=='/api/auth/me'?me():http.Response(jsonEncode(snapshot()),200);
+    }));
+    await client.loginWithKey(url:'http://audit.invalid',key:'fake');
+    final repo=GatewaySmartHomeRepository(client);
+    fail=true; await client.refresh();
+    expect(client.connected,false);
+    expect((await repo.getDevices()).every((d)=>d.online),true);
+    print('F4 Gateway disconnected, retained Device.online values still true');
+    repo.dispose();client.dispose();
+  });
+}

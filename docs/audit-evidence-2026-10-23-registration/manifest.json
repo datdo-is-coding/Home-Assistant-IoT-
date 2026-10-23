@@ -1,0 +1,71 @@
+{
+  "date": "2026-10-23",
+  "source_root": "/home/tuan/Home-Assistant-IoT-",
+  "artifacts": {
+    "ActionBox_V2": {
+      "path": "/home/tuan/Home-Assistant-IoT-/Firmware/firmware_esp/ActionBox_V2/build/ActionBox_V2.bin",
+      "bytes": 1356320,
+      "sha256": "33af5c3609104d950acca88fab4918a72c779c8db82c18624348fc46c02a67a7"
+    },
+    "SubBox": {
+      "path": "/home/tuan/Home-Assistant-IoT-/Firmware/firmware_esp/SubBox/build/SubBox.bin",
+      "bytes": 1139984,
+      "sha256": "e967328c7ff20ad86aee19b02c4d7f69ca119b59e542be4c3883eeb6f0902254"
+    },
+    "Android_debug": {
+      "path": "/home/tuan/Home-Assistant-IoT-/App/dtv_energy_flutter/build/app/outputs/flutter-apk/app-debug.apk",
+      "bytes": 221057859,
+      "sha256": "325eb65cacc53ea5814032b8a5635ec93d9a6df095a0dc46a3b5ca958e3b7693"
+    },
+    "Android_release": {
+      "path": "/home/tuan/Home-Assistant-IoT-/App/dtv_energy_flutter/build/app/outputs/flutter-apk/app-release.apk",
+      "bytes": 71448534,
+      "sha256": "f8535013179f6bca3a15e2b67c37cccef99cf0d01fea777525c6c479eb6f430f"
+    }
+  },
+  "flash": [
+    {
+      "port": "/dev/ttyACM0",
+      "verified": true
+    },
+    {
+      "port": "/dev/ttyACM1",
+      "verified": true
+    },
+    {
+      "port": "/dev/ttyACM2",
+      "verified": true
+    }
+  ],
+  "backup_directory": "/home/tuan/.local/state/esp-backups/20261023-registration",
+  "hardware_claim_verified": true,
+  "android_installed": false,
+  "sources": {
+    "Firmware/firmware_esp/common/registration_wire.h": "f5a653a258b1cae75041a4c7507b63fc6034730de0e8c7a467fcb0ab9562ff37",
+    "Firmware/firmware_esp/ActionBox_V2/src/system/registration.cpp": "cd1ddc1769f05f78a06dcccf521bd02aaf4964d2f8ba0e4b30b9fa6246d7ace8",
+    "Firmware/firmware_esp/ActionBox_V2/src/system/task_manager.cpp": "9460bd850415cf8ed82dcb95ce959cff8434921f73211b3cfc73de1c60884f49",
+    "Firmware/firmware_esp/ActionBox_V2/src/network/espnow_transport.cpp": "a691cd50acf8db7847842a317381e65a373e700a21430b93970f265723f64317",
+    "Firmware/firmware_esp/SubBox/src/audio/audio_transport/espnow_audio_transport.cpp": "5ba26f7f06b0a536175c540f562fb511be1482c3e9528de082ae658ca8111a2e",
+    "Firmware/firmware_esp/SubBox/src/storage/security_config.cpp": "2e9666ec7fc4915998eb036c57edba7b22d40efd68e86555b2ab54a19d995929",
+    "Firmware/firmware_esp/SubBox/src/system/task_manager.cpp": "1ddf24b9b04cd212dc214ef04a5fb86595d31f4abd32cab9d87e79b172533659",
+    "Gateway/gateway/main.py": "ee17728ddc508395393a9e3622c702bf70a5af8ced024020fa9d51bd7b16d17c",
+    "Gateway/gateway/device_lifecycle.py": "16837218c84cca843ffed2b0445ebffd5806580e4e432cfb6c77bf65626e8ed7",
+    "App/dtv_energy_flutter/lib/features/actionbox/add_device_flow.dart": "0eaad5ef510e5b3cede84ad460c7378803ab5a09261c8242be0dc9a1a34e4328"
+  },
+  "gateway_source_sha256": {
+    "main.py": "ee17728ddc508395393a9e3622c702bf70a5af8ced024020fa9d51bd7b16d17c",
+    "device_lifecycle.py": "16837218c84cca843ffed2b0445ebffd5806580e4e432cfb6c77bf65626e8ed7"
+  },
+  "verification": {
+    "gateway_tests_run": 268,
+    "gateway_tests_skipped": 7,
+    "firmware_tests_passed": 18,
+    "android_tests_passed_sequential": 126,
+    "pi_registration_tests_passed": 9
+  },
+  "hardware_claim_evidence": {
+    "AB28848533DDF8": "op_claim_cd4bd52a5580 succeeded revision 1",
+    "AB28848533DDE8": "op_claim_a264408ea95d succeeded revision 1",
+    "user_confirmation": "dc roi, 2026-10-23"
+  }
+}

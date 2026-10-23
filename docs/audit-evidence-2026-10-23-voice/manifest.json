@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-23",
+  "source_root": "/home/tuan/Home-Assistant-IoT-",
+  "pipeline": "ActionBox wake-word -> SubBox -> Pi ASR/command -> SubBox PCM speaker",
+  "voice": "Trúc Ly",
+  "files": {
+    "Firmware/firmware_esp/ActionBox_V2/build/ActionBox_V2.bin": {
+      "sha256": "89e060d92eb0868a10ac6fdc3c43c16f41199b7f6b27ee89cc4cad689d00dcbd",
+      "bytes": 1346928
+    },
+    "Firmware/firmware_esp/ActionBox_V2/src/audio/voice_capture.cpp": {
+      "sha256": "b057337c2a2145cf106a605101bcd29666e684a1cfc2be1fd68c89bf4c9abcc2",
+      "bytes": 14012
+    },
+    "Gateway/gateway/audio_server.py": {
+      "sha256": "d049462fd603a34d608d41af2ea70696a97c6a1d0cc9a44733b080c4c4b111f5",
+      "bytes": 57671
+    },
+    "Gateway/gateway/main.py": {
+      "sha256": "82a5c96f14c031cba182ef09641690e04da36cf680171c474bb0fba4f6850a43",
+      "bytes": 65477
+    },
+    "Gateway/gateway/config.py": {
+      "sha256": "4cd224a1779a6fb809172cb9d45168b8eedbdf2f130f160fd071cf008c3c3ee6",
+      "bytes": 8737
+    }
+  },
+  "flash_verified": [
+    "28848533DDF8",
+    "28848533DDE8"
+  ],
+  "gateway_tests": {
+    "run": 274,
+    "passed": 267,
+    "skipped": 7
+  },
+  "hardware_wake_verified": true,
+  "hardware_asr_verified": true,
+  "user_heard_reply": true,
+  "new_voice_user_review_pending": true,
+  "relay_actuation_hil": false
+}

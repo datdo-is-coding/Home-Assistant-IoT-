@@ -1,0 +1,47 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:dtv_energy_flutter/services/gateway_client.dart';
+import 'package:dtv_energy_flutter/models/automation.dart';
+import 'package:dtv_energy_flutter/repositories/smart_home_repository.dart';
+
+void main() {
+  test('R10 reproduces HTTP 200 failure being stamped as ON', () async {
+    final client=GatewayClient(persistSession:false,client:MockClient((req) async {
+      if(req.url.path=='/api/auth/me') return http.Response('{"authenticated":true,"user":{"role":"admin"}}',200);
+      if(req.url.path=='/api/relay') return http.Response('{"success":false,"verify":"timeout"}',200);
+      return http.Response(jsonEncode({'nodes':{'AB1':{'status':'online','relay_state':[0,0],'channels':{'ch1':{'device_type':'light'},'ch2':{'device_type':'fan'}}}},'pending':{}}),200);
+    }));
+    await client.loginWithKey(url:'http://audit.invalid',key:'fake');
+    final response=await client.relay('AB1','ch1',true);
+    expect(response['success'],false);
+    expect(client.nodes['AB1']['relay_state'][0],1);
+    client.dispose();
+  });
+
+  test('R11 reproduces automation loss when production repository is recreated', () async {
+    final client=GatewayClient(persistSession:false);
+    final repo=GatewaySmartHomeRepository(client);
+    await repo.addAutomation(const Automation(id:'audit',name:'Audit timer',triggerText:'22:00',deviceCount:1,icon:Icons.timer));
+    expect((await repo.getAutomations()).length,1);
+    repo.dispose();
+    final reopened=GatewaySmartHomeRepository(client);
+    expect(await reopened.getAutomations(),isEmpty);
+    reopened.dispose(); client.dispose();
+  });
+
+  test('R14 production repository drops ch3 and repeats board power per channel', () async {
+    final client=GatewayClient(persistSession:false);
+    client.nodes={'AB1':{'status':'online','relay_state':[1,1,1],
+      'last_telemetry':{'power':50},'channels':{
+        'ch1':{'device_type':'socket'},'ch2':{'device_type':'socket'},'ch3':{'device_type':'socket'}}}};
+    final repo=GatewaySmartHomeRepository(client);
+    final devices=await repo.getDevices();
+    expect(devices.length,2);
+    expect(devices.map((d)=>d.metadata['power']).toList(),[50.0,50.0]);
+    expect(devices.fold(0.0,(double p,d)=>p+d.value),100.0);
+    repo.dispose(); client.dispose();
+  });
+}

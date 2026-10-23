@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <atomic>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -36,6 +37,10 @@ static const char *TAG = "VOICE_CAP";
 #define CAPTURE_VAD_SILENCE_ENERGY 500000LL
 
 #define WAKE_TRIGGER_HIESP         0
+#define WAKE_TRIGGER_FOLLOWUP      2
+static std::atomic<int64_t> s_wake_session_us{0};
+static std::atomic<bool> s_followup_requested{false};
+static bool s_followup_stream = false;
 #define WN_MODEL_PARTITION         "model"
 
 static const esp_wn_iface_t *s_wn = NULL;
@@ -126,8 +131,17 @@ bool voice_capture_is_streaming(void) {
     return s_is_streaming;
 }
 
+bool voice_capture_request_followup(void) {
+    const int64_t started = s_wake_session_us.load();
+    if (!started || esp_timer_get_time() - started > 60000000 || s_is_streaming) return false;
+    s_followup_requested = true;
+    return true;
+}
+
 void voice_capture_start_streaming(uint8_t trigger_source) {
     if (s_is_streaming) return;
+    s_followup_stream = trigger_source == WAKE_TRIGGER_FOLLOWUP;
+    if (!s_followup_stream) s_wake_session_us = esp_timer_get_time();
 
     ESP_LOGI(TAG, "===============================================================");
     ESP_LOGI(TAG, "🎙️ [VOICE CAPTURE] Streaming started! Trigger: %s (Source: %u)",
@@ -279,6 +293,10 @@ static void voice_capture_task(void *pvParameters) {
     uint32_t diagnostic_counter = 0;
 
     while (1) {
+        if (s_followup_requested.exchange(false)) {
+            s_cooldown_frames = 0;
+            voice_capture_start_streaming(WAKE_TRIGGER_FOLLOWUP);
+        }
         size_t bytes_read = 0;
         esp_err_t res = i2s_channel_read(
             s_rx_handle, raw_buf,
@@ -371,8 +389,8 @@ static void voice_capture_task(void *pvParameters) {
                     bool silence_end = (s_speech_frames >= VAD_MIN_SPEECH_CHUNKS) &&
                                        (s_silence_frames >= VAD_SILENCE_END_CHUNKS);
                     bool no_speech = (s_speech_frames < VAD_MIN_SPEECH_CHUNKS) &&
-                                     (s_stream_frames >= VAD_NO_SPEECH_CHUNKS);
-                    bool max_dur = (s_stream_frames >= VAD_MAX_STREAM_CHUNKS);
+                                     (s_stream_frames >= (s_followup_stream ? 800 : VAD_NO_SPEECH_CHUNKS));
+                    bool max_dur = (s_stream_frames >= (s_followup_stream ? 800 : VAD_MAX_STREAM_CHUNKS));
 
                     if (silence_end || no_speech || max_dur) {
                         ESP_LOGI(TAG, "Capture end: %s (%.2fs, %u chunks)",

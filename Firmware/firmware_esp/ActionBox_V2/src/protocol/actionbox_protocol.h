@@ -21,7 +21,8 @@ typedef enum {
     CMD_TYPE_GET_POWER   = 6,
     CMD_TYPE_CLEAR_FAULT = 7,
     CMD_TYPE_PING        = 8,
-    CMD_TYPE_SET_CONFIG  = 9
+    CMD_TYPE_SET_CONFIG  = 9,
+    CMD_TYPE_LISTEN_FOLLOWUP = 10
 } ActionBoxCommandType;
 
 typedef struct {

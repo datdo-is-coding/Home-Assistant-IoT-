@@ -154,6 +154,8 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
     }
 
     if (!packet.payload_len) return;
+    // Only the selected microphone belongs to this wake-word/follow-up session.
+    if (!m_session_active || m_active_source_node_id != node_id) return;
 
     ActionBoxAudioChannel& ch = it->second;
     updateChannelMetrics(ch, packet);

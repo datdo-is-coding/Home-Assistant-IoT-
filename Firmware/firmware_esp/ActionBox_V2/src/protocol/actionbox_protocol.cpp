@@ -63,6 +63,7 @@ static ActionBoxCommandType parse_cmd_type(const char *cmd_str) {
     if (strcmp(cmd_str, "GET_POWER") == 0)   return CMD_TYPE_GET_POWER;
     if (strcmp(cmd_str, "CLEAR_FAULT") == 0) return CMD_TYPE_CLEAR_FAULT;
     if (strcmp(cmd_str, "PING") == 0)        return CMD_TYPE_PING;
+    if (strcmp(cmd_str, "LISTEN_FOLLOWUP") == 0) return CMD_TYPE_LISTEN_FOLLOWUP;
     if (strcmp(cmd_str, "SET_CONFIG") == 0)  return CMD_TYPE_SET_CONFIG;
     return CMD_TYPE_UNKNOWN;
 }

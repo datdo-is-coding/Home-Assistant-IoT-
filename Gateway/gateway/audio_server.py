@@ -21,6 +21,7 @@ Protocol (Pi → ESP32):
 import asyncio
 import json
 import logging
+import secrets
 import time
 from typing import Optional, Tuple, Any
 try:
@@ -147,6 +148,7 @@ class AudioServer:
         self._playback_lock = asyncio.Lock()
 
         self._asr_lock = asyncio.Lock()
+        self._followup_pending = {}
         self._active_voice_session = None
         self.arbiter = StreamArbiter(gateway=self.gateway)
 
@@ -838,6 +840,8 @@ class AudioServer:
           3. Command Dispatch (MQTT)
           4. TTS Response → PCM → stream to ESP32 speaker
         """
+        followup_deadline = self._followup_pending.pop(client_node_id, 0)
+        was_followup = followup_deadline > time.monotonic()
         duration_s = len(pcm_samples) / sample_rate
         logger.info(
             f"📊 Processing speech: {len(pcm_samples)} samples ({duration_s:.2f}s) "
@@ -862,13 +866,20 @@ class AudioServer:
                 await inference
                 raise
 
+        if was_followup and not text:
+            dialog = getattr(self.gateway, "dialog", None)
+            if dialog:
+                dialog.clear_session(client_node_id)
+            await websocket.send(json.dumps({"type": "transcript", "text": "", "accepted": False}))
+            return
+
         if not text:
             logger.warning("ASR returned empty transcript")
             reply = "Em không nghe rõ. Bạn nói lại được không?"
             await websocket.send(json.dumps({
                 "type": "transcript", "text": "", "accepted": False
             }))
-            await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
+            await self._send_voice_reply(websocket, reply, follow_up=not was_followup, broadcast=False, follow_up_node_id=client_node_id)
             return
 
         from asr_engine import ASREngine
@@ -880,7 +891,7 @@ class AudioServer:
             }))
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("transcript", {"text": text, "confidence": round(confidence, 2), "status": "low_confidence"})
-            await self._send_voice_reply(websocket, reply, follow_up=True, broadcast=False)
+            await self._send_voice_reply(websocket, reply, follow_up=not was_followup, broadcast=False, follow_up_node_id=client_node_id)
             return
 
         if confidence < ASREngine.CONFIDENCE_MEDIUM:
@@ -913,11 +924,11 @@ class AudioServer:
         }))
 
         if tts_audio and tts_format == "pcm":
-            await self._send_pcm_stream(websocket, tts_audio, follow_up=follow_up)
+            await self._send_pcm_stream(websocket, tts_audio, follow_up=follow_up, follow_up_node_id=client_node_id)
         elif tts_audio and tts_format == "mp3":
             await self._send_audio_stream_mp3(websocket, tts_audio, follow_up=follow_up)
         elif voice_reply:
-            await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up, broadcast=False)
+            await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up, broadcast=False, follow_up_node_id=client_node_id)
 
     async def speak_proactive(self, text: str, node_id: str = None) -> bool:
         """
@@ -965,7 +976,7 @@ class AudioServer:
             logger.error(f"Failed to speak proactive audio: {e}")
         return False
 
-    async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False, broadcast: bool = False):
+    async def _send_voice_reply(self, websocket, text: str, follow_up: bool = False, broadcast: bool = False, follow_up_node_id=None):
         """Synthesize text to PCM and stream to ESP32 speaker(s) — unicast by default."""
         if not self.gateway or not hasattr(self.gateway, "tts"):
             logger.warning("TTS engine not available")
@@ -1002,7 +1013,7 @@ class AudioServer:
         )
 
         if pcm_audio:
-            await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket)
+            await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id)
         else:
 
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")
@@ -1011,12 +1022,12 @@ class AudioServer:
                 for ws in targets:
                     await self._send_audio_stream_mp3(ws, mp3_audio, follow_up=follow_up)
 
-    async def _send_pcm_stream(self, websocket, pcm_bytes: bytes, follow_up: bool = False):
+    async def _send_pcm_stream(self, websocket, pcm_bytes: bytes, follow_up: bool = False, follow_up_node_id=None):
         """Single speaker wrapper for _broadcast_pcm_stream."""
         is_subbox = "subbox" in str(getattr(websocket, "node_id", "")).lower() or str(getattr(websocket, "node_id", "")).upper().startswith("SB")
         has_spk = getattr(websocket, "has_speaker", False) or is_subbox
         if has_spk and websocket and self._is_ws_alive(websocket):
-            await self._broadcast_pcm_stream([websocket], pcm_bytes, follow_up=follow_up, initiator_ws=websocket)
+            await self._broadcast_pcm_stream([websocket], pcm_bytes, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id)
         else:
             subbox_spks = [
                 ws for ws in self._active_speakers
@@ -1024,9 +1035,9 @@ class AudioServer:
             ]
             target = subbox_spks[0] if subbox_spks else next((ws for ws in self._active_speakers if self._is_ws_alive(ws)), None)
             if target:
-                await self._broadcast_pcm_stream([target], pcm_bytes, follow_up=follow_up, initiator_ws=websocket)
+                await self._broadcast_pcm_stream([target], pcm_bytes, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id)
 
-    async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None):
+    async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None, follow_up_node_id=None):
         """
         Stream raw PCM audio data to ESP32 speaker(s).
         Protected by self._playback_lock so multiple streams can never interleave or corrupt audio.
@@ -1101,11 +1112,28 @@ class AudioServer:
             tasks = []
             for ws in valid_targets:
                 ws_follow_up = follow_up if (ws == initiator_ws or initiator_ws is None) else False
-                end_msg = json.dumps({
-                    "type": "audio_end",
-                    "follow_up": ws_follow_up,
+                end_payload = {
+                    "type": "audio_end", "follow_up": ws_follow_up,
                     "timeout_ms": 6000 if ws_follow_up else 0
-                })
+                }
+                parent = getattr(ws, "node_id", "")
+                mqtt = getattr(self.gateway, "mqtt", None)
+                identity = getattr(mqtt, "node_identities", {}).get(follow_up_node_id)
+                if (ws_follow_up and identity and getattr(mqtt, "session_id", 0)
+                        and self._relay_source_epoch(parent, follow_up_node_id) is not None):
+                    command = {"protocol_version": 3, "node_id": follow_up_node_id,
+                               "hardware_uid": identity["hardware_uid"],
+                               "config_version": identity["config_version"],
+                               "request_id": secrets.randbelow(0x7ffffffe) + 1,
+                               "session_id": mqtt.session_id, "cmd": "LISTEN_FOLLOWUP"}
+                    end_payload["follow_up_command"] = json.dumps(command, separators=(",", ":"))
+                    self._followup_pending = {node: deadline for node, deadline in self._followup_pending.items()
+                                              if deadline > time.monotonic()}
+                    self._followup_pending[follow_up_node_id] = time.monotonic() + 30
+                    dialog = getattr(self.gateway, "dialog", None)
+                    if dialog and follow_up_node_id in dialog._sessions:
+                        dialog._sessions[follow_up_node_id].created_at = time.time()
+                end_msg = json.dumps(end_payload)
                 tasks.append(ws.send(end_msg))
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)

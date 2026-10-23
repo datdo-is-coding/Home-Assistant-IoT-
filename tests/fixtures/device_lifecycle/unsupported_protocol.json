@@ -1,0 +1,13 @@
+{
+  "device_uid": "proto_fixture_005",
+  "board_model": "actionbox_v1",
+  "board_revision": "v1.0",
+  "protocol_version": 1,
+  "capabilities": [
+    "relay"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 1,
+  "boot_id": "boot_proto_3e90",
+  "config_revision": 1
+}

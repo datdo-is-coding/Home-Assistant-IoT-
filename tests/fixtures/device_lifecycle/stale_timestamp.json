@@ -1,0 +1,9 @@
+{
+  "kind": "identify",
+  "operation_id": "op_stale_6b56",
+  "device_uid": "ab2_fixture_002",
+  "state": "running",
+  "error_code": null,
+  "timestamp": 1600000000.0,
+  "expires_at": 1600000015.0
+}

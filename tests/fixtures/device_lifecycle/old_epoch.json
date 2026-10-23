@@ -1,0 +1,16 @@
+{
+  "device_uid": "epoch_fixture_006",
+  "board_model": "actionbox_v2",
+  "board_revision": "v2.0",
+  "protocol_version": 2,
+  "capabilities": [
+    "relay",
+    "energy_meter",
+    "voice"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 2,
+  "current_epoch": 5,
+  "boot_id": "boot_epoch_4f12",
+  "config_revision": 3
+}

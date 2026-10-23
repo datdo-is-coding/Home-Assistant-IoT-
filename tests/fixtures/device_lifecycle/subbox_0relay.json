@@ -1,0 +1,15 @@
+{
+  "device_uid": "sub_fixture_003",
+  "board_model": "subbox_v1",
+  "board_revision": "v1.0",
+  "protocol_version": 2,
+  "capabilities": [
+    "wifi",
+    "espnow_router",
+    "audio_bridge"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 1,
+  "boot_id": "boot_sub_1c56",
+  "config_revision": 5
+}

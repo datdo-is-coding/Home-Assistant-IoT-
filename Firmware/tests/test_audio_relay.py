@@ -70,6 +70,9 @@ int main() {
     packet.payload_len = sizeof(pcm);
     memcpy(packet.payload, pcm, sizeof(pcm));
     manager.ingestAudioPacket(packet);
+    strcpy(packet.source_node_id, "AB_OTHER");
+    manager.ingestAudioPacket(packet); // another mic heard the same wake word
+    strcpy(packet.source_node_id, "AB123");
     packet.msg_type = AUDIO_MSG_TYPE_STREAM_END;
     manager.ingestAudioPacket(packet);
     manager.process();

@@ -54,3 +54,15 @@ memory.db
 /Gateway/hc-data/
 *.key
 *owner-token.txt
+
+# Local broker credentials and generated TLS material
+/MQTT_Server/mosquitto/config/passwd
+/MQTT_Server/mosquitto/config/certs/*.crt
+/MQTT_Server/mosquitto/config/certs/*.csr
+/MQTT_Server/mosquitto/config/certs/*.srl
+
+# Local rollback images, serial captures and test failure output
+/Gateway/gateway/*.before-*
+/App/dtv_energy_flutter/test/failures/
+/docs/audit-evidence-*/**/*.bin
+/docs/audit-evidence-*/**/*serial*.jsonl

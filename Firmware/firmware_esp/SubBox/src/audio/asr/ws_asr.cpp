@@ -116,12 +116,18 @@ void WsASR::setSourceNodeId(const char* node_id) {
 }
 
 bool WsASR::start() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_has_final = false;
-    m_has_partial = false;
-    m_final_result.clear();
-    m_partial_result.clear();
-    m_confidence = 0.0f;
+    std::lock_guard<std::mutex> send_lock(m_send_mutex);
+    std::string source_node_id;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        source_node_id = m_source_node_id;
+        m_has_final = false;
+        m_has_partial = false;
+        m_final_result.clear();
+        m_partial_result.clear();
+        m_confidence = 0.0f;
+    }
+    m_streaming = false;
     m_send_buf_count = 0;
 
     if (m_result_sem) {
@@ -133,23 +139,23 @@ bool WsASR::start() {
         return false;
     }
 
-    if (m_source_node_id.empty() || m_source_node_id.size() > 31 ||
-        m_source_node_id.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) {
+    if (source_node_id.empty() || source_node_id.size() > 31 ||
+        source_node_id.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") != std::string::npos) {
         ESP_LOGE(TAG, "Cannot relay audio without a valid ActionBox source ID");
         return false;
     }
     char start_msg[320];
     if (hc_runtime_enabled()) {
-        if (!hc_runtime_registered() || m_source_node_id.find_first_not_of("0123456789") != std::string::npos) return false;
+        if (!hc_runtime_registered() || source_node_id.find_first_not_of("0123456789") != std::string::npos) return false;
         uint32_t nonce[4];
         esp_fill_random(nonce, sizeof(nonce));
         snprintf(start_msg, sizeof(start_msg),
                  "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"source_node_id\":%s,\"request_id\":\"%08lx%08lx%08lx%08lx\"}",
-                 m_source_node_id.c_str(), (unsigned long)nonce[0], (unsigned long)nonce[1],
+                 source_node_id.c_str(), (unsigned long)nonce[0], (unsigned long)nonce[1],
                  (unsigned long)nonce[2], (unsigned long)nonce[3]);
     } else snprintf(start_msg, sizeof(start_msg),
              "{\"type\":\"start\",\"codec\":\"pcm\",\"sample_rate\":16000,\"node_id\":\"%s\",\"speaker\":false,\"audio_relay\":true,\"asr_only\":false}",
-             m_source_node_id.c_str());
+             source_node_id.c_str());
 
     int sent = esp_websocket_client_send_text(m_client, start_msg, strlen(start_msg), pdMS_TO_TICKS(1000));
     if (sent != (int)strlen(start_msg)) {
@@ -158,23 +164,26 @@ bool WsASR::start() {
     }
 
     m_streaming = true;
-    ESP_LOGI(TAG, "PCM relay started from %s -> Pi 4 owns ASR and command processing", m_source_node_id.c_str());
+    ESP_LOGI(TAG, "PCM relay started from %s -> Pi 4 owns ASR and command processing", source_node_id.c_str());
     return true;
 }
 
 void WsASR::cancel() {
-    if (m_streaming.load() && m_client && m_connected.load()) {
-        const char* message = "{\"type\":\"cancel\"}";
-        esp_websocket_client_send_text(m_client, message, strlen(message), pdMS_TO_TICKS(1000));
+    {
+        std::lock_guard<std::mutex> send_lock(m_send_mutex);
+        if (m_streaming.load() && m_client && m_connected.load()) {
+            const char* message = "{\"type\":\"cancel\"}";
+            esp_websocket_client_send_text(m_client, message, strlen(message), pdMS_TO_TICKS(1000));
+        }
     }
     reset();
 }
 
 void WsASR::stop() {
+    std::lock_guard<std::mutex> send_lock(m_send_mutex);
     if (!m_streaming.load()) return;
 
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
         if (m_send_buf_count > 0 && m_client && m_connected.load()) {
             int sent = esp_websocket_client_send_bin(
                 m_client,
@@ -207,11 +216,11 @@ void WsASR::stop() {
 }
 
 bool WsASR::feedAudio(const int16_t* pcm, size_t samples) {
+    std::lock_guard<std::mutex> send_lock(m_send_mutex);
     if (!pcm || samples == 0 || !m_streaming.load() || !m_client || !m_connected.load()) {
         return false;
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex);
     for (size_t i = 0; i < samples; i++) {
         m_send_buf[m_send_buf_count++] = pcm[i];
         if (m_send_buf_count >= 480) {
@@ -247,6 +256,7 @@ const char* WsASR::getFinalResult() const {
 }
 
 void WsASR::reset() {
+    std::lock_guard<std::mutex> send_lock(m_send_mutex);
     std::lock_guard<std::mutex> lock(m_mutex);
     m_streaming = false;
     if (m_receiving_tts.exchange(false)) {
@@ -371,6 +381,15 @@ void WsASR::handleTextMessage(const char* data, int len) {
             ESP_LOGI(TAG, "🏁 Incoming TTS audio stream finished.");
             if (m_receiving_tts.exchange(false)) {
                 SoundPlayer::instance().finishPcmStream();
+                const auto* command = cJSON_GetObjectItem(root, "follow_up_command");
+                if (cJSON_IsTrue(cJSON_GetObjectItem(root, "follow_up")) && cJSON_IsString(command)) {
+                    std::function<void(const std::string&)> callback;
+                    {
+                        std::lock_guard<std::mutex> lock(m_mutex);
+                        callback = m_followup_cb;
+                    }
+                    if (callback) callback(command->valuestring);
+                }
             }
         } else if (strcmp(type->valuestring, "speaker_busy") == 0) {
             cJSON* busy = cJSON_GetObjectItem(root, "busy");

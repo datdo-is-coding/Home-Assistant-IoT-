@@ -10,6 +10,13 @@
 
 static const char* TAG = "TASK_MGR";
 
+bool TaskManager::queueGatewayCommand(const std::string& command) {
+    CommandQueueItem item{};
+    if (!m_command_queue || command.empty() || command.size() >= sizeof(item.gateway_command)) return false;
+    strcpy(item.gateway_command, command.c_str());
+    return xQueueSend(m_command_queue, &item, 0) == pdTRUE;
+}
+
 TaskManager::TaskManager(
     std::shared_ptr<AudioManager> audio_mgr,
     std::shared_ptr<AudioTransport> transport,
@@ -63,10 +70,7 @@ bool TaskManager::init() {
 
     if (m_mqtt) {
         m_mqtt->registerCommandCallback([this](const std::string&, const std::string& payload) {
-            CommandQueueItem item{};
-            if (payload.size() >= sizeof(item.gateway_command)) return;
-            strcpy(item.gateway_command, payload.c_str());
-            xQueueSend(m_command_queue, &item, 0);
+            queueGatewayCommand(payload);
         });
         m_mqtt->registerVoiceResponseCallback([this](const std::string&, const std::string& payload, const uint8_t*, size_t) {
             cJSON* root = cJSON_Parse(payload.c_str());

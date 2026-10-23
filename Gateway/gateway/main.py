@@ -286,8 +286,10 @@ class SmartHomeGateway:
 
         active_session = self.dialog.get_active_session(client_node_id)
         if active_session:
-
-            is_new_command = any(w in user_text.lower() for w in ("bật", "tắt", "mở", "đóng", "cài", "đặt", "chỉnh", "bạn bè"))
+            intent = self.dialog.fill_slot(active_session, user_text)
+            answer_cmd = intent.get("command", {})
+            selected_answer = answer_cmd.get("node_id") or "targets" in answer_cmd
+            is_new_command = not selected_answer and any(w in user_text.lower() for w in ("bật", "tắt", "mở", "đóng", "cài", "đặt", "chỉnh", "bạn bè"))
             if is_new_command:
                 logger.info(f"🔄 User issued fresh command during session for {client_node_id}. Clearing stale session.")
                 self.dialog.clear_session(client_node_id)
@@ -295,7 +297,6 @@ class SmartHomeGateway:
 
         if active_session:
             logger.info(f"🔄 Follow-Up detected for {client_node_id} (filling slot: {active_session.missing_slot})")
-            intent = self.dialog.fill_slot(active_session, user_text)
             self.dialog.clear_session(client_node_id)
             result["engine"] = f"{getattr(self.intent, 'active_engine', 'Hybrid')} (Follow-Up)"
         else:
@@ -304,8 +305,6 @@ class SmartHomeGateway:
             logger.info(f'Engine selected: {result["engine"]}')
 
             if not intent or not self.intent.validate_intent(intent):
-                if hasattr(self, "sound") and self.sound:
-                    asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
                 reply = "Chưa rõ khẩu lệnh."
                 result["voice_reply"] = reply
                 result["follow_up"] = True
@@ -318,8 +317,6 @@ class SmartHomeGateway:
 
             cmd = intent.get("command", {})
             if cmd.get("action") == "unknown":
-                if hasattr(self, "sound") and self.sound:
-                    asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
                 reply = intent.get("voice_reply") or "Chưa rõ khẩu lệnh."
                 reply = clean_voice_text(reply)
                 result["voice_reply"] = reply
@@ -333,21 +330,29 @@ class SmartHomeGateway:
                 logger.info(f"❓ Unknown intent rejected decisively: {reply} (Follow-Up ACTIVE)")
                 return result
 
-            needs_clarify, clarify_q, missing_slot, intent = self.dialog.inspect_intent(
-                intent, detected_room=detected_room, client_key=client_node_id
-            )
-            if needs_clarify:
-                result["intent"] = intent
-                result["voice_reply"] = clarify_q
-                result["follow_up"] = True
-                result["verify"] = "clarification_needed"
-                result["tts_audio"] = await self.tts.synthesize_pcm(clarify_q)
-                self.broadcast_event("command_result", {
-                    "voice_reply": clarify_q, "verify": "clarification_needed",
-                    "engine": result["engine"], "follow_up": True
-                })
-                logger.info(f"❓ Clarification requested: {clarify_q} (Follow-Up ACTIVE)")
-                return result
+        needs_clarify, clarify_q, missing_slot, intent = self.dialog.inspect_intent(
+            intent, detected_room=detected_room, client_key=client_node_id
+        )
+        if needs_clarify:
+            follow_up = True
+            if active_session:
+                if active_session.clarification_attempts >= 1:
+                    self.dialog.clear_session(client_node_id)
+                    clarify_q = "Mình chưa xác định được thiết bị. Đã dừng lệnh, bạn có thể gọi Hi ESP để thử lại."
+                    follow_up = False
+                else:
+                    self.dialog._sessions[client_node_id].clarification_attempts = active_session.clarification_attempts + 1
+            result["intent"] = intent
+            result["voice_reply"] = clarify_q
+            result["follow_up"] = follow_up
+            result["verify"] = "clarification_needed" if follow_up else "clarification_failed"
+            result["tts_audio"] = await self.tts.synthesize_pcm(clarify_q)
+            self.broadcast_event("command_result", {
+                "voice_reply": clarify_q, "verify": result["verify"],
+                "engine": result["engine"], "follow_up": follow_up
+            })
+            logger.info("Clarification: %s (follow_up=%s)", clarify_q, follow_up)
+            return result
 
         result["intent"] = intent
         cmd = intent["command"]
@@ -378,19 +383,27 @@ class SmartHomeGateway:
             })
             return result
 
-        if device == "all" and action in ("turn_on", "turn_off"):
+        selected_group = cmd.get("targets")
+        if (device == "all" or selected_group is not None) and action in ("turn_on", "turn_off"):
             all_online = self.registry.get_online_nodes()
             room_filter = str(location).lower().strip() if location else None
             affected_count = 0
             failed_count = 0
             device_results = []
             targets = []
-            for nid, node in all_online.items():
-                if room_filter and str(node.get("room", "")).lower().strip() != room_filter:
-                    continue
-                for cid in node.get("channels", {}).keys():
-                    seq = self.registry.next_seq(nid)
-                    targets.append((nid, cid, seq))
+            if selected_group is not None:
+                # Only the choices read to this client may be selected together.
+                current = set(self.registry.find_device_candidates(None, location))
+                if (active_session and selected_group == active_session.candidates
+                        and all(target in current for target in selected_group)):
+                    targets = [(nid, cid, self.registry.next_seq(nid)) for nid, cid in selected_group]
+            else:
+                for nid, node in all_online.items():
+                    if room_filter and str(node.get("room", "")).lower().strip() != room_filter:
+                        continue
+                    for cid in node.get("channels", {}).keys():
+                        seq = self.registry.next_seq(nid)
+                        targets.append((nid, cid, seq))
 
             if targets:
                 tasks = [
@@ -428,13 +441,16 @@ class SmartHomeGateway:
             r_vn = get_room_name(location)
             act_vn = "bật" if action == "turn_on" else "tắt"
             if not affected_count and not failed_count:
-                reply = "Chưa có thiết bị nào trong phòng." if r_vn else "Chưa có thiết bị kết nối."
+                reply = "Danh sách thiết bị đã thay đổi. Chưa thực hiện lệnh." if selected_group is not None else (
+                    "Chưa có thiết bị nào trong phòng." if r_vn else "Chưa có thiết bị kết nối.")
             elif not affected_count:
                 reply = "Chưa có thiết bị nào xác nhận lệnh."
             elif failed_count:
                 reply = f"Có {affected_count} thiết bị xác nhận, {failed_count} thiết bị chưa xác nhận."
             else:
-                if r_vn:
+                if selected_group is not None:
+                    reply = f"Đã {act_vn} {affected_count} thiết bị vừa chọn."
+                elif r_vn:
                     reply = f"Đã {act_vn} thiết bị ở {r_vn}."
                 else:
                     reply = f"Đã {act_vn} tất cả thiết bị."
@@ -463,10 +479,13 @@ class SmartHomeGateway:
             logger.info(f"Bulk {action} executed for {affected_count} channels (room={location})")
             return result
 
-        lookup = self.registry.find_node_by_device(device, location)
+        selected = (cmd.get("node_id"), cmd.get("channel"))
+        if all(selected):
+            lookup = selected if (active_session and selected in active_session.candidates
+                                  and selected in self.registry.find_device_candidates(None, location)) else None
+        else:
+            lookup = self.registry.find_node_by_device(device, location)
         if not lookup:
-            if hasattr(self, "sound") and self.sound:
-                asyncio.create_task(self.sound.play_sound(SoundManager.SOUND_WRONG, target_node=client_node_id))
 
             all_online = self.registry.get_online_nodes()
             if not all_online:

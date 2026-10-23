@@ -1,0 +1,15 @@
+{
+  "device_uid": "ab2_fixture_002",
+  "board_model": "actionbox_v2",
+  "board_revision": "v2.0",
+  "protocol_version": 2,
+  "capabilities": [
+    "relay",
+    "energy_meter",
+    "voice"
+  ],
+  "home_id": "home_comm_01",
+  "owner_epoch": 1,
+  "boot_id": "boot_ab2_9b34",
+  "config_revision": 12
+}

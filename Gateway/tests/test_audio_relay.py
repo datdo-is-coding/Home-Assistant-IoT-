@@ -313,6 +313,36 @@ class RegisteredRelayTests(unittest.IsolatedAsyncioTestCase):
         server._process_audio.assert_not_awaited()
 
 class VoiceReplyFormatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_silent_followup_closes_instead_of_opening_mic_forever(self):
+        import time
+        gateway = SimpleNamespace(asr=SimpleNamespace(transcribe_with_confidence=lambda *args: ('', 0)),
+                                  dialog=SimpleNamespace(clear_session=Mock()))
+        server = AudioServer(gateway)
+        server._followup_pending['AB1'] = time.monotonic() + 30
+        server._send_voice_reply = AsyncMock()
+        await server._process_audio(Socket(), [0]*160, 16000, client_node_id='AB1')
+        gateway.dialog.clear_session.assert_called_once_with('AB1')
+        server._send_voice_reply.assert_not_awaited()
+
+    async def test_followup_listen_is_only_sent_after_pcm_to_registered_source(self):
+        nodes = {'SB1': {}, 'AB1': {'subbox_id': 'SB1', 'status': 'online'}}
+        gateway = SimpleNamespace(registry=SimpleNamespace(get_all_nodes=lambda: nodes,
+            get_pending=lambda: {}), mqtt=SimpleNamespace(node_identities={
+                'AB1': {'hardware_uid': '001122334455', 'config_version': 1}}, session_id=12))
+        server = AudioServer(gateway)
+        ws = Socket(); ws.node_id = 'SB1'; ws.has_speaker = True
+        await server._send_pcm_stream(ws, b'\0\0'*160, follow_up=True, follow_up_node_id='AB1')
+        end = next(m for m in ws.sent if isinstance(m, dict) and m.get('type') == 'audio_end')
+        command = json.loads(end['follow_up_command'])
+        self.assertEqual(command['cmd'], 'LISTEN_FOLLOWUP')
+        self.assertEqual(command['node_id'], 'AB1')
+        self.assertGreater(ws.sent.index(end), next(i for i,m in enumerate(ws.sent) if isinstance(m, bytes)))
+        nodes['AB1']['subbox_id'] = 'SB2'
+        ws.sent.clear()
+        await server._send_pcm_stream(ws, b'\0\0'*160, follow_up=True, follow_up_node_id='AB1')
+        end = next(m for m in ws.sent if isinstance(m,dict) and m.get('type') == 'audio_end')
+        self.assertNotIn('follow_up_command', end)
+
     async def test_cancel_and_unknown_reply_are_pcm_not_encoded_audio(self):
         from main import SmartHomeGateway
         from dialog_manager import DialogManager

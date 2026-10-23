@@ -118,4 +118,9 @@ int main() {
         ActionBoxCommand command{};
         assert(protocol_parse_command(json, &command) == (ch == 3 ? ESP_OK : ESP_ERR_INVALID_ARG));
     }
+    snprintf(json, sizeof(json), "{\"protocol_version\":3,\"node_id\":\"%s\",\"hardware_uid\":\"%s\",\"config_version\":%u,\"request_id\":2,\"session_id\":7,\"cmd\":\"LISTEN_FOLLOWUP\"}",
+             cfg.node_id, protocol_get_hardware_uid(), cfg.config_version);
+    ActionBoxCommand listen{};
+    assert(protocol_parse_command(json, &listen) == ESP_OK);
+    assert(listen.cmd == CMD_TYPE_LISTEN_FOLLOWUP);
 }

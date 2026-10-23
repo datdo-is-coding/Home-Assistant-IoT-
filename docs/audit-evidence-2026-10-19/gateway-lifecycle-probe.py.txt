@@ -1,0 +1,55 @@
+"""Read-only source audit: temporary DBs and mocked transports, no hardware."""
+import asyncio
+import os
+from pathlib import Path
+import sys
+import tempfile
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
+
+ROOT = Path('/home/tuan/.codex/worktrees/d283/Home-Assistant-IoT-')
+TMP = Path('/tmp/iot-lifecycle-audit-20261019')
+(TMP / 'firmware').mkdir(exist_ok=True)
+os.environ.update(FIRMWARE_DIR=str(TMP / 'firmware'),
+                  BOOTSTRAP_PASSWORD='audit-only-bootstrap-password', AI_ENABLED='false')
+sys.path.insert(0, str(ROOT / 'Gateway/gateway'))
+from registry_manager import RegistryManager
+from main import SmartHomeGateway
+from auth_manager import AuthManager
+
+async def main():
+    with tempfile.TemporaryDirectory(dir=TMP) as directory:
+        base = Path(directory)
+        registry = RegistryManager(str(base / 'registry.json'), str(base / 'registry.db'))
+        gw = SmartHomeGateway.__new__(SmartHomeGateway)
+        gw.registry = registry
+        gw.mqtt = SimpleNamespace(send_cfg=AsyncMock(return_value=False))
+        gw.discovery = SimpleNamespace(publish_ha_discovery_for_node=AsyncMock())
+        gw.broadcast_event = Mock()
+        result = await gw.provision_pending('NEVER_SEEN', 'livingroom', 'light', 'fan')
+        node_id = result['node_id']
+        assert result['success'] and registry.data['nodes'][node_id]['status'] == 'online'
+        print('G1 no discovery, send_cfg=False -> success=True, status=online, id=',node_id)
+
+        for i in range(3):
+            registry.provision_node(f'EXISTING_{i}', 'livingroom')
+        registry.on_hello({'id':'NEW_PENDING','mac':'AA:BB:CC:DD:EE:99','state':'FACTORY_NEW'})
+        assert 'NEW_PENDING' in registry.data['pending']
+        rejected = registry.provision_node('NEW_PENDING','livingroom')
+        assert rejected is None and 'NEW_PENDING' not in registry.data['pending']
+        print('G2 fifth node rejected for room limit, but pending candidate already removed')
+
+        result = registry.on_hello({'id':node_id,'state':'FACTORY_NEW','cfg':None})
+        assert result['action'] == 'cfg_mismatch' and node_id not in registry.data['pending']
+        print('G3 factory-new hello with registered id -> cfg_mismatch, no new claim required')
+
+        auth = AuthManager(str(base / 'auth.db'))
+        with auth._get_db() as conn:
+            member_id = auth._create_user(conn,'audit_member','audit-member-password',role='member')
+        auth.assign_device_to_user(member_id,node_id)
+        gw.auth = auth
+        assert await gw.delete_device(node_id)
+        assert node_id in auth.get_user_devices(member_id)
+        print('G4 delete_device removes registry but leaves member grant in separate auth DB')
+
+asyncio.run(main())
