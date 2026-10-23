@@ -111,6 +111,11 @@ static void network_task(void *pvParameters) {
     while (1) {
 
         if (xQueueReceive(s_network_rx_queue, &rx_pkt, pdMS_TO_TICKS(50)) == pdTRUE) {
+            static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+            if (memcmp(rx_pkt.mac, bcast, 6) == 0) {
+                ESP_LOGW(TAG, "Dropped packet from broadcast MAC");
+                continue;
+            }
 
             char json_buf[512];
             size_t copy_len = (rx_pkt.len < sizeof(json_buf) - 1) ? rx_pkt.len : (sizeof(json_buf) - 1);
@@ -118,10 +123,23 @@ static void network_task(void *pvParameters) {
             json_buf[copy_len] = '\0';
 
             if (strstr(json_buf, "\"heartbeat\"") != NULL || strstr(json_buf, "\"subbox_id\"") != NULL) {
-                safety_feed_network_watchdog();
-                if (!espnow_transport_is_paired()) {
+                if (espnow_transport_is_paired()) {
+                    uint8_t paired_mac[6] = {0};
+                    if (espnow_transport_get_subbox_mac(paired_mac) && memcmp(rx_pkt.mac, paired_mac, 6) != 0) {
+                        ESP_LOGW(TAG, "Heartbeat dropped from non-paired MAC %02X:%02X:%02X:%02X:%02X:%02X",
+                                 rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
+                        continue;
+                    }
+                } else if (espnow_transport_is_pairing_mode()) {
+                    ESP_LOGI(TAG, "Pairing mode active: pairing with SubBox MAC %02X:%02X:%02X:%02X:%02X:%02X",
+                             rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
                     espnow_transport_pair_subbox(rx_pkt.mac);
+                    espnow_transport_set_pairing_mode(false);
+                } else {
+                    ESP_LOGD(TAG, "Heartbeat ignored: ActionBox not paired and pairing mode inactive");
+                    continue;
                 }
+                safety_feed_network_watchdog();
                 cJSON *hb_root = cJSON_Parse(json_buf);
                 if (hb_root) {
                     const auto* wifi = cJSON_GetObjectItemCaseSensitive(hb_root, "wifi");
@@ -145,6 +163,22 @@ static void network_task(void *pvParameters) {
             ActionBoxCommand cmd;
             esp_err_t err = protocol_parse_command(json_buf, &cmd);
             if (err == ESP_OK) {
+                bool requires_paired_subbox = (cmd.cmd == CMD_TYPE_TURN_ON || cmd.cmd == CMD_TYPE_TURN_OFF ||
+                                              cmd.cmd == CMD_TYPE_TOGGLE || cmd.cmd == CMD_TYPE_SET_CONFIG ||
+                                              cmd.cmd == CMD_TYPE_CLEAR_FAULT);
+                if (requires_paired_subbox) {
+                    uint8_t paired_mac[6] = {0};
+                    if (!espnow_transport_is_paired() || !espnow_transport_get_subbox_mac(paired_mac)) {
+                        ESP_LOGW(TAG, "Rejected control/config command: ActionBox is not paired with a trusted SubBox!");
+                        continue;
+                    }
+                    if (memcmp(rx_pkt.mac, paired_mac, 6) != 0) {
+                        ESP_LOGW(TAG, "Rejected control/config command from untrusted MAC %02X:%02X:%02X:%02X:%02X:%02X (expected %02X:%02X:%02X:%02X:%02X:%02X)!",
+                                 rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5],
+                                 paired_mac[0], paired_mac[1], paired_mac[2], paired_mac[3], paired_mac[4], paired_mac[5]);
+                        continue;
+                    }
+                }
                 safety_feed_network_watchdog();
 
                 char cached_resp[512] = {0};
@@ -173,10 +207,6 @@ static void network_task(void *pvParameters) {
                         }
                     }
                 }
-
-                if (!espnow_transport_is_paired()) {
-                    espnow_transport_pair_subbox(rx_pkt.mac);
-                }
             }
         }
 
@@ -193,16 +223,36 @@ static void telemetry_task(void *pvParameters) {
 
     while (1) {
 
-        const bool fault = relay_get_fault(1) != RELAY_FAULT_NONE || relay_get_fault(2) != RELAY_FAULT_NONE;
-        const int code = fault ? 4 : (safety_is_network_timed_out() ? 1 : s_upstream_error.load());
-        static int previous = -1;
-        if (code != previous) {
-            previous = code;
-            const char* labels[] = {"READY", "SUBBOX_MISSING", "SUBBOX_WIFI_OFFLINE", "GATEWAY_MQTT_OFFLINE", "RELAY_FAULT"};
-            ESP_LOGI(TAG, "LED1 code=%d %s", code, labels[code]);
+        bool fault = false;
+        for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ch++) {
+            if (relay_get_fault(ch) != RELAY_FAULT_NONE) {
+                fault = true;
+                break;
+            }
         }
-        led_set_pattern(1, code == 0 ? LED_PATTERN_BLINK_FAST : static_cast<LedPattern>(LED_PATTERN_ERROR_1 + code - 1));
 
+        ArmedKind armed = device_manager_get_armed_kind();
+        bool is_claimed = device_manager_is_claimed();
+
+        ::LedPattern p1;
+        if (fault) {
+            p1 = ::LedPattern::FAULT;
+        } else if (armed == ArmedKind::FACTORY_RESET) {
+            p1 = ::LedPattern::AWAITING_FACTORY_RESET;
+        } else if (armed == ArmedKind::NETWORK_RESET) {
+            p1 = ::LedPattern::AWAITING_NETWORK_RESET;
+        } else if (!is_claimed) {
+            p1 = ::LedPattern::UNCLAIMED;
+        } else {
+            const int code = (safety_is_network_timed_out() ? 1 : s_upstream_error.load());
+            if (code == 0) {
+                p1 = ::LedPattern::READY;
+            } else {
+                p1 = ::LedPattern::OFFLINE;
+            }
+        }
+
+        led_set_pattern(1, p1);
         led_driver_tick();
 
         TickType_t now = xTaskGetTickCount();
@@ -216,7 +266,7 @@ static void telemetry_task(void *pvParameters) {
             char telem_json[768];
             if (protocol_serialize_telemetry(telem_json, sizeof(telem_json)) == ESP_OK) {
                 espnow_transport_send((const uint8_t*)telem_json, strlen(telem_json));
-                ESP_LOGI(TAG, "Telemetry: %s", telem_json);
+                ESP_LOGD(TAG, "Telemetry: %s", telem_json);
             }
         }
 
@@ -225,7 +275,9 @@ static void telemetry_task(void *pvParameters) {
 }
 
 static void on_espnow_packet_received(const uint8_t *mac_addr, const uint8_t *data, int len) {
-    if (!data || len <= 0 || len > 250) return;
+    if (!mac_addr || !data || len <= 0 || len > 250) return;
+    static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    if (memcmp(mac_addr, bcast, 6) == 0) return;
     task_manager_post_network_rx(mac_addr, data, (size_t)len);
 }
 
@@ -243,6 +295,12 @@ esp_err_t task_manager_init(void) {
     }
 
     espnow_transport_register_rx_callback(on_espnow_packet_received);
+
+    const ActionBoxPersistentConfig *stored_cfg = nvs_storage_get_cached_config();
+    if (!stored_cfg || !stored_cfg->has_assigned_subbox) {
+        ESP_LOGI(TAG, "No assigned SubBox configured, enabling ESP-NOW pairing mode on boot.");
+        espnow_transport_set_pairing_mode(true);
+    }
 
     ESP_LOGI(TAG, "Spawning ActionBox FreeRTOS tasks...");
 

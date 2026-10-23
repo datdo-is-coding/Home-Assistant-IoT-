@@ -9,17 +9,20 @@ Nâng cấp:
 """
 
 import asyncio
+import time
+from datetime import datetime, timezone
 import logging
 import signal
 import sys
 import os
 import json
+import re
 from typing import Optional, Dict, Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import config
-from registry_manager import RegistryManager
+from registry_manager import RegistryManager, ROOM_ALIASES, slug
 from mqtt_handler import MQTTHandler
 from intent_engine import IntentEngine
 from dialog_manager import DialogManager, DialogSession
@@ -33,6 +36,7 @@ from discovery_manager import DiscoveryManager
 from ota_manager import OTAManager
 from auth_manager import AuthManager
 from sound_manager import SoundManager
+from device_lifecycle import DeviceLifecycleManager
 
 if getattr(config, "AI_ENABLED", False):
     try:
@@ -79,6 +83,14 @@ class SmartHomeGateway:
         self.auth = AuthManager()
         self.sound = SoundManager(self)
         self.web_server = WebServer(self)
+        self.lifecycle = DeviceLifecycleManager(
+            db_path=self.registry.db_path,
+            registry=self.registry,
+            mqtt=self.mqtt,
+            discovery=self.discovery,
+            broadcaster=self.broadcast_event,
+            auth=self.auth,
+        )
 
         self.memory = MemoryEngine() if (getattr(config, "AI_ENABLED", False) and MemoryEngine) else None
         self.persona = PersonaEngine() if (getattr(config, "PERSONA_ENABLED", False) and PersonaEngine) else None
@@ -97,6 +109,8 @@ class SmartHomeGateway:
 
         logger.info("Initializing ASR engine (with dynamic registry hotwords)...")
         self.asr.initialize(self.registry)
+        if config.TTS_PROVIDER.strip().lower() == "vieneu":
+            await self.tts.vieneu.initialize()
 
         await self.audio_server.start()
         await self.web_server.start()
@@ -105,6 +119,7 @@ class SmartHomeGateway:
             self.telemetry_writer.initialize()
 
         self._subbox_voice_requests = {}
+        self.mqtt.on_message("home/subbox/+/state", self._on_subbox_state)
         self.mqtt.on_message("home/subbox/+/voice/request", self._on_subbox_voice)
         self.mqtt.on_message("home/subbox/+/event/actionbox", self._on_subbox_actionbox)
         self.mqtt.on_message("smarthome/hello", self._on_hello)
@@ -121,7 +136,10 @@ class SmartHomeGateway:
         self.mqtt.on_message("home/devices/+/status", self._on_device_status)
         self.mqtt.on_message("home/devices/+/telemetry", self._on_device_telemetry)
         self.mqtt.on_message("home/devices/+/config/reported", self._on_reported_config)
+        self.mqtt.on_message("home/devices/+/applied", self._on_device_applied_msg)
         self.mqtt.on_message("home/devices/+/relay/+/state", self._on_device_relay_state)
+        self.mqtt.on_message("home/devices/+/operation/ack", self._on_device_operation_ack)
+        self.mqtt.on_message("smarthome/operation/ack/#", self._on_device_operation_ack)
 
         self._running = True
         asyncio.create_task(self._announce_all_nodes())
@@ -143,6 +161,46 @@ class SmartHomeGateway:
         except Exception as e:
             logger.debug(f"Bootup sound task error: {e}")
 
+    def _voice_inventory_reply(self, user_text: str) -> Optional[str]:
+        text = slug(user_text).replace("_", " ")
+        if not re.fullmatch(
+            r"(?:(?:cho toi biet|cho minh biet) )?"
+            r"(?:(?:(?:trong nha|nha minh|nha toi|he thong) )?(?:hien |dang )?"
+            r"co (?:nhung |cac )?thiet bi (?:nao|gi)(?: trong nha)?"
+            r"|liet ke (?:cac |nhung )?thiet bi(?: trong nha)?)"
+            r"(?: nhi| vay| a)?", text
+        ):
+            return None
+
+        groups = {}
+        pending = self.registry.get_pending()
+        for node_id, node in self.registry.get_all_nodes().items():
+            # SubBox channels are legacy metadata, not household relay outputs.
+            if (node_id in pending or str(node_id).upper().startswith("SB")
+                    or "subbox" in str(node_id).lower()
+                    or node.get("status") not in ("online", "offline")):
+                continue
+            room = slug(node.get("room", ""))
+            room = next((key for key, aliases in ROOM_ALIASES.items() if room in aliases), room)
+            for channel in node.get("channels", {}).values():
+                name = get_device_name(channel)
+                label = f"{name} ở {get_room_name(room)}" if room != "unknown" else name
+                key = (node.get("status") != "online", label)
+                groups[key] = groups.get(key, 0) + 1
+
+        total = sum(groups.values())
+        if not total:
+            return "Nhà bạn chưa có thiết bị nào được đăng ký."
+        shown = sorted(groups.items())[:5]
+        items = [f"{str(count) + ' ' if count > 1 else ''}{label}"
+                 + (", đang ngoại tuyến" if offline else "")
+                 for (offline, label), count in shown]
+        reply = f"Nhà bạn có {total} thiết bị đã đăng ký: " + "; ".join(items) + "."
+        remaining = total - sum(count for _, count in shown)
+        if remaining:
+            reply += f" Còn {remaining} thiết bị khác, bạn có thể xem đầy đủ trong ứng dụng."
+        return reply
+
     async def process_voice_command(
         self,
         user_text: str,
@@ -161,13 +219,25 @@ class SmartHomeGateway:
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.notify_user_activity(user_text)
 
+        inventory_reply = self._voice_inventory_reply(user_text)
+        if inventory_reply is not None:
+            self.dialog.clear_session(client_node_id)
+            result.update(voice_reply=inventory_reply, engine="Registry inventory",
+                          verify="inventory", tts_format="pcm")
+            result["tts_audio"] = await self.tts.synthesize_pcm(inventory_reply)
+            self.broadcast_event("command_result", {
+                "voice_reply": inventory_reply, "verify": "inventory", "follow_up": False
+            })
+            logger.info("Voice inventory: %s", inventory_reply)
+            return result
+
         if any(w in user_text.lower().strip().split() for w in ("thôi", "hủy", "dừng", "cancel")):
             self.dialog.clear_session(client_node_id)
             reply = "Đã hủy lệnh."
             result["voice_reply"] = reply
             result["follow_up"] = False
             result["verify"] = "cancelled"
-            result["tts_audio"] = await self.tts.synthesize(reply)
+            result["tts_audio"] = await self.tts.synthesize_pcm(reply)
             self.broadcast_event("command_result", {
                 "voice_reply": reply, "verify": "cancelled", "follow_up": False
             })
@@ -239,7 +309,7 @@ class SmartHomeGateway:
                 reply = "Chưa rõ khẩu lệnh."
                 result["voice_reply"] = reply
                 result["follow_up"] = True
-                result["tts_audio"] = await self.tts.synthesize(reply)
+                result["tts_audio"] = await self.tts.synthesize_pcm(reply)
                 self.broadcast_event("command_result", {
                     "voice_reply": reply, "verify": "parse_error",
                     "engine": result["engine"], "follow_up": True
@@ -255,7 +325,7 @@ class SmartHomeGateway:
                 result["voice_reply"] = reply
                 result["follow_up"] = True
                 result["verify"] = "unknown_intent"
-                result["tts_audio"] = await self.tts.synthesize(reply)
+                result["tts_audio"] = await self.tts.synthesize_pcm(reply)
                 self.broadcast_event("command_result", {
                     "voice_reply": reply, "verify": "unknown_intent",
                     "engine": result["engine"], "follow_up": True
@@ -271,7 +341,7 @@ class SmartHomeGateway:
                 result["voice_reply"] = clarify_q
                 result["follow_up"] = True
                 result["verify"] = "clarification_needed"
-                result["tts_audio"] = await self.tts.synthesize(clarify_q)
+                result["tts_audio"] = await self.tts.synthesize_pcm(clarify_q)
                 self.broadcast_event("command_result", {
                     "voice_reply": clarify_q, "verify": "clarification_needed",
                     "engine": result["engine"], "follow_up": True
@@ -285,32 +355,93 @@ class SmartHomeGateway:
         location = cmd.get("location")
         action = cmd.get("action", "turn_on")
 
+        is_scene = (intent.get("intent") == "scene" or action == "scene")
+        if is_scene:
+            scene_name = intent.get("scene") or cmd.get("value") or "sleep"
+            scene_res = await self.execute_scene(scene_name)
+            result.update({
+                "device_results": scene_res["device_results"],
+                "success": scene_res["success"],
+                "verify": scene_res["verify"],
+                "voice_reply": scene_res["voice_reply"],
+                "follow_up": False,
+            })
+            pcm = await self.tts.synthesize_pcm(scene_res["voice_reply"])
+            result["tts_audio"] = pcm or await self.tts.synthesize(scene_res["voice_reply"])
+            result["tts_format"] = "pcm" if pcm else "mp3"
+            self.broadcast_event("command_result", {
+                "voice_reply": scene_res["voice_reply"],
+                "verify": result["verify"],
+                "engine": result["engine"],
+                "device_results": scene_res["device_results"],
+                "follow_up": False
+            })
+            return result
+
         if device == "all" and action in ("turn_on", "turn_off"):
             all_online = self.registry.get_online_nodes()
             room_filter = str(location).lower().strip() if location else None
             affected_count = 0
             failed_count = 0
+            device_results = []
+            targets = []
             for nid, node in all_online.items():
                 if room_filter and str(node.get("room", "")).lower().strip() != room_filter:
                     continue
                 for cid in node.get("channels", {}).keys():
                     seq = self.registry.next_seq(nid)
-                    verified, *_ = await self.verifier.verify_command(nid, cid, action, seq=seq)
-                    if verified in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE):
+                    targets.append((nid, cid, seq))
+
+            if targets:
+                tasks = [
+                    self.verifier.verify_command(nid, cid, action, seq=seq)
+                    for nid, cid, seq in targets
+                ]
+                gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+                for (nid, cid, seq), cmd_res in zip(targets, gathered_results):
+                    if isinstance(cmd_res, Exception):
+                        res_dict = {
+                            "command_id": str(seq),
+                            "node_id": nid,
+                            "channel": cid,
+                            "requested_state": "ON" if action in ("turn_on", "open", "on") else "OFF",
+                            "confirmed_state": None,
+                            "verification": "failed",
+                            "is_success": False,
+                            "error": str(cmd_res),
+                        }
+                    else:
+                        res_dict = cmd_res.to_dict() if hasattr(cmd_res, "to_dict") else {
+                            "command_id": str(seq),
+                            "node_id": nid,
+                            "channel": cid,
+                            "requested_state": "ON" if action in ("turn_on", "open", "on") else "OFF",
+                            "confirmed_state": "ON" if (cmd_res[0] in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE)) else None,
+                            "verification": cmd_res[0].value if hasattr(cmd_res[0], "value") else str(cmd_res[0]),
+                            "is_success": cmd_res[0] in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE),
+                        }
+                    device_results.append(res_dict)
+                    if res_dict.get("is_success"):
                         affected_count += 1
                     else:
                         failed_count += 1
             r_vn = get_room_name(location)
             act_vn = "bật" if action == "turn_on" else "tắt"
-            if r_vn:
-                reply = f"Đã {act_vn} thiết bị ở {r_vn}."
-            else:
-                reply = f"Đã {act_vn} tất cả thiết bị."
-            if not affected_count:
+            if not affected_count and not failed_count:
+                reply = "Chưa có thiết bị nào trong phòng." if r_vn else "Chưa có thiết bị kết nối."
+            elif not affected_count:
                 reply = "Chưa có thiết bị nào xác nhận lệnh."
             elif failed_count:
                 reply = f"Có {affected_count} thiết bị xác nhận, {failed_count} thiết bị chưa xác nhận."
-            result["verify"] = "success" if affected_count and not failed_count else "partial" if affected_count else "timeout"
+            else:
+                if r_vn:
+                    reply = f"Đã {act_vn} thiết bị ở {r_vn}."
+                else:
+                    reply = f"Đã {act_vn} tất cả thiết bị."
+
+            result["device_results"] = device_results
+            result["success"] = (affected_count > 0 and failed_count == 0)
+            result["verify"] = "success" if (affected_count and not failed_count) else "partial" if affected_count else "timeout"
             result["voice_reply"] = reply
 
             fb_mode = getattr(config, "AUDIO_FEEDBACK_MODE", "hybrid").lower()
@@ -381,12 +512,28 @@ class SmartHomeGateway:
         logger.info(f"Resolver OK: {device}@{location} → {fullname} ({node_id}/{channel}) {action}")
 
         seq = self.registry.next_seq(node_id)
-        verify_result, p_before, p_after, delta = await self.verifier.verify_command(
+        cmd_res = await self.verifier.verify_command(
             node_id, channel, action, seq=seq
         )
+        verify_result, p_before, p_after, delta = cmd_res
         result["verify"] = verify_result.value
+        result["device_results"] = [
+            cmd_res.to_dict() if hasattr(cmd_res, "to_dict") else {
+                "command_id": str(seq),
+                "requested_state": "ON" if action in ("turn_on", "open", "on") else "OFF",
+                "confirmed_state": "ON" if verify_result in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE) else None,
+                "verification": verify_result.value,
+                "is_success": verify_result in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE),
+                "error": None,
+                "power_before": p_before,
+                "power_after": p_after,
+                "delta": delta,
+                "channel": channel,
+                "node_id": node_id,
+            }
+        ]
 
-        action_str = "bật" if action == "turn_on" else "tắt"
+        action_str = "bật" if action in ("turn_on", "open", "on") else "tắt"
         dev_str = get_device_name(device or channel)
         room_str = get_room_name(location)
         target_desc = f"{dev_str} {room_str}".strip() if room_str else dev_str
@@ -397,14 +544,21 @@ class SmartHomeGateway:
             voice_reply = f"Đã đặt {target_desc} sang {action_str}."
         elif verify_result == VerifyResult.ALREADY_IN_STATE:
             voice_reply = f"{target_desc} đang ở trạng thái {action_str}."
+        elif verify_result == VerifyResult.TIMEOUT:
+            voice_reply = "Chưa xác nhận được trạng thái thiết bị."
+        elif verify_result == VerifyResult.FAILED:
+            voice_reply = "Thiết bị chưa thực hiện được lệnh."
         else:
             voice_reply = self.verifier.generate_failure_message(action, device or channel, location or "", verify_result)
 
         voice_reply = clean_voice_text(voice_reply)
         result["voice_reply"] = voice_reply
-        result["success"] = verify_result in (
-            VerifyResult.SUCCESS, VerifyResult.ACK_ONLY,
-            VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE
+        result["success"] = (
+            cmd_res.is_success if hasattr(cmd_res, "is_success") else
+            verify_result in (
+                VerifyResult.SUCCESS, VerifyResult.ACK_ONLY,
+                VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE
+            )
         )
 
         if hasattr(self, "tts") and self.tts:
@@ -438,6 +592,87 @@ class SmartHomeGateway:
         logger.info(f"Done: {action} {fullname} via [{result.get('engine')}] → {verify_result.value} Δ{delta:+.1f}W")
         return result
 
+    async def execute_scene(self, scene_name: str) -> dict:
+        """Thực thi Scene và thu thập kết quả từng thiết bị."""
+        all_online = self.registry.get_online_nodes()
+        affected_count = 0
+        failed_count = 0
+        device_results = []
+
+        targets = []
+        for nid, node in all_online.items():
+            channels = node.get("channels", {})
+            for cid, ch_info in channels.items():
+                dev_type = str(ch_info.get("device_type", "")).lower()
+                if scene_name in ("sleep", "night", "leave_home", "away"):
+                    target_action = "turn_off"
+                elif scene_name in ("morning",):
+                    target_action = "turn_on" if dev_type in ("light", "den", "lamp") else None
+                else:
+                    target_action = "turn_off"
+                if target_action is None:
+                    continue
+
+                seq = self.registry.next_seq(nid)
+                targets.append((nid, cid, target_action, seq))
+
+        if targets:
+            tasks = [
+                self.verifier.verify_command(nid, cid, target_action, seq=seq)
+                for nid, cid, target_action, seq in targets
+            ]
+            gathered_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for (nid, cid, target_action, seq), cmd_res in zip(targets, gathered_results):
+                if isinstance(cmd_res, Exception):
+                    res_dict = {
+                        "command_id": str(seq),
+                        "node_id": nid,
+                        "channel": cid,
+                        "verification": "failed",
+                        "is_success": False,
+                        "error": str(cmd_res),
+                    }
+                else:
+                    res_dict = cmd_res.to_dict() if hasattr(cmd_res, "to_dict") else {
+                        "command_id": str(seq), "node_id": nid, "channel": cid,
+                        "verification": cmd_res[0].value if hasattr(cmd_res[0], "value") else str(cmd_res[0]),
+                        "is_success": cmd_res[0] in (VerifyResult.SUCCESS, VerifyResult.ACK_ONLY, VerifyResult.CONFIRMED_LOAD, VerifyResult.ALREADY_IN_STATE),
+                    }
+                device_results.append(res_dict)
+                if res_dict.get("is_success"):
+                    affected_count += 1
+                else:
+                    failed_count += 1
+
+        is_success = (affected_count > 0 and failed_count == 0)
+        verify_status = "success" if is_success else "partial" if affected_count else "timeout"
+        scene_vn_map = {
+            "sleep": "đi ngủ", "night": "đi ngủ",
+            "leave_home": "rời nhà", "away": "rời nhà",
+            "morning": "chào buổi sáng", "movie": "xem phim"
+        }
+        scene_display = scene_vn_map.get(scene_name, str(scene_name))
+        if not affected_count and not failed_count:
+            reply = "Chưa có thiết bị nào phù hợp để thực hiện cảnh."
+        elif not affected_count:
+            reply = "Chưa có thiết bị nào xác nhận lệnh."
+        elif failed_count:
+            reply = f"Có {affected_count} thiết bị xác nhận, {failed_count} thiết bị chưa xác nhận."
+        else:
+            reply = f"Đã kích hoạt cảnh {scene_display}."
+
+        result = {
+            "scene": scene_name,
+            "success": is_success,
+            "verify": verify_status,
+            "affected_count": affected_count,
+            "failed_count": failed_count,
+            "device_results": device_results,
+            "voice_reply": reply,
+        }
+        self.broadcast_event("scene_executed", result)
+        return result
+
     def broadcast_event(self, event_name: str, data: dict):
         """Send SSE event to WebUI and subscribers."""
         if hasattr(self, "web_server") and self.web_server:
@@ -445,6 +680,26 @@ class SmartHomeGateway:
                 self.web_server.broadcast_event(event_name, data)
             elif hasattr(self.web_server, "broadcast"):
                 self.web_server.broadcast(event_name, data)
+
+    async def _on_subbox_state(self, topic, payload):
+        if not isinstance(payload, dict) or payload.get("status") != "ONLINE":
+            return
+        parts = topic.split("/")
+        if len(parts) != 4 or parts[:2] != ["home", "subbox"] or parts[3] != "state":
+            return
+        node_id = parts[2]
+        if not node_id or payload.get("subbox_id") != node_id:
+            return
+        node = self.registry.get_all_nodes().get(node_id)
+        if node is None or node.get("status") == "NEEDS_REPROVISION":
+            return
+        self.registry.update_heartbeat(node_id)
+        if getattr(self, "lifecycle", None):
+            self.lifecycle.resume_claims(node_id)
+        self.broadcast_event("node_status", {
+            "node_id": node_id, "device_id": node_id,
+            "online": True, "status": "online",
+        })
 
     async def _on_subbox_voice(self, topic, payload):
         if not isinstance(payload, dict):
@@ -477,6 +732,53 @@ class SmartHomeGateway:
         await self.mqtt.publish(response_topic, response)
 
     async def _on_subbox_actionbox(self, topic, payload):
+        # Enrollment events arrive through the authenticated SubBox MQTT topic.
+        if isinstance(payload, dict) and payload.get("type") in ("SETUP", "CLAIM_APPLIED", "CLAIM_FAILED"):
+            import re
+            parts = topic.split("/")
+            uid = payload.get("hardware_uid", "")
+            node_id = payload.get("node_id", "")
+            if (len(parts) != 5 or parts[:2] != ["home", "subbox"] or parts[3:] != ["event", "actionbox"]
+                    or not isinstance(uid, str) or not re.fullmatch(r"[0-9A-F]{12}", uid)
+                    or node_id != "AB" + uid or payload.get("protocol_version") != 3):
+                return
+            subbox_id = parts[2]
+            if payload["type"] == "SETUP":
+                remaining = payload.get("setup_remaining_ms")
+                session = payload.get("setup_session")
+                if (type(remaining) is not int or not 0 < remaining <= 180000
+                        or type(session) is not int or not 0 < session <= 0xffffffff
+                        or payload.get("channel_count") != 3):
+                    return
+                candidate = {**payload, "device_uid": node_id, "id": node_id,
+                    "board_model": "actionbox_v2", "subbox_id": subbox_id,
+                    "hardware": "ActionBox", "state": "FACTORY_NEW", "serial": uid,
+                    "mac": ":".join(uid[i:i+2] for i in range(0, 12, 2)), "rl": [0, 0, 0]}
+                self.lifecycle.add_candidate(candidate)
+                # Physical discovery permits a new claim, never automatic ownership.
+                self.registry.data.setdefault("pending", {})[node_id] = {
+                    **candidate, "device_id": node_id, "last_seen": datetime.now(timezone.utc).isoformat()
+                }
+                self.registry.save()
+                self.broadcast_event("pending_device", {"device_uid": node_id})
+                return
+            op = self.lifecycle.get_operation(payload.get("operation_id", ""))
+            if (not op or op.device_uid != node_id or op.target_subbox != subbox_id
+                    or op.kind.value != "claim" or op.state.value not in ("accepted", "running")
+                    or op.is_expired(time.time())):
+                return
+            if payload["type"] == "CLAIM_FAILED":
+                from device_lifecycle import OperationState
+                self.lifecycle.ledger.update_operation_state(op.operation_id, OperationState.FAILED,
+                    error_code=str(payload.get("error_code", "DEVICE_REJECTED")),
+                    error_message="Thiết bị chưa lưu được đăng ký. Mở lại CONFIG và BUT1 rồi thử lại.")
+                return
+            if (type(payload.get("config_version")) is not int or payload["config_version"] != op.desired_revision
+                    or type(payload.get("owner_epoch")) is not int or payload["owner_epoch"] < 1):
+                return
+            await self.lifecycle.on_device_applied(node_id, payload["owner_epoch"],
+                op.operation_id, payload["config_version"], confirmed_subbox=subbox_id)
+            return
         if not isinstance(payload, dict) or not isinstance(payload.get("channels"), list):
             return
         node_id = payload.get("node_id")
@@ -585,6 +887,8 @@ class SmartHomeGateway:
                 await self.mqtt.send_cfg(res["node_id"], cfg)
         elif res.get("action") == "known":
             self.broadcast_event("node_status", {"node_id": res["node_id"], "online": True})
+            if hasattr(self, "lifecycle") and self.lifecycle:
+                self.lifecycle.on_device_reconnected(res["node_id"])
 
     async def _on_node_register(self, topic: str, payload: dict):
         """Legacy register (giữ tương thích)."""
@@ -725,9 +1029,17 @@ class SmartHomeGateway:
         mac = node.get("mac", "")
         cfg = self.registry.get_provision_payload(node_id)
 
+        ok = True
         if mac:
-            await self.mqtt.send_cfg(mac, cfg)
-        await self.mqtt.send_cfg(node_id, cfg)
+            if not await self.mqtt.send_cfg(mac, cfg):
+                ok = False
+        if not await self.mqtt.send_cfg(node_id, cfg):
+            ok = False
+
+        if not ok:
+            self.registry.data["nodes"].pop(node_id, None)
+            self.registry.save()
+            return {"success": False, "error": "Failed to transmit configuration to device"}
 
         await self.discovery.publish_ha_discovery_for_node(node_id)
         self.broadcast_event("node_provisioned", {"node_id": node_id, "device_id": node_id, "cfg": cfg})
@@ -743,6 +1055,8 @@ class SmartHomeGateway:
             except Exception:
                 return
         logger.info(f"🆕 [Discovery] Unclaimed Device: {payload.get('device_id')} ({payload.get('serial')})")
+        if hasattr(self, "lifecycle") and self.lifecycle:
+            self.lifecycle.add_candidate(payload)
         res = self.registry.on_hello(payload, ws_available=False)
         self.broadcast_event("pending_device", payload)
 
@@ -765,6 +1079,31 @@ class SmartHomeGateway:
             self.broadcast_event("node_status", {"node_id": device_id, "online": False, "status": "offline"})
         else:
             self.broadcast_event("node_status", {"node_id": device_id, "online": True, "status": "online"})
+            if hasattr(self, "lifecycle") and self.lifecycle:
+                self.lifecycle.on_device_reconnected(device_id)
+
+    async def _on_device_operation_ack(self, topic: str, payload: Any):
+        """Nhận operation feedback / ACK từ thiết bị: home/devices/{device_id}/operation/ack"""
+        parts = topic.split("/")
+        device_id = parts[2] if len(parts) >= 3 else None
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(payload)
+            except Exception:
+                payload = {}
+        dev_id = payload.get("device_uid") or payload.get("node_id") or device_id
+        op_id = payload.get("operation_id") or payload.get("op_id")
+        status = payload.get("status", "succeeded")
+        err_code = payload.get("error_code")
+        err_msg = payload.get("error_message")
+        if dev_id and hasattr(self, "lifecycle") and self.lifecycle:
+            self.lifecycle.on_operation_ack(
+                device_uid=dev_id,
+                operation_id=op_id,
+                status=status,
+                error_code=err_code,
+                error_message=err_msg,
+            )
 
     async def _on_device_telemetry(self, topic: str, payload: Any):
         """Nhận telemetry định kỳ từ home/devices/{device_id}/telemetry"""
@@ -797,6 +1136,47 @@ class SmartHomeGateway:
             "reported": payload,
             "sync_status": sync_status
         })
+
+        op_id = payload.get("operation_id")
+        try:
+            epoch = int(payload.get("owner_epoch", 1)) if payload.get("owner_epoch") is not None else 1
+        except (ValueError, TypeError):
+            epoch = 1
+        try:
+            rev = int(payload.get("version") or payload.get("config_revision", 1))
+        except (ValueError, TypeError):
+            rev = 1
+        if op_id or payload.get("status") in ("applied", "APPLIED", "READY") or payload.get("state") in ("applied", "APPLIED"):
+            await self.on_device_applied(device_id, owner_epoch=epoch, operation_id=op_id, config_revision=rev)
+
+    async def on_device_applied(self, device_uid: str, owner_epoch: int = 1, operation_id: str | None = None, config_revision: int = 1):
+        if hasattr(self, "lifecycle") and self.lifecycle:
+            await self.lifecycle.on_device_applied(
+                device_uid=device_uid,
+                owner_epoch=owner_epoch,
+                operation_id=operation_id,
+                config_revision=config_revision,
+            )
+
+    async def _on_device_applied_msg(self, topic: str, payload: Any):
+        parts = topic.split("/")
+        if len(parts) >= 3:
+            device_id = parts[2]
+            if not isinstance(payload, dict):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            op_id = payload.get("operation_id")
+            try:
+                epoch = int(payload.get("owner_epoch", 1)) if payload.get("owner_epoch") is not None else 1
+            except (ValueError, TypeError):
+                epoch = 1
+            try:
+                rev = int(payload.get("config_revision") or payload.get("version", 1))
+            except (ValueError, TypeError):
+                rev = 1
+            await self.on_device_applied(device_id, owner_epoch=epoch, operation_id=op_id, config_revision=rev)
 
     async def _on_device_relay_state(self, topic: str, payload: Any):
         """Nhận trạng thái relay độc lập: home/devices/{device_id}/relay/{channel}/state"""
@@ -940,11 +1320,38 @@ class SmartHomeGateway:
 
     async def delete_device(self, device_id: str) -> bool:
         """Xóa hoàn toàn thiết bị khỏi registry, đóng kết nối socket, broadcast event."""
+        if hasattr(self, "lifecycle") and self.lifecycle:
+            try:
+                from device_lifecycle import OperationKind
+                if self.registry and "nodes" in getattr(self.registry, "data", {}) and device_id in self.registry.data["nodes"]:
+                    self.lifecycle.start_operation(
+                        user={"id": 1, "username": "admin", "role": "admin"},
+                        device_uid=device_id,
+                        kind=OperationKind.REMOVE_FROM_HOME,
+                        confirmation=True,
+                    )
+                    if hasattr(self, "audio_server") and hasattr(self.audio_server, "_ws_nodes"):
+                        ws = self.audio_server._ws_nodes.pop(device_id, None)
+                        if ws and hasattr(self.audio_server, "_active_speakers"):
+                            self.audio_server._active_speakers.discard(ws)
+                    return True
+            except Exception as e:
+                logger.warning(f"Lifecycle remove_from_home failed for {device_id}: {e}")
+
+        if hasattr(self, "auth") and self.auth:
+            self.auth.revoke_device_grants(device_id)
         ok = self.registry.delete_node(device_id)
         if hasattr(self, "audio_server") and hasattr(self.audio_server, "_ws_nodes"):
             ws = self.audio_server._ws_nodes.pop(device_id, None)
             if ws and hasattr(self.audio_server, "_active_speakers"):
                 self.audio_server._active_speakers.discard(ws)
+        if hasattr(self, "discovery") and hasattr(self.discovery, "remove_ha_discovery_for_node"):
+            try:
+                res = self.discovery.remove_ha_discovery_for_node(device_id)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                pass
         self.broadcast_event("device_deleted", {"device_id": device_id})
         return ok
 

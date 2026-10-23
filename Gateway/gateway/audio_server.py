@@ -31,8 +31,44 @@ except ImportError:
 try:
     import numpy as np
 except ImportError:
+    import array
+    import math
+
+    class _DummyArray(list):
+        def astype(self, dtype):
+            return self
+
+        def __truediv__(self, other):
+            return _DummyArray([x / other for x in self])
+
+        def __rtruediv__(self, other):
+            return _DummyArray([other / x for x in self])
+
     class _DummyNP:
         ndarray = Any
+        int16 = "h"
+        float32 = "f"
+
+        def frombuffer(self, b, dtype=None):
+            arr = array.array("h")
+            arr.frombytes(b)
+            return _DummyArray(arr)
+
+        def square(self, arr):
+            return [x * x for x in arr]
+
+        def mean(self, arr):
+            return sum(arr) / len(arr) if arr else 0.0
+
+        def sqrt(self, val):
+            return math.sqrt(val)
+
+        def concatenate(self, chunks):
+            res = _DummyArray()
+            for c in chunks:
+                res.extend(c)
+            return res
+
     np = _DummyNP()
 
 try:
@@ -191,6 +227,47 @@ class AudioServer:
 
         return False
 
+    def _check_owner_epoch(self, node_id: str, payload_epoch: Any, bound_epoch: Optional[int] = None) -> bool:
+        """Kiểm tra owner_epoch chống replay/stale/stripped epoch.
+        Trả về False và ghi log cảnh báo nếu epoch nhận được nhỏ hơn epoch hiện tại của node trong registry,
+        hoặc nếu node đã có epoch > 0 mà payload không chứa epoch."""
+        reg_epoch = 0
+        if self.gateway and hasattr(self.gateway, "registry") and self.gateway.registry:
+            actual_nid = node_id
+            if hasattr(self.gateway.registry, "find_node_by_mac") and (":" in str(node_id) or len(str(node_id)) == 12):
+                mapped_id = self.gateway.registry.find_node_by_mac(str(node_id))
+                if mapped_id:
+                    actual_nid = mapped_id
+            if hasattr(self.gateway.registry, "get_node_owner_epoch"):
+                reg_epoch = self.gateway.registry.get_node_owner_epoch(actual_nid)
+            elif hasattr(self.gateway.registry, "get_all_nodes"):
+                node_info = self.gateway.registry.get_all_nodes().get(actual_nid, {})
+                reg_epoch = int(node_info.get("owner_epoch", node_info.get("epoch", 0)))
+
+        min_valid_epoch = max(reg_epoch, bound_epoch or 0)
+        if payload_epoch is None:
+            if min_valid_epoch > 0:
+                logger.warning(
+                    f"Rejected packet missing owner_epoch (epoch stripped) for node '{node_id}' "
+                    f"(expected epoch >= {min_valid_epoch})"
+                )
+                return False
+            return True
+
+        try:
+            p_epoch = int(payload_epoch)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid owner_epoch format '{payload_epoch}' from node '{node_id}'")
+            return False
+
+        if min_valid_epoch > 0 and p_epoch < min_valid_epoch:
+            logger.warning(
+                f"Rejected packet with stale/replay owner_epoch {p_epoch} < {min_valid_epoch} "
+                f"for node '{node_id}'"
+            )
+            return False
+        return True
+
     async def start(self):
         """Start the WebSocket server."""
         self._running = True
@@ -227,6 +304,18 @@ class AudioServer:
         )
         logger.info("Audio WebSocket server running and ready for ESP32 connections")
 
+    def _relay_source_epoch(self, parent_id: str, source_id: str) -> Optional[int]:
+        registry = getattr(self.gateway, "registry", None)
+        if not registry or not isinstance(source_id, str):
+            return None
+        nodes = registry.get_all_nodes()
+        source = nodes.get(source_id, {})
+        pending = registry.get_pending() if hasattr(registry, "get_pending") else {}
+        if (parent_id not in nodes or source.get("subbox_id") != parent_id
+                or source.get("status") != "online" or source_id in pending):
+            return None
+        return int(source.get("owner_epoch", source.get("epoch", 0)))
+
     async def stop(self):
         """Stop the server."""
         self._running = False
@@ -240,7 +329,11 @@ class AudioServer:
         client_addr = getattr(websocket, "remote_address", "unknown")
         logger.info(f"🔗 ESP32 client connected from {client_addr}")
 
-        auth_required = bool(getattr(config, "WS_AUDIO_TOKEN", "") or getattr(config, "WS_AUDIO_TOKENS", {}))
+        auth_required = bool(
+            getattr(config, "WS_AUDIO_TOKEN", "")
+            or getattr(config, "WS_AUDIO_TOKENS", {})
+            or getattr(config, "WS_AUDIO_AUTH_REQUIRED", False)
+        )
         extracted_token = self._extract_token(websocket, path)
         is_authenticated = False
         authenticated_token = None
@@ -252,8 +345,13 @@ class AudioServer:
             authenticated_token = extracted_token
 
         client_node_id = None
+        client_owner_epoch = None
+        stream_source_id = None
+        relay_source_epoch = None
         websocket.has_speaker = True
         websocket.authenticated = is_authenticated
+        websocket.client_node_id = None
+        websocket.owner_epoch = None
 
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
@@ -265,8 +363,8 @@ class AudioServer:
         client_mac = None
         installed = {}
 
-        async def _bind_client_node(target_node_id: str) -> bool:
-            nonlocal client_node_id
+        async def _bind_client_node(target_node_id: str, owner_epoch: Optional[int] = None) -> bool:
+            nonlocal client_node_id, client_owner_epoch
             if not target_node_id:
                 return False
             if client_node_id and client_node_id != target_node_id:
@@ -284,8 +382,12 @@ class AudioServer:
                     pass
 
             client_node_id = target_node_id
+            if owner_epoch is not None:
+                client_owner_epoch = owner_epoch
             self._ws_nodes[target_node_id] = websocket
             websocket.node_id = target_node_id
+            websocket.client_node_id = target_node_id
+            websocket.owner_epoch = client_owner_epoch
             return True
 
         try:
@@ -322,6 +424,16 @@ class AudioServer:
                                         await websocket.close(1008, "Forbidden")
                                     return
 
+                            hello_epoch = cmd.get("owner_epoch", cmd.get("epoch"))
+                            target_id_for_check = hello_id or (cmd.get("mac") or "").upper()
+                            if target_id_for_check:
+                                if not self._check_owner_epoch(target_id_for_check, hello_epoch):
+                                    logger.warning(f"Rejected hello with stale/replay/missing owner_epoch {hello_epoch} from {client_addr}")
+                                    await websocket.send(json.dumps({"t": "error", "error": "stale_epoch"}))
+                                    if hasattr(websocket, "close"):
+                                        await websocket.close(1008, "Stale epoch")
+                                    return
+
                             client_mac = (cmd.get("mac") or "").upper()
                             handled = None
                             if self.gateway and hasattr(self.gateway, "registry"):
@@ -333,7 +445,10 @@ class AudioServer:
                                 node_id = hello_id
 
                             if node_id:
-                                bound_ok = await _bind_client_node(node_id)
+                                bound_ok = await _bind_client_node(
+                                    node_id,
+                                    owner_epoch=int(hello_epoch) if hello_epoch is not None else None
+                                )
                                 if not bound_ok:
                                     logger.warning(f"Failed to bind node identity '{node_id}' from {client_addr}")
                                     await websocket.send(json.dumps({"t": "error", "error": "conflict"}))
@@ -363,8 +478,12 @@ class AudioServer:
 
                                 if self.gateway and hasattr(self.gateway, "mqtt"):
                                     cfg = self.gateway.registry.get_provision_payload(node_id)
-                                    if cfg:
-                                        await self.gateway.mqtt.send_cfg(node_id, cfg)
+                                    if cfg and hasattr(self.gateway.mqtt, "send_cfg"):
+                                        res = self.gateway.mqtt.send_cfg(node_id, cfg)
+                                        if asyncio.iscoroutine(res):
+                                            await res
+                                if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                    self.gateway.broadcast_event("pending_node", {"mac": client_mac, "hello": cmd})
                                 await websocket.send(json.dumps({"t": "cfg_sent", "id": node_id}))
                             elif handled and handled.get("action") == "pending":
                                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
@@ -381,6 +500,10 @@ class AudioServer:
                             nid = cmd.get("id")
                             if not client_node_id or nid != client_node_id:
                                 logger.warning(f"Rejected spoofed ACK: socket node_id='{client_node_id}', payload id='{nid}' from {client_addr}")
+                                continue
+                            ep = cmd.get("owner_epoch", cmd.get("epoch"))
+                            if not self._check_owner_epoch(client_node_id, ep, client_owner_epoch):
+                                logger.warning(f"Rejected ACK with stale/replay/missing owner_epoch {ep} for node '{client_node_id}' from {client_addr}")
                                 continue
                             rl = cmd.get("rl")
                             if self.gateway and nid:
@@ -402,6 +525,15 @@ class AudioServer:
                             if not is_authenticated:
                                 logger.warning(f"Rejected need_cfg from unauthenticated socket {client_addr}")
                                 continue
+                            req_nid = cmd.get("id")
+                            if req_nid and client_node_id and req_nid != client_node_id:
+                                logger.warning(f"Rejected need_cfg with mismatched node_id '{req_nid}' (socket bound to '{client_node_id}') from {client_addr}")
+                                continue
+                            ep = cmd.get("owner_epoch", cmd.get("epoch"))
+                            target_check = client_node_id or req_nid
+                            if target_check and not self._check_owner_epoch(target_check, ep, client_owner_epoch):
+                                logger.warning(f"Rejected need_cfg with stale/replay/missing owner_epoch {ep} from {client_addr}")
+                                continue
                             mac = (cmd.get("mac") or "").upper()
 
                             found = None
@@ -409,8 +541,10 @@ class AudioServer:
                                 nid = self.gateway.registry.find_node_by_mac(mac) if hasattr(self.gateway.registry, "find_node_by_mac") else None
                                 if nid:
                                     cfg = self.gateway.registry.get_provision_payload(nid)
-                                    if self.gateway.mqtt:
-                                        await self.gateway.mqtt.send_cfg(nid, cfg)
+                                    if self.gateway.mqtt and hasattr(self.gateway.mqtt, "send_cfg"):
+                                        res = self.gateway.mqtt.send_cfg(nid, cfg)
+                                        if asyncio.iscoroutine(res):
+                                            await res
                                         found = True
                             if not found:
                                 await websocket.send(json.dumps({"t": "pending", "mac": mac}))
@@ -423,13 +557,29 @@ class AudioServer:
                                 continue
 
                             start_nid = cmd.get("node_id")
+                            source_epoch = None
                             if client_node_id and start_nid and start_nid != client_node_id:
-                                logger.warning(f"Rejected start with mismatched node_id '{start_nid}' (socket bound to '{client_node_id}') from {client_addr}")
-                                continue
+                                if getattr(websocket, "is_subbox", False) and cmd.get("audio_relay") is True:
+                                    source_epoch = self._relay_source_epoch(client_node_id, start_nid)
+                                if source_epoch is None:
+                                    logger.warning(f"Rejected unregistered relay source '{start_nid}' from '{client_node_id}'")
+                                    await websocket.send(json.dumps({"type": "error", "error": "forbidden"}))
+                                    continue
                             if not client_node_id and start_nid:
                                 bound_ok = await _bind_client_node(start_nid)
                                 if not bound_ok:
+                                    await websocket.send(json.dumps({"type": "error", "error": "conflict"}))
                                     continue
+                            if not client_node_id:
+                                logger.warning(f"Rejected start from unbound socket {client_addr}")
+                                await websocket.send(json.dumps({"type": "error", "error": "identity_required"}))
+                                continue
+
+                            ep = cmd.get("owner_epoch", cmd.get("epoch"))
+                            if not self._check_owner_epoch(client_node_id, ep, client_owner_epoch):
+                                logger.warning(f"Rejected start with stale/replay/missing owner_epoch {ep} for node '{client_node_id}' from {client_addr}")
+                                await websocket.send(json.dumps({"type": "error", "error": "stale_epoch"}))
+                                continue
 
                             websocket.asr_only = cmd.get("asr_only") is True
                             websocket.audio_relay = cmd.get("audio_relay") is True
@@ -443,11 +593,13 @@ class AudioServer:
 
                             codec = cmd.get("codec", "pcm")
                             sample_rate = cmd.get("sample_rate", config.AUDIO_SAMPLE_RATE)
+                            stream_source_id = start_nid or client_node_id
+                            relay_source_epoch = source_epoch
                             pcm_chunks.clear()
                             recording = True
                             record_start_time = time.monotonic()
                             total_frames = 0
-                            curr_node = client_node_id or "node_voice"
+                            curr_node = stream_source_id or client_node_id or "node_voice"
                             self._ws_nodes[curr_node] = websocket
                             if not getattr(websocket, "is_subbox", False):
                                 websocket.node_id = curr_node
@@ -489,7 +641,7 @@ class AudioServer:
                         elif msg_type == "cancel":
                             recording = False
                             pcm_chunks.clear()
-                            self.arbiter.active_streams.pop(client_node_id, None)
+                            self.arbiter.active_streams.pop(stream_source_id or client_node_id, None)
                             await websocket.send(json.dumps({"type": "status", "state": "cancelled"}))
 
                         elif msg_type == "stop":
@@ -498,7 +650,11 @@ class AudioServer:
                             recording = False
                             now_ts = time.monotonic()
                             elapsed = now_ts - record_start_time
-                            curr_node = client_node_id or "node_voice"
+                            curr_node = stream_source_id or client_node_id or "node_voice"
+                            if relay_source_epoch is not None and self._relay_source_epoch(client_node_id, curr_node) != relay_source_epoch:
+                                pcm_chunks.clear()
+                                await websocket.send(json.dumps({"type": "error", "error": "forbidden"}))
+                                continue
 
                             if self._active_voice_session and (now_ts - self._active_voice_session.get("timestamp", 0)) < 3.5:
                                 active_nid = self._active_voice_session.get("node_id")
@@ -563,7 +719,13 @@ class AudioServer:
                     except json.JSONDecodeError:
                         logger.warning(f"Invalid text frame: {message[:100]}")
 
-                elif isinstance(message, bytes) and recording:
+                elif isinstance(message, bytes):
+                    if not is_authenticated or not client_node_id or not recording:
+                        logger.warning(
+                            f"Rejected binary audio frame from unauthenticated/unbound/non-recording socket {client_addr} "
+                            f"(auth={is_authenticated}, bound={client_node_id}, rec={recording})"
+                        )
+                        continue
 
                     total_frames += 1
 
@@ -585,7 +747,7 @@ class AudioServer:
 
                         if len(raw_i16) > 0:
                             rms = int(np.sqrt(np.mean(np.square(raw_i16.astype(np.float32)))))
-                            curr_node = client_node_id or "node_voice"
+                            curr_node = stream_source_id or client_node_id or "node_voice"
                             self.arbiter.add_rms(curr_node, rms)
                             if self.gateway and hasattr(self.gateway, "broadcast_event") and total_frames % 2 == 0:
                                 self.gateway.broadcast_event("audio_meter", {"rms": rms, "frames": total_frames})
@@ -602,7 +764,11 @@ class AudioServer:
                         }))
                         if pcm_chunks:
                             full_pcm = np.concatenate(pcm_chunks)
-                            curr_node = client_node_id or "node_voice"
+                            curr_node = stream_source_id or client_node_id or "node_voice"
+                            if relay_source_epoch is not None and self._relay_source_epoch(client_node_id, curr_node) != relay_source_epoch:
+                                pcm_chunks.clear()
+                                await websocket.send(json.dumps({"type": "error", "error": "forbidden"}))
+                                continue
                             dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             await self._process_audio(
                                 websocket, full_pcm, sample_rate,
@@ -635,6 +801,10 @@ class AudioServer:
         Payload: {"t":"rl","ch":1,"s":1,"seq":n} (~27 byte, nhẹ hơn 1 PCM frame ~24 lần).
         TEXT frame xen kẽ vẫn giữ luồng PCM 2 chiều ổn định.
         """
+        is_bcast = not node_id or str(node_id).lower() in ("all", "broadcast", "*", "broadcast_mac", "ff:ff:ff:ff:ff:ff")
+        if is_bcast and not getattr(config, "ALLOW_BROADCAST_COMMANDS", False):
+            logger.warning(f"Refusing to send relay control command to broadcast/all ({node_id}) via WebSocket")
+            return False
         ws = self._ws_nodes.get(node_id)
         if not self.has_ws(node_id):
             return False

@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include "esp_err.h"
 
+#include "common/device_lifecycle.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -16,7 +18,13 @@ typedef enum {
     BUTTON_EVENT_FACTORY_RST = 4
 } ButtonEvent;
 
-typedef void (*button_event_cb_t)(uint8_t channel, ButtonEvent event, void *user_data);
+#ifdef __cplusplus
+}
+typedef void (*button_event_cb_t)(uint8_t channel, ButtonAction action, void *user_data);
+extern "C" {
+#else
+typedef void (*button_event_cb_t)(uint8_t channel, uint8_t action, void *user_data);
+#endif
 
 esp_err_t button_driver_init(void);
 

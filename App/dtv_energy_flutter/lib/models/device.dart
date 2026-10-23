@@ -21,6 +21,7 @@ class Device {
   final bool online;
   final bool isOn;
   final double value;
+  final double? powerWatts;
   final List<String> voiceAliases;
   final bool isFavorite;
   final Map<String, dynamic> metadata;
@@ -35,6 +36,7 @@ class Device {
     this.online = true,
     this.isOn = false,
     this.value = 0.0,
+    this.powerWatts,
     this.voiceAliases = const [],
     this.isFavorite = false,
     this.metadata = const {},
@@ -50,6 +52,7 @@ class Device {
     bool? online,
     bool? isOn,
     double? value,
+    double? powerWatts,
     List<String>? voiceAliases,
     bool? isFavorite,
     Map<String, dynamic>? metadata,
@@ -64,6 +67,7 @@ class Device {
       online: online ?? this.online,
       isOn: isOn ?? this.isOn,
       value: value ?? this.value,
+      powerWatts: powerWatts ?? this.powerWatts,
       voiceAliases: voiceAliases ?? this.voiceAliases,
       isFavorite: isFavorite ?? this.isFavorite,
       metadata: metadata ?? this.metadata,
@@ -94,19 +98,36 @@ class Device {
   String get stateText {
     if (!online) return 'Ngoại tuyến';
     if (!isOn) return 'Đã tắt';
+
+    final canDim = metadata['can_dim'] == true;
+    final canSpeed = metadata['can_speed'] == true;
+    final hasThermostat = metadata['has_thermostat'] == true;
+
+    final hasPower = powerWatts != null && powerWatts! > 0;
+    final powerStr = hasPower ? 'Bật · ${powerWatts!.toStringAsFixed(1)} W' : 'Đang bật';
+
     switch (type) {
       case DeviceType.light:
-        return 'Bật · ${value.toInt()}%';
+        if (canDim && value > 0) {
+          return 'Bật · ${value.toInt()}%';
+        }
+        return powerStr;
       case DeviceType.fan:
-        return 'Bật · Cấp ${value.toInt().clamp(1, 3)}';
+        if (canSpeed && value > 0) {
+          return 'Bật · Cấp ${value.toInt().clamp(1, 3)}';
+        }
+        return powerStr;
       case DeviceType.socket:
-        return value > 0 ? 'Bật · ${value.toStringAsFixed(1)}W' : 'Đang bật';
+        return powerStr;
       case DeviceType.airConditioner:
-        return 'Làm mát · ${value.toInt()}°C';
+        if (hasThermostat && value > 0) {
+          return 'Làm mát · ${value.toInt()}°C';
+        }
+        return powerStr;
       case DeviceType.sensor:
         return '${value.toStringAsFixed(1)} °C';
       default:
-        return 'Đang bật';
+        return powerStr;
     }
   }
 }

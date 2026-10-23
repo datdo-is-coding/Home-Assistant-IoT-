@@ -230,3 +230,23 @@ class DiscoveryManager:
                     logger.info(f"📢 Published HA Discovery: {discovery_topic}")
             except Exception as e:
                 logger.warning(f"Failed to publish HA discovery for {node_id}/{ch_key}: {e}")
+
+    async def remove_ha_discovery_for_node(self, node_id: str):
+        """
+        Unpublish Home Assistant discovery topics over MQTT by publishing empty retained messages.
+        """
+        self.discovered_devices.pop(node_id, None)
+        if not self.gateway or not hasattr(self.gateway, "mqtt") or not self.gateway.mqtt:
+            return
+
+        client = getattr(self.gateway.mqtt, "client", None)
+        for component in ("light", "switch"):
+            for ch in range(1, 5):
+                topic = f"homeassistant/{component}/{node_id}/ch{ch}/config"
+                try:
+                    if client and hasattr(client, "publish"):
+                        await client.publish(topic, "", qos=1, retain=True)
+                    elif hasattr(self.gateway.mqtt, "publish"):
+                        await self.gateway.mqtt.publish(topic, "", qos=1, retain=True)
+                except Exception as e:
+                    logger.debug(f"Failed to clear HA discovery topic {topic}: {e}")

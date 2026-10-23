@@ -6,24 +6,54 @@
 #include "led_driver.h"
 #include "cJSON.h"
 #include <vector>
+#include <map>
+#include <string>
 
 static std::vector<uint8_t> blob;
+static std::map<std::string, std::vector<uint8_t>> blobs;
 esp_err_t nvs_flash_init() { return ESP_OK; }
 esp_err_t nvs_flash_erase() { assert(false && "Must preserve V1 configuration"); return ESP_FAIL; }
 esp_err_t nvs_open(const char* name, int, int* handle) {
     assert(strcmp(name, "actionbox_v2") == 0); *handle = 1; return ESP_OK;
 }
-esp_err_t nvs_get_blob(int, const char*, void* out, size_t* size) {
-    if (blob.empty()) return ESP_ERR_NOT_FOUND;
-    if (blob.size() > *size) { *size = blob.size(); return ESP_ERR_INVALID_SIZE; }
-    memcpy(out, blob.data(), blob.size()); *size = blob.size(); return ESP_OK;
+esp_err_t nvs_get_blob(int, const char* key, void* out, size_t* size) {
+    if (key && strcmp(key, "user_config") == 0) {
+        if (blob.empty()) return ESP_ERR_NOT_FOUND;
+        if (blob.size() > *size) { *size = blob.size(); return ESP_ERR_INVALID_SIZE; }
+        memcpy(out, blob.data(), blob.size());
+        *size = blob.size();
+        return ESP_OK;
+    }
+    if (!key || blobs.find(key) == blobs.end() || blobs[key].empty()) return ESP_ERR_NOT_FOUND;
+    const auto& b = blobs[key];
+    if (b.size() > *size) { *size = b.size(); return ESP_ERR_INVALID_SIZE; }
+    memcpy(out, b.data(), b.size());
+    *size = b.size();
+    return ESP_OK;
 }
-esp_err_t nvs_set_blob(int, const char*, const void* bytes, size_t size) {
-    auto* start = static_cast<const uint8_t*>(bytes); blob.assign(start, start + size); return ESP_OK;
+esp_err_t nvs_set_blob(int, const char* key, const void* bytes, size_t size) {
+    auto* start = static_cast<const uint8_t*>(bytes);
+    if (key) {
+        blobs[key].assign(start, start + size);
+        if (strcmp(key, "user_config") == 0) {
+            blob.assign(start, start + size);
+        }
+    }
+    return ESP_OK;
 }
 esp_err_t nvs_commit(int) { return ESP_OK; }
-esp_err_t nvs_erase_all(int) { blob.clear(); return ESP_OK; }
+esp_err_t nvs_erase_key(int, const char* key) {
+    if (key) {
+        blobs.erase(key);
+        if (strcmp(key, "user_config") == 0) {
+            blob.clear();
+        }
+    }
+    return ESP_OK;
+}
+esp_err_t nvs_erase_all(int) { blob.clear(); blobs.clear(); return ESP_OK; }
 void nvs_close(int) {}
+extern "C" void esp_restart(void) {}
 esp_err_t gpio_config(const gpio_config_t*) { return ESP_OK; }
 esp_err_t gpio_set_level(int pin, uint32_t) { assert(pin >= 0 && pin < 49); return ESP_OK; }
 extern "C" esp_err_t bl0942_read_channel(uint8_t, CurrentMeasurement* out) {

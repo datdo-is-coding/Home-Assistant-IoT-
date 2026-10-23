@@ -49,6 +49,13 @@ class ActionBox {
   final String firmwareVersion;
   final String ipAddress;
   final int signalStrength;
+  final String boardModel;
+  final String boardRevision;
+  final String? subboxId;
+  final int ownerEpoch;
+  final List<String> capabilities;
+  final int protocolVersion;
+  final Map<String, dynamic> metadata;
 
   const ActionBox({
     required this.id,
@@ -56,10 +63,22 @@ class ActionBox {
     required this.roomId,
     this.online = true,
     required this.channels,
-    this.firmwareVersion = 'v1.4.2-esp32s3',
+    this.firmwareVersion = 'v2.1.0-esp32s3',
     this.ipAddress = '192.168.1.105',
     this.signalStrength = -58,
+    this.boardModel = 'actionbox_v2',
+    this.boardRevision = 'v2.1',
+    this.subboxId,
+    this.ownerEpoch = 1,
+    this.capabilities = const ['relay', 'energy_meter'],
+    this.protocolVersion = 2,
+    this.metadata = const {},
   });
+
+  bool get isSubBox =>
+      boardModel.toLowerCase().contains('subbox') ||
+      metadata['type'] == 'subbox' ||
+      metadata['node_type'] == 'subbox';
 
   ActionBox copyWith({
     String? id,
@@ -70,6 +89,13 @@ class ActionBox {
     String? firmwareVersion,
     String? ipAddress,
     int? signalStrength,
+    String? boardModel,
+    String? boardRevision,
+    String? subboxId,
+    int? ownerEpoch,
+    List<String>? capabilities,
+    int? protocolVersion,
+    Map<String, dynamic>? metadata,
   }) {
     return ActionBox(
       id: id ?? this.id,
@@ -80,6 +106,13 @@ class ActionBox {
       firmwareVersion: firmwareVersion ?? this.firmwareVersion,
       ipAddress: ipAddress ?? this.ipAddress,
       signalStrength: signalStrength ?? this.signalStrength,
+      boardModel: boardModel ?? this.boardModel,
+      boardRevision: boardRevision ?? this.boardRevision,
+      subboxId: subboxId ?? this.subboxId,
+      ownerEpoch: ownerEpoch ?? this.ownerEpoch,
+      capabilities: capabilities ?? this.capabilities,
+      protocolVersion: protocolVersion ?? this.protocolVersion,
+      metadata: metadata ?? this.metadata,
     );
   }
 }

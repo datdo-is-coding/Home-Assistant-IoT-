@@ -21,7 +21,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    _url.text = service.serverUrl;
+    _url.text = service.serverUrl.isNotEmpty ? service.serverUrl : 'http://192.168.11.29:8000';
+    _username.text = 'admin';
   }
 
   @override
@@ -105,7 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           textInputAction: TextInputAction.next,
                           decoration: const InputDecoration(
                               labelText: 'Địa chỉ Gateway',
-                              hintText: 'http://192.168.1.10:8000',
+                              hintText: 'http://192.168.11.29:8000',
                               prefixIcon: Icon(Icons.router_outlined)),
                           validator: (value) {
                             try {

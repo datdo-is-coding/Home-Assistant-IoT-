@@ -273,6 +273,18 @@ class AuthManager:
 
         return {k: v for k, v in all_nodes.items() if k in allowed_ids}
 
+    def revoke_device_grants(self, node_id: str) -> bool:
+        """
+        Revoke all user permissions/ownership records for a device node (Fix G4).
+        Deletes all grants from user_devices table.
+        """
+        if not node_id:
+            return False
+        with self._get_db() as conn:
+            conn.execute("DELETE FROM user_devices WHERE node_id = ?", (str(node_id).strip(),))
+        logger.info(f"Revoked all user grants for device node '{node_id}'")
+        return True
+
     def has_any_admin(self) -> bool:
         """Check if at least one admin account exists."""
         try:

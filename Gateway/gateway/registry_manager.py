@@ -11,6 +11,7 @@ Tương thích ngược: tự migrate file cũ (area/channels) sang schema mới
 import json
 import os
 import re
+import copy
 import sqlite3
 import logging
 import asyncio
@@ -366,7 +367,7 @@ class RegistryManager:
         {"t":"hello", "id":..., "mac":..., "hardware":..., "serial":..., "state":..., "rl":[...], "cfg":n, ...}
         """
         mac = (payload.get("mac") or "").upper()
-        node_id = payload.get("id") or payload.get("device_id")
+        node_id = payload.get("id") or payload.get("node_id") or payload.get("device_id")
         hardware = payload.get("hardware", "esp32s3")
         serial = payload.get("serial", "S3-2026-000000")
         state = payload.get("state", "READY")
@@ -374,6 +375,7 @@ class RegistryManager:
         rl = payload.get("rl", [0, 0])
         rssi = payload.get("rssi")
         ip = payload.get("ip")
+        owner_epoch = payload.get("owner_epoch", payload.get("epoch"))
         now = datetime.now(TZ_VN).isoformat()
 
         existing_node_id = None
@@ -386,7 +388,36 @@ class RegistryManager:
                     existing_node_id = nid
                     break
 
-        if existing_node_id and (state == "FACTORY_NEW" or cfg is None or node_id != existing_node_id):
+        # G3: Check tombstone — removed devices cannot restore ownership via legacy hello
+        tombstone = self.get_tombstone(node_id) if hasattr(self, "get_tombstone") else None
+        if not tombstone and mac and hasattr(self, "get_tombstone"):
+            tombstone = self.get_tombstone(mac)
+        if not existing_node_id and tombstone and state != "FACTORY_NEW":
+            logger.warning(f"Rejected hello from tombstoned device {node_id or mac}: {tombstone.get('notice')}")
+            return {"action": "rejected", "error": "device_removed_from_home", "node_id": node_id or mac}
+
+        if existing_node_id and state == "FACTORY_NEW":
+            logger.warning(
+                f"Device {existing_node_id} (MAC={mac}) reported FACTORY_NEW. "
+                "Rejecting auto-relink without setup proof (G3)."
+            )
+            return {"action": "rejected", "error": "proof_required_for_factory_new", "node_id": existing_node_id}
+
+        if existing_node_id:
+            curr_epoch = int(self.data["nodes"][existing_node_id].get("owner_epoch", self.data["nodes"][existing_node_id].get("epoch", 0)))
+            if owner_epoch is not None:
+                try:
+                    new_epoch = int(owner_epoch)
+                    if new_epoch < curr_epoch:
+                        logger.warning(f"Rejected stale owner_epoch {new_epoch} < {curr_epoch} for node {existing_node_id}")
+                        return {"action": "rejected", "error": "stale_epoch", "node_id": existing_node_id}
+                except (ValueError, TypeError):
+                    pass
+            elif curr_epoch > 0:
+                logger.warning(f"Rejected packet missing owner_epoch (epoch stripped) for node {existing_node_id}")
+                return {"action": "rejected", "error": "epoch_stripped", "node_id": existing_node_id}
+
+        if existing_node_id and (cfg is None or node_id != existing_node_id):
             logger.info(f"🔄 [Registry] Re-flashed device detected (MAC={mac}) -> Auto-relinking to existing node '{existing_node_id}'")
 
             if mac:
@@ -402,6 +433,11 @@ class RegistryManager:
             if rssi is not None: n["rssi"] = rssi
             if ip: n["ip"] = ip
             n["relay_state"] = rl
+            if owner_epoch is not None:
+                try:
+                    n["owner_epoch"] = int(owner_epoch)
+                except (ValueError, TypeError):
+                    pass
             if "address" not in n: n["address"] = {}
             if ip: n["address"]["ip"] = ip
             if mac: n["address"]["mac"] = mac
@@ -454,6 +490,11 @@ class RegistryManager:
             if rssi is not None: n["rssi"] = rssi
             if ip: n["ip"] = ip
             n["relay_state"] = rl
+            if owner_epoch is not None:
+                try:
+                    n["owner_epoch"] = int(owner_epoch)
+                except (ValueError, TypeError):
+                    pass
 
             if "address" not in n:
                 n["address"] = {}
@@ -517,6 +558,22 @@ class RegistryManager:
             return True
         return False
 
+    def update_relay_channel(self, node_id: str, channel: Any, state: Any) -> bool:
+        """Cập nhật trạng thái một relay đơn lẻ cho ActionBox V2 (ch1, ch2, ch3)."""
+        if node_id not in self.data["nodes"]:
+            return False
+        node = self.data["nodes"][node_id]
+        ch_idx = {"ch1": 0, "ch2": 1, "ch3": 2, 1: 0, 2: 1, 3: 2, "1": 0, "2": 1, "3": 2}.get(channel)
+        if ch_idx is None:
+            return False
+        caps = node.get("capabilities", [])
+        min_relays = 3 if ("relay_3ch" in caps or len(node.get("channels") or {}) >= 3) else 2
+        cur_rl = list(node.get("relay_state", []))
+        while len(cur_rl) < max(min_relays, ch_idx + 1):
+            cur_rl.append(0)
+        cur_rl[ch_idx] = 1 if state in (1, True, "ON", "on") else 0
+        return self.update_relay_state(node_id, cur_rl)
+
     def delete_node(self, node_id: str) -> bool:
         """Xóa hoàn toàn một thiết bị khỏi registry và SQLite."""
         deleted = False
@@ -539,10 +596,6 @@ class RegistryManager:
                 conn.execute("DELETE FROM device_configs WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM device_capabilities WHERE device_id = ?", (node_id,))
                 conn.execute("DELETE FROM registry_entries WHERE entry_id = ?", (node_id,))
-                try:
-                    conn.execute("DELETE FROM user_devices WHERE node_id = ?", (node_id,))
-                except Exception:
-                    pass
                 conn.commit()
             deleted = True
         except Exception as e:
@@ -552,13 +605,46 @@ class RegistryManager:
         logger.info(f"🗑️ [Registry] Deleted device: {node_id}")
         return deleted
 
+    def clear_tombstone(self, device_uid: str) -> bool:
+        """Clear tombstone record for a device UID (e.g. when recommissioned)."""
+        if not device_uid:
+            return False
+        try:
+            with self._get_db() as conn:
+                tbl = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='device_tombstones'").fetchone()
+                if tbl:
+                    conn.execute("DELETE FROM device_tombstones WHERE device_uid = ?", (str(device_uid),))
+                    conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clear tombstone for {device_uid}: {e}")
+            return False
+
+    def get_tombstone(self, device_uid: str) -> Optional[dict]:
+        """Check if device UID has a tombstone from being removed from home."""
+        if not device_uid:
+            return None
+        try:
+            with self._get_db() as conn:
+                conn.row_factory = sqlite3.Row
+                tbl = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='device_tombstones'").fetchone()
+                if not tbl:
+                    return None
+                row = conn.execute("SELECT * FROM device_tombstones WHERE device_uid = ?", (str(device_uid),)).fetchone()
+                if row:
+                    return dict(row)
+        except Exception:
+            pass
+        return None
+
     def provision_node(self, mac_or_id: str, room: str, rl1: str = "light", rl2: str = "fan",
                        rl3: Optional[str] = None,
                        node_short: str = None, description: str = None,
-                       name: str = None, location: str = None) -> Optional[dict]:
+                       name: str = None, location: str = None,
+                       subbox_id: Optional[str] = None) -> Optional[dict]:
         """
         WebUI gọi khi user gán tên + phòng + vị trí cho node pending.
-        Tuân thủ chặt chẽ schema Image 1:
+        Tuân thủ chặt chẽ schema:
         - device_id (khóa chính)
         - name, room, location, description
         - address, capabilities, firmware, configuration, security
@@ -573,40 +659,47 @@ class RegistryManager:
                     target_key = k
                 matched_keys.append(k)
 
-        for k in matched_keys:
-            self.data["pending"].pop(k, None)
-
         if not pending and mac_or_id in self.data["nodes"]:
             pending = self.data["nodes"][mac_or_id]
 
         if not pending:
+            logger.warning(f"Provision rejected: Device '{mac_or_id}' not found in pending candidates.")
+            return None
 
-            actual_id = mac_or_id if mac_or_id.startswith("node_") else (f"node_{mac_or_id.replace(':', '').lower()[-8:]}" if ":" in mac_or_id else f"node_{mac_or_id.lower()}")
-            mac = mac_or_id.upper() if ":" in mac_or_id else ""
-            pending = {
-                "device_id": actual_id,
-                "mac": mac,
-                "hardware": "esp32s3" if rl3 else "esp32",
-                "serial": "S3-2026-000001",
-                "state": "READY",
-                "ip": None,
-                "rssi": None,
-                "rl": [0, 0, 0] if rl3 else [0, 0]
-            }
+        actual_id = pending.get("device_id") or mac_or_id
+        mac = (pending.get("mac") or "").upper()
+        room_s = slug(room)
 
-        if pending.get("mac"):
-            pmac = pending["mac"].upper()
+        # Kiểm tra giới hạn phòng (tối đa 4 node)
+        room_nodes = [n for n in self.data["nodes"].values() if n.get("room") == room_s]
+        if len(room_nodes) >= 4 and actual_id not in self.data["nodes"]:
+            logger.warning(f"Provision rejected: Room '{room_s}' already has {len(room_nodes)} nodes (limit 4).")
+            return None
+
+        # Kiểm tra giới hạn SubBox (tối đa 4 ActionBox trên một SubBox)
+        target_subbox = subbox_id or pending.get("subbox_id")
+        if target_subbox:
+            subbox_nodes = [
+                n for n in self.data["nodes"].values()
+                if (n.get("subbox_id") == target_subbox or n.get("parent_subbox") == target_subbox)
+            ]
+            if len(subbox_nodes) >= 4 and actual_id not in self.data["nodes"]:
+                logger.warning(f"Provision rejected: SubBox '{target_subbox}' already has {len(subbox_nodes)} nodes (limit 4).")
+                return None
+
+        # Chỉ pop pending sau khi đã vượt qua các kiểm tra giới hạn
+        for k in matched_keys:
+            self.data["pending"].pop(k, None)
+
+        if mac:
             for k, p in list(self.data["pending"].items()):
-                if (p.get("mac") and p.get("mac").upper() == pmac) or k.upper() == pmac:
+                if (p.get("mac") and p.get("mac").upper() == mac) or k.upper() == mac:
                     self.data["pending"].pop(k, None)
 
         if rl3 is None:
             is_3ch = len(pending.get("rl", [])) >= 3 or "ActionBox" in pending.get("hardware", "") or pending.get("hardware") == "esp32s3"
             if is_3ch:
                 rl3 = "switch"
-
-        actual_id = pending.get("device_id") or mac_or_id
-        mac = (pending.get("mac") or "").upper()
 
         if mac:
             for old_id, old_node in list(self.data["nodes"].items()):
@@ -617,13 +710,6 @@ class RegistryManager:
         serial = pending.get("serial", "S3-2026-000000")
         ip = pending.get("ip")
         rssi = pending.get("rssi")
-
-        room_s = slug(room)
-
-        room_nodes = [n for n in self.data["nodes"].values() if n.get("room") == room_s]
-        if len(room_nodes) >= 4 and actual_id not in self.data["nodes"]:
-            logger.warning(f"Provision rejected: Room '{room_s}' already has {len(room_nodes)} nodes (limit 4).")
-            return None
 
         rl1_c = canon_device(rl1) if rl1 else "light"
         rl2_c = canon_device(rl2) if rl2 else "fan"
@@ -711,8 +797,13 @@ class RegistryManager:
             "last_seen": now,
             "cfg_version": 1,
             "channels": channels,
-            "aliases": ROOM_ALIASES.get(room_s, [room_s])
+            "aliases": ROOM_ALIASES.get(room_s, [room_s]),
+            "subbox_id": target_subbox,
         }
+
+        self.clear_tombstone(actual_id)
+        if mac:
+            self.clear_tombstone(mac)
 
         self.save()
         logger.info(f"✨ Commercial Provisioned: {actual_id} -> Name='{dev_name}', Room='{room_s}', Serial='{serial}'")
@@ -1163,6 +1254,35 @@ class RegistryManager:
                     n["last_seen"] = datetime.now(TZ_VN).isoformat()
                     n["status"] = "online"
 
+                # Store per-channel telemetry when device provides it
+                channels_data = telemetry_dict.get("channels")
+                if isinstance(channels_data, dict):
+                    for ch_id, ch_val in channels_data.items():
+                        if isinstance(ch_val, dict):
+                            ch_target = n.setdefault("channels", {}).setdefault(ch_id, {})
+                            if "telemetry" in ch_val and isinstance(ch_val["telemetry"], dict):
+                                ch_target["telemetry"] = ch_val["telemetry"]
+                            else:
+                                ch_target["telemetry"] = {
+                                    "power_w": float(ch_val.get("power_w", ch_val.get("power", ch_val.get("p", 0.0)))),
+                                    "voltage_v": float(ch_val.get("voltage_v", ch_val.get("voltage", ch_val.get("v", v)))),
+                                    "current_a": float(ch_val.get("current_a", ch_val.get("current", ch_val.get("c", 0.0)))),
+                                    "energy_wh": float(ch_val.get("energy_wh", ch_val.get("energy", ch_val.get("e", 0.0)))),
+                                }
+                for ch_id in ("ch1", "ch2", "ch3"):
+                    if ch_id in telemetry_dict and isinstance(telemetry_dict[ch_id], dict):
+                        ch_val = telemetry_dict[ch_id]
+                        ch_target = n.setdefault("channels", {}).setdefault(ch_id, {})
+                        if "telemetry" in ch_val and isinstance(ch_val["telemetry"], dict):
+                            ch_target["telemetry"] = ch_val["telemetry"]
+                        else:
+                            ch_target["telemetry"] = {
+                                "power_w": float(ch_val.get("power_w", ch_val.get("power", ch_val.get("p", 0.0)))),
+                                "voltage_v": float(ch_val.get("voltage_v", ch_val.get("voltage", ch_val.get("v", v)))),
+                                "current_a": float(ch_val.get("current_a", ch_val.get("current", ch_val.get("c", 0.0)))),
+                                "energy_wh": float(ch_val.get("energy_wh", ch_val.get("energy", ch_val.get("e", 0.0)))),
+                            }
+
             node_snapshot = copy.deepcopy(self.data["nodes"][device_id]) if device_id in self.data["nodes"] else None
 
             def _db_work(snapshot=node_snapshot):
@@ -1507,10 +1627,33 @@ ws ::= [ \\t\\n]*
         auth = getattr(gw, "auth", None) if gw else getattr(self, "auth", None)
         if auth and hasattr(auth, "filter_nodes"):
             return auth.filter_nodes(user, all_nodes)
+        if auth and hasattr(auth, "get_user_devices") and "id" in user:
+            allowed = set(auth.get_user_devices(user["id"]))
+            return {k: v for k, v in all_nodes.items() if k in allowed}
         if "device_ids" in user:
             allowed = set(user["device_ids"])
             return {k: v for k, v in all_nodes.items() if k in allowed}
         return {}
+
+    def get_node_owner_epoch(self, node_id: str) -> int:
+        """Trả về owner_epoch hiện tại của node từ registry, mặc định 0 nếu chưa set."""
+        node = self.get_all_nodes().get(node_id, {})
+        return int(node.get("owner_epoch", node.get("epoch", 0)))
+
+    def update_node_owner_epoch(self, node_id: str, epoch: int):
+        """Cập nhật owner_epoch cho node đã tồn tại trong registry."""
+        if node_id in self.data.get("nodes", {}):
+            try:
+                new_epoch = int(epoch)
+            except (ValueError, TypeError):
+                return
+            curr_epoch = self.get_node_owner_epoch(node_id)
+            if new_epoch < curr_epoch:
+                logger.warning(f"Ignored stale owner_epoch {new_epoch}")
+                return
+            self.data["nodes"][node_id]["owner_epoch"] = new_epoch
+            self._sync_node_to_sqlite(node_id, self.data["nodes"][node_id])
+            self.save()
     def get_pending(self) -> dict: return self.data.get("pending", {})
     def get_rooms(self) -> dict: return self.data.get("rooms", {})
     def get_online_nodes(self) -> dict:

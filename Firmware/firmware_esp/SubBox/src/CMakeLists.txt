@@ -7,6 +7,7 @@ idf_component_register(
     SRCS ${app_sources}
     INCLUDE_DIRS
         "."
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
         "config"
         "network"
         "audio"

@@ -41,7 +41,6 @@ void safety_check_sensor_timeouts(void) {
     for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ++ch) {
         if (!safety_sensor_ready(ch) && relay_get_state(ch) == RELAY_STATE_ON) {
             relay_set_fault(ch, RELAY_FAULT_HARDWARE);
-            if (ch != 1) led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
             if (s_fault_callback) s_fault_callback(ch, RELAY_FAULT_HARDWARE, 0);
         }
     }
@@ -102,7 +101,6 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
                  channel, meas->current_rms_ma, SAFETY_ABSOLUTE_MAX_CURRENT_MA);
 
         relay_set_fault(channel, RELAY_FAULT_OVERCURRENT);
-        if (channel != 1) led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
 
         if (s_fault_callback) {
             s_fault_callback(channel, RELAY_FAULT_OVERCURRENT, meas->current_rms_ma);
@@ -124,7 +122,6 @@ void safety_process_measurement(uint8_t channel, const CurrentMeasurement *meas)
                          channel, elapsed_ms, meas->current_rms_ma);
 
                 relay_set_fault(channel, RELAY_FAULT_OVERCURRENT);
-                if (channel != 1) led_set_pattern(channel, LED_PATTERN_BLINK_FAST);
 
                 if (s_fault_callback) {
                     s_fault_callback(channel, RELAY_FAULT_OVERCURRENT, meas->current_rms_ma);
@@ -210,18 +207,15 @@ void safety_apply_startup_state(void) {
             case STARTUP_MODE_ALWAYS_ON:
                 ESP_LOGI(TAG, "Ch%u startup policy: ALWAYS_ON", ch);
                 relay_on(ch);
-                if (ch != 1) led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
                 break;
 
             case STARTUP_MODE_RESTORE_LAST:
                 if (cfg->last_states[i] == RELAY_STATE_ON) {
                     ESP_LOGI(TAG, "Ch%u startup policy: RESTORE_LAST (Previous: ON)", ch);
                     relay_on(ch);
-                    if (ch != 1) led_set_pattern(ch, relay_get_state(ch) == RELAY_STATE_ON ? LED_PATTERN_ON : LED_PATTERN_OFF);
                 } else {
                     ESP_LOGI(TAG, "Ch%u startup policy: RESTORE_LAST (Previous: OFF)", ch);
                     relay_off(ch);
-                    if (ch != 1) led_set_pattern(ch, LED_PATTERN_OFF);
                 }
                 break;
 
@@ -229,7 +223,6 @@ void safety_apply_startup_state(void) {
             default:
                 ESP_LOGI(TAG, "Ch%u startup policy: ALWAYS_OFF", ch);
                 relay_off(ch);
-                if (ch != 1) led_set_pattern(ch, LED_PATTERN_OFF);
                 break;
         }
     }

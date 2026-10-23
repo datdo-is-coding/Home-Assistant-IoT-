@@ -8,9 +8,14 @@ import '../models/scene.dart';
 import '../models/automation.dart';
 import '../models/voice_alias.dart';
 import '../repositories/smart_home_repository.dart';
+import '../services/app_preferences_service.dart';
 
 import '../main.dart' show gateway;
 import '../services/gateway_client.dart';
+
+final appPreferencesServiceProvider = Provider<AppPreferencesService>((ref) {
+  return AppPreferencesService();
+});
 
 final gatewayClientProvider = ChangeNotifierProvider<GatewayClient>((ref) => gateway);
 
@@ -22,7 +27,8 @@ final smartHomeRepositoryProvider = Provider<SmartHomeRepository>((ref) {
     return repo;
   }
   final client = ref.read(gatewayClientProvider);
-  final repo = GatewaySmartHomeRepository(client);
+  final prefs = ref.read(appPreferencesServiceProvider);
+  final repo = GatewaySmartHomeRepository(client, preferencesService: prefs);
   ref.onDispose(() => repo.dispose());
   return repo;
 });
@@ -110,33 +116,85 @@ class DeviceFilterCategoryNotifier extends Notifier<String> {
 final deviceFilterCategoryProvider = NotifierProvider<DeviceFilterCategoryNotifier, String>(DeviceFilterCategoryNotifier.new);
 
 class ThemeModeNotifier extends Notifier<ThemeMode> {
+  AppPreferencesService get _prefs => ref.read(appPreferencesServiceProvider);
+
   @override
-  ThemeMode build() => ThemeMode.light;
+  ThemeMode build() {
+    ref.watch(appPreferencesServiceProvider);
+    _loadTheme();
+    return ThemeMode.light;
+  }
+
+  Future<void> _loadTheme() async {
+    final mode = await _prefs.loadThemeMode();
+    if (state != mode) {
+      state = mode;
+    }
+  }
+
   @override
-  set state(ThemeMode value) => super.state = value;
+  set state(ThemeMode value) {
+    super.state = value;
+    _prefs.saveThemeMode(value);
+  }
 }
 final themeModeProvider = NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);
 
-final deviceProvider = Provider.family<Device?, String>((ref, id) {
+class HomeNameNotifier extends Notifier<String> {
+  AppPreferencesService get _prefs => ref.read(appPreferencesServiceProvider);
+
+  @override
+  String build() {
+    ref.watch(appPreferencesServiceProvider);
+    final gateway = ref.watch(gatewayClientProvider);
+    _loadHomeName(gateway.serverUrl, gateway.currentUserId);
+    return 'My Home';
+  }
+
+  Future<void> _loadHomeName(String url, String userId) async {
+    final name = await _prefs.loadHomeName(gatewayUrl: url, userId: userId);
+    if (state != name) {
+      state = name;
+    }
+  }
+
+  Future<void> updateHomeName(String newName) async {
+    state = newName;
+    final gateway = ref.read(gatewayClientProvider);
+    await _prefs.saveHomeName(newName, gatewayUrl: gateway.serverUrl, userId: gateway.currentUserId);
+  }
+}
+final homeNameProvider = NotifierProvider<HomeNameNotifier, String>(HomeNameNotifier.new);
+
+final deviceMapProvider = Provider<Map<String, Device>>((ref) {
+  final repo = ref.watch(smartHomeRepositoryProvider);
   final devicesAsync = ref.watch(devicesStreamProvider);
-  return devicesAsync.when(
-    data: (devices) {
-      for (final d in devices) {
-        if (d.id == id) return d;
-      }
-      return null;
-    },
-    loading: () => null,
-    error: (_, __) => null,
-  );
+  return repo is GatewaySmartHomeRepository
+      ? repo.deviceMap
+      : {for (final d in devicesAsync.value ?? const <Device>[]) d.id: d};
 });
+
+final deviceProvider = Provider.family<Device?, String>((ref, id) {
+  return ref.watch(deviceMapProvider.select((m) => m[id]));
+});
+
+List<String> _cachedIds = const [];
+
+bool _listEquals(List<String> a, List<String> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (int i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
 
 final filteredDeviceIdsProvider = Provider<List<String>>((ref) {
   final devicesAsync = ref.watch(devicesStreamProvider);
   final selectedRoomId = ref.watch(selectedRoomIdProvider);
   final favoritesOnly = ref.watch(favoritesOnlyProvider);
 
-  return devicesAsync.when(
+  final newIds = devicesAsync.when(
     data: (devices) {
       return devices.where((d) {
         if (selectedRoomId != 'all' && d.roomId != selectedRoomId) return false;
@@ -144,18 +202,25 @@ final filteredDeviceIdsProvider = Provider<List<String>>((ref) {
         return true;
       }).map((d) => d.id).toList();
     },
-    loading: () => const [],
-    error: (_, __) => const [],
+    loading: () => const <String>[],
+    error: (_, __) => const <String>[],
   );
+
+  if (_listEquals(_cachedIds, newIds)) {
+    return _cachedIds;
+  }
+  _cachedIds = List.unmodifiable(newIds);
+  return _cachedIds;
 });
 
 final roomDeviceCountProvider = Provider.family<int, String>((ref, roomId) {
-  final devicesAsync = ref.watch(devicesStreamProvider);
-  return devicesAsync.when(
-    data: (devices) => devices.where((d) => d.roomId == roomId).length,
-    loading: () => 0,
-    error: (_, __) => 0,
-  );
+  return ref.watch(deviceMapProvider.select((m) {
+    int count = 0;
+    for (final d in m.values) {
+      if (d.roomId == roomId) count++;
+    }
+    return count;
+  }));
 });
 
 final groupedFilteredDevicesProvider = Provider<Map<String, List<Device>>>((ref) {

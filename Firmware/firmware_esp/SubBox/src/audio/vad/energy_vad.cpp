@@ -61,7 +61,7 @@ bool EnergyVAD::process(const int16_t* pcm, size_t count) {
                 m_speech_started = true;
                 m_consecutive_silence_ms = 0;
                 m_total_speech_duration_ms = chunk_ms * m_onset_frames;
-                ESP_LOGI(TAG, "Speech Onset detected (Energy=%lld, NoiseFloor=%.0f)",
+                ESP_LOGD(TAG, "Speech Onset detected (Energy=%lld, NoiseFloor=%.0f)",
                          (long long)m_latest_energy, m_noise_floor);
             }
         } else {
@@ -86,7 +86,7 @@ bool EnergyVAD::process(const int16_t* pcm, size_t count) {
             m_is_speaking = false;
             m_speech_ended = true;
             m_consecutive_speech_frames = 0;
-            ESP_LOGI(TAG, "Speech End detected: %s (Duration=%ums, Silence=%ums)",
+            ESP_LOGD(TAG, "Speech End detected: %s (Duration=%ums, Silence=%ums)",
                      silence_timeout ? "1.5s Silence" : "Max 10s Window",
                      m_total_speech_duration_ms, m_consecutive_silence_ms);
         }

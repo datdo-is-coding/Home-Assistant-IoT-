@@ -48,15 +48,26 @@ class Automation {
     };
   }
 
+  static IconData _iconFromCode(int? code) {
+    if (code == null) return Icons.auto_awesome_rounded;
+    if (code == Icons.nights_stay_rounded.codePoint) return Icons.nights_stay_rounded;
+    if (code == Icons.thermostat_rounded.codePoint) return Icons.thermostat_rounded;
+    if (code == Icons.directions_walk_rounded.codePoint) return Icons.directions_walk_rounded;
+    if (code == Icons.schedule_rounded.codePoint) return Icons.schedule_rounded;
+    if (code == Icons.bolt_rounded.codePoint) return Icons.bolt_rounded;
+    if (code == Icons.power_rounded.codePoint) return Icons.power_rounded;
+    if (code == Icons.sync_rounded.codePoint) return Icons.sync_rounded;
+    if (code == Icons.lightbulb_rounded.codePoint) return Icons.lightbulb_rounded;
+    if (code == Icons.mode_night_rounded.codePoint) return Icons.mode_night_rounded;
+    return Icons.auto_awesome_rounded;
+  }
+
   factory Automation.fromJson(Map<String, dynamic> json) {
-    final iconCode = json['iconCode'] as int? ?? Icons.auto_awesome_rounded.codePoint;
-    final fontFamily = json['fontFamily'] as String?;
-    final fontPackage = json['fontPackage'] as String?;
+    final iconCode = json['iconCode'] as int?;
     return Automation(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      // ignore: non_const_argument_for_const_parameter
-      icon: IconData(iconCode, fontFamily: fontFamily ?? 'MaterialIcons', fontPackage: fontPackage),
+      icon: _iconFromCode(iconCode),
       triggerText: json['triggerText'] as String? ?? '',
       deviceCount: json['deviceCount'] as int? ?? 0,
       enabled: json['enabled'] as bool? ?? true,

@@ -12,7 +12,7 @@ class ActionBoxV2Test(unittest.TestCase):
         source_root = SRC if v2 else HERE.parent / "firmware_esp/ActionBox/src"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for header in ("esp_err.h", "esp_log.h", "esp_timer.h", "esp_attr.h",
+            for header in ("esp_err.h", "esp_log.h", "esp_timer.h", "esp_attr.h", "esp_system.h",
                            "sdkconfig.h", "freertos/FreeRTOS.h", "freertos/task.h",
                            "freertos/semphr.h", "driver/gpio.h", "driver/uart.h",
                            "nvs.h", "nvs_flash.h", "esp_mac.h", "esp_random.h", "esp_task_wdt.h"):
@@ -26,8 +26,9 @@ class ActionBoxV2Test(unittest.TestCase):
                 content = file.read()
                 file.seek(0)
                 file.write("#pragma once\n" + content)
-            includes = [source_root, *[p for p in source_root.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
-            command = ["g++", "-std=c++17", "-pthread", "-g", "-o", str(root / "check")]
+            (root / "hc_runtime.h").write_text("#pragma once\nbool hc_runtime_enabled(void);\n")
+            includes = [source_root.parent.parent / "common", source_root, *[p for p in source_root.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
+            command = ["g++", "-std=c++17", "-pthread", "-g", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-o", str(root / "check")]
             command += [f"-I{path}" for path in includes]
             command += [str(source_root / source) for source in sources]
             if json:
@@ -39,6 +40,12 @@ class ActionBoxV2Test(unittest.TestCase):
             self.assertEqual(build.returncode, 0, build.stderr)
             run = subprocess.run([str(root / "check")], capture_output=True, text=True, timeout=15)
             self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_registration_requires_presence_and_durable_save(self):
+        self.run_driver("registration.cpp", ["system/registration.cpp"])
+
+    def test_setup_button_opens_pairing_without_reset_or_relay_change(self):
+        self.run_driver("button_setup.cpp", ["device/device_manager.cpp"])
 
     def test_latching_pulses_boot_faults_and_emergency_serialization(self):
         self.run_driver("relay.cpp", ["drivers/relay/relay_driver.cpp", "drivers/led/led_driver.cpp"])

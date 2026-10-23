@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Set, Dict, Any, Optional
 
 import config
+from device_lifecycle import ClaimError, OperationError, OperationKind
 
 logger = logging.getLogger("web_server")
 
@@ -43,6 +44,17 @@ class WebServer:
         self.server = None
         self.sse_queues = {}
         self._running = False
+        self._event_revision = 0
+
+    @property
+    def ota_manager(self):
+        if hasattr(self, "_ota_manager") and self._ota_manager is not None:
+            return self._ota_manager
+        return getattr(self.gateway, "ota", None)
+
+    @ota_manager.setter
+    def ota_manager(self, value):
+        self._ota_manager = value
 
     async def start(self):
         self._running = True
@@ -60,13 +72,31 @@ class WebServer:
             logger.info("Web server stopped")
 
     def broadcast_event(self, event_name: str, data: Dict[str, Any]):
+        self._event_revision += 1
+        data["revision"] = self._event_revision
         if not self.sse_queues:
             return
-        payload = f"event: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        payload = f"id: {self._event_revision}\nevent: {event_name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        allowed_non_admin_events = {
+            "node_status",
+            "node_telemetry",
+            "relay_state",
+            "device_deleted",
+            "device_rebooted",
+            "operation_updated",
+        }
         for q, user in list(self.sse_queues.items()):
             if user.get("role") != "admin":
                 node_id = data.get("node_id") or data.get("device_id")
-                if event_name not in {"node_status", "node_telemetry", "device_deleted"} or not node_id or node_id not in self.gateway.auth.get_user_devices(user["id"]):
+                if (
+                    event_name not in allowed_non_admin_events
+                    or not node_id
+                    or not (
+                        hasattr(self.gateway, "auth")
+                        and self.gateway.auth
+                        and node_id in self.gateway.auth.get_user_devices(user["id"])
+                    )
+                ):
                     continue
             try:
                 q.put_nowait(payload)
@@ -102,6 +132,9 @@ class WebServer:
         mqtt_obj = getattr(self.gateway, "mqtt", None)
         mqtt_ch_powers = getattr(mqtt_obj, "channel_powers", {}) if mqtt_obj else {}
         for node_id, node in all_nodes.items():
+            if str(node_id).upper().startswith("SB"):
+                node.setdefault("board_model", "subbox")
+                node.setdefault("device_type", "subbox")
             ch_powers = mqtt_ch_powers.get(node_id, {})
             channels = node.get("channels", {})
             if isinstance(channels, dict):
@@ -117,7 +150,18 @@ class WebServer:
         }
 
     async def _respond(self, writer, status, data, extra=""):
-        reasons = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 413: "Payload Too Large", 429: "Too Many Requests"}
+        reasons = {
+            200: "OK",
+            202: "Accepted",
+            400: "Bad Request",
+            401: "Unauthorized",
+            403: "Forbidden",
+            404: "Not Found",
+            409: "Conflict",
+            413: "Payload Too Large",
+            429: "Too Many Requests",
+            500: "Internal Server Error",
+        }
         body = json.dumps(data, ensure_ascii=False).encode()
         writer.write((f"HTTP/1.1 {status} {reasons.get(status, 'OK')}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Length: {len(body)}\r\n{extra}Connection: close\r\n\r\n").encode() + body)
         await writer.drain()
@@ -210,7 +254,7 @@ class WebServer:
             async def _read_body():
                 return raw_body
             if current_user and current_user.get("role") != "admin":
-                allowed = (method == "GET" and path in {"/", "/index.html", "/api/nodes", "/api/events", "/api/auth/me", "/api/health", "/api/voice/vocabulary"}) or (method == "POST" and path == "/api/auth/logout")
+                allowed = (method == "GET" and path in {"/", "/index.html", "/api/nodes", "/api/events", "/api/auth/me", "/api/health", "/api/voice/vocabulary"}) or (method == "POST" and path == "/api/auth/logout") or (is_commissioning_wifi and path == "/api/wifi/connect")
                 target = None
                 if method == "POST" and path == "/api/relay":
                     try: target = json.loads(raw_body).get("node_id")
@@ -227,6 +271,174 @@ class WebServer:
                     allowed = target in auth.get_user_devices(current_user["id"])
                 if not allowed:
                     await self._respond(writer, 403, {"error": "Insufficient permissions"}); return
+
+            # Route guard for device lifecycle & commissioning: admin only
+            is_lifecycle_endpoint = (
+                path.startswith("/api/commissioning")
+                or path.startswith("/api/operations")
+                or (path.startswith("/api/devices/") and ("/operations" in path or path.endswith("/remove")))
+            )
+            if is_lifecycle_endpoint:
+                if not current_user:
+                    await self._respond(writer, 401, {"error": "Authentication required"}); return
+                if current_user.get("role") != "admin":
+                    await self._respond(writer, 403, {"error": "Admin privileges required"}); return
+
+                if path == "/api/commissioning/candidates" and method == "GET":
+                    now = time.time()
+                    candidates = []
+                    if hasattr(self.gateway, "lifecycle") and self.gateway.lifecycle:
+                        active_candidates = self.gateway.lifecycle.get_candidates(now)
+                        candidates = [c.to_api_dict() for c in active_candidates]
+                    await self._respond(writer, 200, {"success": True, "candidates": candidates}); return
+
+                if path == "/api/commissioning/claims" and method == "POST":
+                    body_json = {}
+                    if raw_body:
+                        try:
+                            body_json = json.loads(raw_body.decode())
+                        except Exception:
+                            await self._respond(writer, 400, {"error": "Invalid JSON"}); return
+                    if not hasattr(self.gateway, "lifecycle") or not self.gateway.lifecycle:
+                        await self._respond(writer, 500, {"error": "Lifecycle manager not initialized"}); return
+
+                    try:
+                        now = time.time()
+                        op = self.gateway.lifecycle.start_claim(current_user, body_json, now)
+                        await self._respond(writer, 202, {
+                            "success": True,
+                            "operation": op.to_dict(),
+                            **op.to_dict()
+                        }); return
+                    except ClaimError as e:
+                        await self._respond(writer, e.status_code, {
+                            "success": False,
+                            "error": e.error_code,
+                            "error_code": e.error_code,
+                            "message": e.message
+                        }); return
+                    except Exception as e:
+                        await self._respond(writer, 400, {
+                            "success": False,
+                            "error": str(e)
+                        }); return
+
+                parts = [p for p in path.split("/") if p]
+
+                if len(parts) == 4 and parts[0] == "api" and parts[1] == "devices" and parts[3] == "operations" and method == "POST":
+                    uid = parts[2]
+                    body_json = {}
+                    if raw_body:
+                        try:
+                            body_json = json.loads(raw_body.decode())
+                        except Exception:
+                            await self._respond(writer, 400, {"error": "Invalid JSON"}); return
+                    if not hasattr(self.gateway, "lifecycle") or not self.gateway.lifecycle:
+                        await self._respond(writer, 500, {"error": "Lifecycle manager not initialized"}); return
+
+                    kind = body_json.get("kind")
+                    if not kind:
+                        await self._respond(writer, 400, {
+                            "success": False,
+                            "error": "MISSING_KIND",
+                            "error_code": "MISSING_KIND",
+                            "message": "kind is required",
+                        }); return
+                    confirmation = bool(body_json.get("confirmation", False))
+                    idempotency_key = body_json.get("idempotency_key")
+                    now = time.time()
+                    try:
+                        op = self.gateway.lifecycle.start_operation(
+                            user=current_user,
+                            device_uid=uid,
+                            kind=kind,
+                            idempotency_key=idempotency_key,
+                            confirmation=confirmation,
+                            now_sec=now,
+                        )
+                        await self._respond(writer, 202, {
+                            "success": True,
+                            "operation": op.to_dict(),
+                            **op.to_dict(),
+                        }); return
+                    except OperationError as e:
+                        await self._respond(writer, e.status_code, {
+                            "success": False,
+                            "error": e.error_code,
+                            "error_code": e.error_code,
+                            "message": e.message,
+                        }); return
+                    except Exception as e:
+                        await self._respond(writer, 400, {
+                            "success": False,
+                            "error": str(e),
+                        }); return
+
+                if len(parts) == 4 and parts[0] == "api" and parts[1] == "devices" and parts[3] == "remove" and method == "POST":
+                    uid = parts[2]
+                    body_json = {}
+                    if raw_body:
+                        try:
+                            body_json = json.loads(raw_body.decode())
+                        except Exception:
+                            pass
+                    if not hasattr(self.gateway, "lifecycle") or not self.gateway.lifecycle:
+                        await self._respond(writer, 500, {"error": "Lifecycle manager not initialized"}); return
+
+                    idempotency_key = body_json.get("idempotency_key")
+                    now = time.time()
+                    try:
+                        op = self.gateway.lifecycle.start_operation(
+                            user=current_user,
+                            device_uid=uid,
+                            kind=OperationKind.REMOVE_FROM_HOME,
+                            idempotency_key=idempotency_key,
+                            confirmation=True,
+                            now_sec=now,
+                        )
+                        await self._respond(writer, 200, {
+                            "success": True,
+                            "device_id": uid,
+                            "operation": op.to_dict(),
+                            **op.to_dict(),
+                        }); return
+                    except OperationError as e:
+                        await self._respond(writer, e.status_code, {
+                            "success": False,
+                            "error": e.error_code,
+                            "error_code": e.error_code,
+                            "message": e.message,
+                        }); return
+                    except Exception as e:
+                        await self._respond(writer, 400, {
+                            "success": False,
+                            "error": str(e),
+                        }); return
+
+                if path.startswith("/api/operations/") and method == "GET":
+                    op_id = parts[2] if len(parts) >= 3 else ""
+                    if not hasattr(self.gateway, "lifecycle") or not self.gateway.lifecycle:
+                        await self._respond(writer, 500, {"error": "Lifecycle manager not initialized"}); return
+                    now = time.time()
+                    op = self.gateway.lifecycle.get_operation(op_id, now_sec=now)
+                    if not op:
+                        await self._respond(writer, 404, {"error": "Operation not found"}); return
+                    await self._respond(writer, 200, {
+                        "success": True,
+                        "operation": op.to_dict(),
+                        **op.to_dict()
+                    }); return
+
+                elif hasattr(self.gateway, "handle_lifecycle_request"):
+                    body_json = {}
+                    if raw_body:
+                        try: body_json = json.loads(raw_body.decode())
+                        except Exception: pass
+                    res = await self.gateway.handle_lifecycle_request(method, path, body_json, user=current_user)
+                    await self._respond(writer, 200, res); return
+                else:
+                    await self._respond(writer, 200, {"success": True, "endpoint": path, "status": "ready"}); return
+
             if method == "GET" and path == "/api/health":
                 await self._respond(writer, 200, {"status": "ok"}); return
 
@@ -253,7 +465,7 @@ class WebServer:
                 self.sse_queues[q] = current_user
                 try:
                     init_d = json.dumps(self._nodes_snapshot(current_user), ensure_ascii=False)
-                    writer.write(f"event: init\ndata: {init_d}\n\n".encode())
+                    writer.write(f"id: {self._event_revision}\nevent: init\ndata: {init_d}\n\n".encode())
                     await writer.drain()
                     while self._running:
                         try:
@@ -302,6 +514,8 @@ class WebServer:
                             self.gateway.registry.update_relay_state(node_id, cur_rl)
                             if hasattr(self.gateway, "broadcast_event"):
                                 self.gateway.broadcast_event("relay_state", {"node_id": node_id, "relay_state": cur_rl})
+                            else:
+                                self.broadcast_event("relay_state", {"node_id": node_id, "relay_state": cur_rl})
 
                     resp_data = {"success": is_ok, "verify": outcome, "node_id": node_id, "channel": channel, "action": action}
                     if not is_ok:
@@ -432,6 +646,19 @@ class WebServer:
                         resp_data = self.gateway.get_voice_vocabulary_diagnostics(user=current_user)
                     else:
                         resp_data = {"success": False, "error": "Voice vocabulary diagnostics not available"}
+
+                    # Strict permission filtering: Member only sees devices permitted by auth.get_user_devices
+                    if current_user and current_user.get("role") != "admin" and auth and hasattr(auth, "get_user_devices") and isinstance(resp_data, dict):
+                        resp_data = dict(resp_data)
+                        allowed_devs = set(auth.get_user_devices(current_user.get("id")))
+                        if "devices" in resp_data and isinstance(resp_data["devices"], list):
+                            resp_data["devices"] = [d for d in resp_data["devices"] if d in allowed_devs]
+                        if "stored_vocabulary" in resp_data and isinstance(resp_data["stored_vocabulary"], list):
+                            resp_data["stored_vocabulary"] = [
+                                item for item in resp_data["stored_vocabulary"]
+                                if item.get("node_id") in allowed_devs or (item.get("device_id") and item.get("device_id").split("::")[0] in allowed_devs)
+                            ]
+                            resp_data["total_stored_items"] = len(resp_data["stored_vocabulary"])
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
@@ -750,7 +977,10 @@ class WebServer:
                     writer.write(hdr)
                     if method == "GET":
                         writer.write(data)
-                    await writer.drain(); writer.close(); return
+                    await writer.drain()
+                    if method == "GET" and req_ticket and self.ota_manager and hasattr(self.ota_manager, "consume_download_ticket"):
+                        self.ota_manager.consume_download_ticket(req_ticket)
+                    writer.close(); return
                 else:
                     writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
                     await writer.drain(); writer.close(); return

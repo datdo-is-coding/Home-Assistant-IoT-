@@ -23,6 +23,13 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_provision_node_3_relays(self):
+        self.registry.data["pending"]["AA:BB:CC:DD:EE:11"] = {
+            "device_id": "node_ee11",
+            "mac": "AA:BB:CC:DD:EE:11",
+            "hardware": "esp32s3",
+            "serial": "S3-2026-000011",
+            "rl": [0, 0, 0]
+        }
         node = self.registry.provision_node(
             mac_or_id="AA:BB:CC:DD:EE:11",
             room="phong_khach",
@@ -46,7 +53,13 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cfg.get("rl3"), "switch")
 
     def test_update_device_3_relays(self):
-
+        self.registry.data["pending"]["AA:BB:CC:DD:EE:22"] = {
+            "device_id": "node_ee22",
+            "mac": "AA:BB:CC:DD:EE:22",
+            "hardware": "esp32",
+            "serial": "S3-2026-000022",
+            "rl": [0, 0]
+        }
         node = self.registry.provision_node(
             mac_or_id="AA:BB:CC:DD:EE:22",
             room="phong_khach",
@@ -83,6 +96,13 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ch3", node["configuration"]["relays"])
 
     def test_sqlite_sync_dynamic_num_relays(self):
+        self.registry.data["pending"]["AA:BB:CC:DD:EE:33"] = {
+            "device_id": "node_ee33",
+            "mac": "AA:BB:CC:DD:EE:33",
+            "hardware": "esp32s3",
+            "serial": "S3-2026-000033",
+            "rl": [0, 0, 0]
+        }
         node = self.registry.provision_node(
             mac_or_id="AA:BB:CC:DD:EE:33",
             room="phong_khach",
@@ -100,6 +120,13 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         gw = SmartHomeGateway()
         gw.registry = self.registry
 
+        self.registry.data["pending"]["AA:BB:CC:DD:EE:44"] = {
+            "device_id": "node_ee44",
+            "mac": "AA:BB:CC:DD:EE:44",
+            "hardware": "esp32",
+            "serial": "S3-2026-000044",
+            "rl": [0, 0]
+        }
         node = self.registry.provision_node(
             mac_or_id="AA:BB:CC:DD:EE:44",
             room="phong_khach",
@@ -132,6 +159,13 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         gw.mqtt.client.publish = AsyncMock()
 
         dm = DiscoveryManager(gw)
+        self.registry.data["pending"]["AA:BB:CC:DD:EE:55"] = {
+            "device_id": "node_ee55",
+            "mac": "AA:BB:CC:DD:EE:55",
+            "hardware": "esp32s3",
+            "serial": "S3-2026-000055",
+            "rl": [0, 0, 0]
+        }
         node = self.registry.provision_node(
             mac_or_id="AA:BB:CC:DD:EE:55",
             room="phong_khach",

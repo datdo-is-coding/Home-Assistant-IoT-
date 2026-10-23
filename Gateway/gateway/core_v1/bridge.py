@@ -10,7 +10,10 @@ import secrets
 import ssl
 import struct
 import time
-import aiomqtt
+try:
+    import aiomqtt
+except ImportError:
+    aiomqtt = None
 from .protocol import Frame, MessageType, ReplayWindow
 from .registry import CoreError, canonical, require
 from .provisioning import Provisioning

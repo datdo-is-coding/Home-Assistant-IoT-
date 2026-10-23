@@ -155,6 +155,10 @@ class MQTTHandler:
         """
         if action not in ('turn_on', 'on', 'open', 'turn_off', 'off', 'close') or node_id in self.conflicting_nodes:
             return False
+        is_bcast = not node_id or str(node_id).lower() in ("all", "broadcast", "*", "broadcast_mac", "ff:ff:ff:ff:ff:ff")
+        if is_bcast and not getattr(config, "ALLOW_BROADCAST_COMMANDS", False):
+            logger.warning(f"Refusing to send relay control command to broadcast/all ({node_id}) via MQTT")
+            return False
         route = self.subbox_route(node_id)
         if route:
             channel_number = {"ch1": 1, "ch2": 2, "ch3": 3, "1": 1, "2": 2, "3": 3, 1: 1, 2: 2, 3: 3}.get(channel)

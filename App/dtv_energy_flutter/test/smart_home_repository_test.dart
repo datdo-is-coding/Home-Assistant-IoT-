@@ -172,15 +172,18 @@ void main() {
       expect(ch3.isOn, true);
 
       // Power allocation: board power (120W) is assigned only to ch1 (primary), avoiding R14 triple counting
-      expect(ch1.value, 120.0);
+      expect(ch1.powerWatts, 120.0);
       expect(ch1.metadata['power'], 120.0);
-      expect(ch2.value, 0.0);
+      expect(ch1.value, 0.0);
+      expect(ch2.powerWatts, null);
       expect(ch2.metadata['power'], 0.0);
-      expect(ch3.value, 0.0);
+      expect(ch2.value, 0.0);
+      expect(ch3.powerWatts, null);
       expect(ch3.metadata['power'], 0.0);
+      expect(ch3.value, 0.0);
 
-      // Total device value in room is 120W, not 360W
-      final totalPower = devices.fold<double>(0.0, (sum, d) => sum + d.value);
+      // Total device power in room is 120W, not 360W
+      final totalPower = devices.fold<double>(0.0, (sum, d) => sum + (d.powerWatts ?? 0.0));
       expect(totalPower, 120.0);
 
       final actionBoxes = await repo.getActionBoxes();
@@ -234,8 +237,10 @@ void main() {
       final ch1 = devices.firstWhere((d) => d.id == 'AB_INDIV::ch1');
       final ch2 = devices.firstWhere((d) => d.id == 'AB_INDIV::ch2');
 
-      expect(ch1.value, 45.0);
-      expect(ch2.value, 105.0);
+      expect(ch1.powerWatts, 45.0);
+      expect(ch1.value, 0.0);
+      expect(ch2.powerWatts, 105.0);
+      expect(ch2.value, 0.0);
     });
 
     test('activateScene throws GatewayException when a target device fails', () async {

@@ -9,13 +9,40 @@
 #include "app_config.h"
 #include "voice_capture.h"
 #include "hc_runtime.h"
+#include "device_reset.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <atomic>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_system.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
 static const char *TAG = "DEV_MGR";
+
+static std::atomic<uint8_t> s_armed_kind{static_cast<uint8_t>(ArmedKind::NONE)};
+static std::atomic<uint64_t> s_armed_at_ms{0};
+
+bool device_manager_is_claimed(void) {
+    return nvs_storage_is_claimed();
+}
+
+ArmedKind device_manager_get_armed_kind(void) {
+    uint8_t kind_val = s_armed_kind.load();
+    if (kind_val != static_cast<uint8_t>(ArmedKind::NONE)) {
+        uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+        uint64_t armed_ms = s_armed_at_ms.load();
+        if (is_armed_timed_out(now_ms, armed_ms, 5000)) {
+            ESP_LOGW(TAG, "Armed reset TIMED OUT after 5s -> cancelled");
+            s_armed_kind.store(static_cast<uint8_t>(ArmedKind::NONE));
+            s_armed_at_ms.store(0);
+            return ArmedKind::NONE;
+        }
+    }
+    return static_cast<ArmedKind>(kind_val);
+}
 
 esp_err_t device_manager_init(void) {
     ESP_LOGI(TAG, "Initializing Device Manager Coordinator...");
@@ -31,16 +58,9 @@ esp_err_t device_manager_init(void) {
 }
 
 void device_manager_update_leds(void) {
-    for (uint8_t ch = 1; ch <= BOARD_LED_COUNT; ch++) {
-        if (ch == 1) continue;
-        RelayFault flt = relay_get_fault(ch);
-        if (flt != RELAY_FAULT_NONE) {
-            led_set_pattern(ch, LED_PATTERN_BLINK_FAST);
-        } else {
-            RelayState st = relay_get_state(ch);
-            led_set_pattern(ch, (st == RELAY_STATE_ON) ? LED_PATTERN_ON : LED_PATTERN_OFF);
-        }
-    }
+    // LED2 is dedicated strictly to voice capture (managed by voice_capture module).
+    // Do NOT overwrite LED2 with relay states or faults.
+    // LED1 is updated by task_manager telemetry loop based on lifecycle, faults, and armed reset.
 }
 
 esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxResponse *out_resp) {
@@ -53,6 +73,14 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
     out_resp->request_id = cmd->request_id;
     out_resp->session_id = cmd->session_id;
     out_resp->channel = cmd->channel;
+
+    if (is_reset_locked()) {
+        out_resp->success = false;
+        strncpy(out_resp->status, "ERROR", sizeof(out_resp->status) - 1);
+        strncpy(out_resp->state, "RESET_LOCKED", sizeof(out_resp->state) - 1);
+        snprintf(out_resp->error_msg, sizeof(out_resp->error_msg), "Reset in progress");
+        return ESP_ERR_INVALID_STATE;
+    }
 
     char err_buf[48] = {0};
     if (!safety_validate_command(cmd, err_buf, sizeof(err_buf))) {
@@ -73,7 +101,6 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
                 strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
                 strncpy(out_resp->state, "ON", sizeof(out_resp->state) - 1);
                 nvs_storage_record_relay_state(cmd->channel, RELAY_STATE_ON);
-                if (cmd->channel != 1) led_set_pattern(cmd->channel, LED_PATTERN_ON);
             } else {
                 out_resp->success = false;
                 strncpy(out_resp->status, "ERROR", sizeof(out_resp->status) - 1);
@@ -90,7 +117,6 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
                 strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
                 strncpy(out_resp->state, "OFF", sizeof(out_resp->state) - 1);
                 nvs_storage_record_relay_state(cmd->channel, RELAY_STATE_OFF);
-                if (cmd->channel != 1) led_set_pattern(cmd->channel, LED_PATTERN_OFF);
             } else {
                 out_resp->success = false;
                 strncpy(out_resp->status, "ERROR", sizeof(out_resp->status) - 1);
@@ -163,7 +189,6 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
             out_resp->success = true;
             strncpy(out_resp->status, "OK", sizeof(out_resp->status) - 1);
             strncpy(out_resp->state, (st == RELAY_STATE_ON) ? "ON" : "OFF", sizeof(out_resp->state) - 1);
-            if (cmd->channel != 1) led_set_pattern(cmd->channel, (st == RELAY_STATE_ON) ? LED_PATTERN_ON : LED_PATTERN_OFF);
             ESP_LOGI(TAG, "Fault cleared on Ch%u by SubBox command", cmd->channel);
             break;
         }
@@ -207,41 +232,108 @@ esp_err_t device_manager_execute_command(const ActionBoxCommand *cmd, ActionBoxR
     return exec_err;
 }
 
-void device_manager_on_button_event(uint8_t channel, ButtonEvent event, void *user_data) {
-    if (channel < 1 || channel > BOARD_RELAY_CHANNEL_COUNT) return;
+void device_manager_on_button_event(uint8_t channel, ButtonAction action, void *user_data) {
+    if (is_reset_locked()) {
+        ESP_LOGW(TAG, "Button event ignored: Reset in progress or locked");
+        return;
+    }
 
-    switch (event) {
-        case BUTTON_EVENT_SHORT_PRESS: {
-            ESP_LOGI(TAG, "LOCAL BUTTON Ch%u: Toggling relay (offline operation)", channel);
-            relay_toggle(channel);
-            RelayState new_st = relay_get_state(channel);
-            nvs_storage_record_relay_state(channel, new_st);
-            device_manager_update_leds();
-            break;
-        }
+    if (channel < 1 || channel > BOARD_BUTTON_COUNT) return;
 
-        case BUTTON_EVENT_LONG_PRESS: {
-            ESP_LOGI(TAG, "LOCAL BUTTON Ch%u: Long press (1.2s) -> Push-To-Talk Voice Trigger", channel);
+    if (channel == 2) {
+        if (action == ButtonAction::SHORT_PRESS) {
+            ESP_LOGI(TAG, "LOCAL BUTTON Ch2: Toggling relay 2");
+            relay_toggle(2);
+            RelayState new_st = relay_get_state(2);
+            nvs_storage_record_relay_state(2, new_st);
+        } else if (action == ButtonAction::VOICE_TRIGGER) {
+            ESP_LOGI(TAG, "LOCAL BUTTON Ch2: Held >= 700ms -> Triggering Voice Streaming");
             voice_capture_start_streaming(2);
+        }
+        return;
+    }
+
+    // channel == 1 (BUT1): Admin gestures & relay 1
+    switch (action) {
+        case ButtonAction::SHORT_PRESS: {
+            ESP_LOGI(TAG, "LOCAL BUTTON Ch1: Toggling relay 1");
+            relay_toggle(1);
+            RelayState new_st = relay_get_state(1);
+            nvs_storage_record_relay_state(1, new_st);
             break;
         }
 
-        case BUTTON_EVENT_RELEASE: {
-            if (voice_capture_is_streaming()) {
-                ESP_LOGI(TAG, "LOCAL BUTTON Ch%u released -> Stopping voice streaming", channel);
-                voice_capture_stop_streaming();
+        case ButtonAction::REBOOT: {
+            ESP_LOGW(TAG, "LOCAL BUTTON Ch1: Admin gesture REBOOT -> Triggering confirmed reboot sequence");
+            execute_confirmed_reset(ResetKind::REBOOT, "local_button_reboot");
+            break;
+        }
+
+        case ButtonAction::START_SETUP: {
+            if (hc_runtime_enabled()) {
+                ESP_LOGW(TAG, "Secure node: use protected BOOT provisioning; legacy pairing is disabled");
+                break;
+            }
+            espnow_transport_set_pairing_mode(true);
+            ESP_LOGI(TAG, "LOCAL BUTTON Ch1: Admin gesture START_SETUP -> 180s setup window open");
+            led_set_pattern(1, ::LedPattern::CLAIMING);
+            break;
+        }
+
+        case ButtonAction::ARM_NETWORK_RESET: {
+            ESP_LOGW(TAG, "LOCAL BUTTON Ch1: Admin gesture ARM_NETWORK_RESET -> Confirm with short press within 5s");
+            prepare_reset(ResetKind::NETWORK_RESET, "local_button_network_reset", nvs_storage_get_owner_epoch());
+            s_armed_kind.store(static_cast<uint8_t>(ArmedKind::NETWORK_RESET));
+            s_armed_at_ms.store((uint64_t)(esp_timer_get_time() / 1000));
+            led_set_pattern(1, ::LedPattern::AWAITING_NETWORK_RESET);
+            break;
+        }
+
+        case ButtonAction::ARM_FACTORY_RESET: {
+            ESP_LOGW(TAG, "LOCAL BUTTON Ch1: Admin gesture ARM_FACTORY_RESET -> Confirm with short press within 5s");
+            prepare_reset(ResetKind::FACTORY_RESET, "local_button_factory_reset", nvs_storage_get_owner_epoch());
+            s_armed_kind.store(static_cast<uint8_t>(ArmedKind::FACTORY_RESET));
+            s_armed_at_ms.store((uint64_t)(esp_timer_get_time() / 1000));
+            led_set_pattern(1, ::LedPattern::AWAITING_FACTORY_RESET);
+            break;
+        }
+
+        case ButtonAction::CONFIRM_RESET: {
+            // CRITICAL: DO NOT call relay_toggle!
+            uint64_t now_ms = (uint64_t)(esp_timer_get_time() / 1000);
+            uint64_t armed_ms = s_armed_at_ms.load();
+            if (is_armed_timed_out(now_ms, armed_ms, 5000)) {
+                ESP_LOGW(TAG, "LOCAL BUTTON Ch1: Reset confirmation TIMED OUT -> cancelled (destructive action = 0)");
+                s_armed_kind.store(static_cast<uint8_t>(ArmedKind::NONE));
+                s_armed_at_ms.store(0);
+                cancel_armed_reset();
+                led_set_pattern(1, LED_PATTERN_OFF);
+                break;
+            }
+
+            ArmedKind confirmed_kind = static_cast<ArmedKind>(s_armed_kind.exchange(static_cast<uint8_t>(ArmedKind::NONE)));
+            s_armed_at_ms.store(0);
+            led_set_pattern(1, LED_PATTERN_BLINK_FAST);
+
+            if (confirmed_kind == ArmedKind::FACTORY_RESET) {
+                ESP_LOGE(TAG, "LOCAL BUTTON Ch1: CONFIRMED FACTORY RESET! Executing safe reset...");
+                execute_confirmed_reset(ResetKind::FACTORY_RESET, "local_button_factory_reset");
+            } else if (confirmed_kind == ArmedKind::NETWORK_RESET) {
+                ESP_LOGW(TAG, "LOCAL BUTTON Ch1: CONFIRMED NETWORK RESET! Executing safe reset...");
+                execute_confirmed_reset(ResetKind::NETWORK_RESET, "local_button_network_reset");
             }
             break;
         }
 
-        case BUTTON_EVENT_FACTORY_RST: {
-            ESP_LOGW(TAG, "LOCAL BUTTON Ch%u: Held 10s -> RESTORING FACTORY SETTINGS!", channel);
-            led_set_pattern(1, LED_PATTERN_BLINK_FAST);
-            led_set_pattern(2, LED_PATTERN_BLINK_FAST);
-            nvs_storage_factory_reset(NULL);
+        case ButtonAction::CANCEL_ARMED: {
+            ESP_LOGI(TAG, "LOCAL BUTTON Ch1: CANCEL_ARMED gesture received -> Reset cancelled");
+            s_armed_kind.store(static_cast<uint8_t>(ArmedKind::NONE));
+            s_armed_at_ms.store(0);
+            led_set_pattern(1, LED_PATTERN_OFF);
             break;
         }
 
+        case ButtonAction::NONE:
         default:
             break;
     }

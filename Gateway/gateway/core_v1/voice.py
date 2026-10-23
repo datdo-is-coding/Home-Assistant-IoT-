@@ -8,7 +8,10 @@ import math
 import re
 import time
 import unicodedata
-from aiohttp import web
+try:
+    from aiohttp import web
+except ImportError:
+    web = None
 from .registry import CoreError, require
 
 def normalize(value):
@@ -141,7 +144,14 @@ class CoreVoice:
                 except (ConnectionResetError, RuntimeError):
                     pass
 
+    async def handle_ws(self, request, user=None):
+        if web is None:
+            raise RuntimeError('aiohttp is required for voice web sockets')
+        return await self.websocket(request, user)
+
     async def websocket(self, request, user):
+        if web is None:
+            raise RuntimeError('aiohttp is required for voice web sockets')
         header = request.headers.get('X-Device-ID', '')
         require(header.isascii() and header.isdecimal(), 'voice_identity_denied', 403)
         parent = int(header)

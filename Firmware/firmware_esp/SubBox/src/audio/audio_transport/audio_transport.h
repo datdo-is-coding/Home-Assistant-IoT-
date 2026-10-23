@@ -12,6 +12,7 @@ public:
 
     virtual bool sendAudio(const char* target_node_id, const AudioPacket& packet) = 0;
     virtual bool sendCommand(const char* target_node_id, const std::string& json_cmd, std::string* response = nullptr) { return false; }
+    virtual bool claimDevice(const std::string& request, std::string& receipt) { return false; }
     virtual void registerJsonCallback(std::function<void(const std::string&)> callback) {}
 
     virtual void registerRxCallback(std::function<void(const AudioPacket&)> callback) = 0;

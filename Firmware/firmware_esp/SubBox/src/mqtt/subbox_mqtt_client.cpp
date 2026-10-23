@@ -171,7 +171,7 @@ void MqttClient::onMqttData(const char* topic, int topic_len, const char* data, 
     std::string s_topic(topic, topic_len);
     std::string s_data(data, data_len);
 
-    ESP_LOGI(TAG, "MQTT Inbound: [%s] -> %s", s_topic.c_str(), s_data.c_str());
+    ESP_LOGD(TAG, "MQTT Inbound: [%s] -> %s", s_topic.c_str(), s_data.c_str());
 
     std::function<void(const std::string&, const std::string&)> cmd_cb;
     std::function<void(const std::string&, const std::string&, const uint8_t*, size_t)> voice_cb;

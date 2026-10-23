@@ -50,7 +50,7 @@ class FeatureHomeScreen extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'My Home',
+                            ref.watch(homeNameProvider),
                             style: TextStyle(
                               fontSize: 26,
                               fontWeight: FontWeight.w800,

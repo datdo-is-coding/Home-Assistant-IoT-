@@ -1,14 +1,23 @@
 """Integration tests for Core V1 HTTP/WebSocket services and Voice ingress (INT-01, INT-02, LOG-05)."""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import asyncio
 import hashlib
 import hmac
-from pathlib import Path
 import tempfile
 import unittest
 
-from aiohttp.test_utils import TestClient, TestServer
+try:
+    from aiohttp.test_utils import TestClient, TestServer
+    from gateway.core_v1.api import create_app
+    HAVE_AIOHTTP = True
+except ImportError:
+    HAVE_AIOHTTP = False
+    TestClient = TestServer = None
+    create_app = None
 
-from gateway.core_v1.api import create_app
 from gateway.core_v1.registry import Registry, canonical
 from gateway.core_v1.voice import CoreVoice
 
@@ -20,6 +29,7 @@ class MockASR:
     def transcribe_with_confidence(self, samples, sample_rate):
         return (self.text, self.confidence)
 
+@unittest.skipUnless(HAVE_AIOHTTP, "aiohttp not installed")
 class ServiceIntegrationTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()

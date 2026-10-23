@@ -31,27 +31,37 @@ class _SmartHomeAppState extends ConsumerState<SmartHomeApp>
 
   Future<void> _restore() async {
     try {
-      await _client.restore();
+      await _client.restoreLocalSession();
     } catch (_) {
       _client.error = 'Không thể khôi phục phiên. Vui lòng đăng nhập lại.';
     }
     if (!mounted) return;
     setState(() => _ready = true);
-    if (WidgetsBinding.instance.lifecycleState == null ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-      _startPolling();
+
+    if (_client.authenticated) {
+      _client.revalidateSession().then((_) {
+        if (mounted &&
+            (WidgetsBinding.instance.lifecycleState == null ||
+                WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed)) {
+          _startPolling();
+        }
+      });
     }
   }
 
   void _startPolling() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _client.refresh());
+    final interval = _client.isSseConnected ? const Duration(seconds: 15) : const Duration(seconds: 5);
+    _timer = Timer.periodic(interval, (_) => _client.refresh());
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _timer?.cancel();
-    if (!_useMock && _ready && state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.paused) {
+      _client.eventStream?.pause();
+    } else if (!_useMock && _ready && state == AppLifecycleState.resumed && _client.authenticated) {
+      _client.eventStream?.resume();
       _client.refresh();
       _startPolling();
     }
@@ -67,9 +77,23 @@ class _SmartHomeAppState extends ConsumerState<SmartHomeApp>
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeModeProvider);
-    final client = ref.watch(gatewayClientProvider);
+    final authenticated = ref.watch(gatewayClientProvider.select((c) => c.authenticated));
+    final _ = ref.watch(gatewayClientProvider.select((c) => c.error));
 
-    if (!_ready || (!_useMock && !client.authenticated)) {
+    ref.listen<bool>(
+      gatewayClientProvider.select((c) => c.isSseConnected),
+      (prev, next) {
+        if (prev != next && _ready && authenticated) {
+          _startPolling();
+        }
+      },
+    );
+
+    if (!authenticated) {
+      _timer?.cancel();
+    }
+
+    if (!_ready || (!_useMock && !authenticated)) {
       return MaterialApp(
         title: 'Smart Home IoT',
         debugShowCheckedModeBanner: false,
@@ -78,7 +102,7 @@ class _SmartHomeAppState extends ConsumerState<SmartHomeApp>
         themeMode: themeMode,
         home: !_ready
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-            : LoginScreen(client: client),
+            : LoginScreen(client: _client),
       );
     }
 

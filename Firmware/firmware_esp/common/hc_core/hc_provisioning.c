@@ -77,9 +77,145 @@ esp_err_t hc_provisioning_load(hc_provisioned_config *out) {
     hc_factory_id(base,actual);
     return memcmp(actual,out->factory_id,sizeof(actual))==0?ESP_OK:ESP_ERR_INVALID_MAC;
 }
+static esp_err_t sync_subbox_credentials(const hc_provisioned_config *c) {
+    if (!c || !c->subbox) return ESP_OK;
+    char ws_uri[128] = {0};
+    const char *p = c->mqtt_uri;
+    const char *proto_end = strstr(p, "://");
+    const char *host_start = proto_end ? proto_end + 3 : p;
+    char host[64] = {0};
+    size_t hi = 0;
+    while (host_start[hi] && host_start[hi] != ':' && host_start[hi] != '/' && hi < sizeof(host) - 1) {
+        host[hi] = host_start[hi];
+        hi++;
+    }
+    host[hi] = '\0';
+    if (hi > 0) {
+        snprintf(ws_uri, sizeof(ws_uri), "ws://%s:8765/ws/audio", host);
+    }
+
+    nvs_handle_t h;
+    if (nvs_open("subbox_cfg", NVS_READWRITE, &h) == ESP_OK) {
+        char id_str[32] = {0};
+        snprintf(id_str, sizeof(id_str), "%lu", (unsigned long)c->node_id);
+        nvs_set_str(h, "id", id_str);
+        if (c->room_id[0]) nvs_set_str(h, "room", c->room_id);
+        nvs_set_str(h, "ssid", c->wifi_ssid);
+        nvs_set_str(h, "pass", c->wifi_password);
+        nvs_set_str(h, "broker", c->mqtt_uri);
+        if (ws_uri[0]) nvs_set_str(h, "wsuri", ws_uri);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+
+    if (nvs_open("subbox_sec", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "mqtt_uri", c->mqtt_uri);
+        if (ws_uri[0]) nvs_set_str(h, "ws_uri", ws_uri);
+        nvs_set_str(h, "wifi_ssid", c->wifi_ssid);
+        nvs_set_str(h, "wifi_pass", c->wifi_password);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    return ESP_OK;
+}
+
+static bool extract_json_str(const char *json, const char *key, char *out, size_t out_sz) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *k = strstr(json, pattern);
+    if (!k) return false;
+    const char *colon = strchr(k + strlen(pattern), ':');
+    if (!colon) return false;
+    const char *q1 = strchr(colon, '\"');
+    if (!q1) return false;
+    const char *q2 = strchr(q1 + 1, '\"');
+    if (!q2) return false;
+    size_t val_len = (size_t)(q2 - (q1 + 1));
+    if (val_len >= out_sz) val_len = out_sz - 1;
+    memcpy(out, q1 + 1, val_len);
+    out[val_len] = '\0';
+    return true;
+}
+
+static bool extract_json_int(const char *json, const char *key, int *out) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *k = strstr(json, pattern);
+    if (!k) return false;
+    const char *colon = strchr(k + strlen(pattern), ':');
+    if (!colon) return false;
+    const char *p = colon + 1;
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p >= '0' && *p <= '9') {
+        *out = atoi(p);
+        return true;
+    }
+    return false;
+}
+
 bool hc_provisioning_active(void) { return server && esp_timer_get_time()<deadline; }
 esp_err_t hc_provisioning_apply(const uint8_t *p,size_t length) {
     if(!hc_provisioning_active())return ESP_ERR_INVALID_STATE;
+
+    if (p && length > 2 && p[0] == '{') {
+        char json_buf[512] = {0};
+        size_t cp_len = length < sizeof(json_buf) - 1 ? length : sizeof(json_buf) - 1;
+        memcpy(json_buf, p, cp_len);
+        json_buf[cp_len] = '\0';
+
+        char j_ssid[33] = {0}, j_pass[65] = {0}, j_host[64] = {0}, j_pop[65] = {0}, j_room[32] = {0};
+        int j_port = 8883;
+
+        extract_json_str(json_buf, "ssid", j_ssid, sizeof(j_ssid));
+        extract_json_str(json_buf, "password", j_pass, sizeof(j_pass));
+        if (!j_pass[0]) extract_json_str(json_buf, "pass", j_pass, sizeof(j_pass));
+        extract_json_str(json_buf, "gateway_host", j_host, sizeof(j_host));
+        if (!j_host[0]) extract_json_str(json_buf, "gateway", j_host, sizeof(j_host));
+        extract_json_str(json_buf, "pop", j_pop, sizeof(j_pop));
+        extract_json_str(json_buf, "room_name", j_room, sizeof(j_room));
+        if (!j_room[0]) extract_json_str(json_buf, "room", j_room, sizeof(j_room));
+        extract_json_int(json_buf, "gateway_port", &j_port);
+
+        if (!j_ssid[0]) return ESP_ERR_INVALID_ARG;
+        if (j_pop[0] && setup[0] && strcmp(j_pop, setup) != 0) return ESP_ERR_INVALID_STATE;
+
+        esp_err_t err = lock_config();
+        if (err != ESP_OK) return err;
+        hc_provisioned_config c = {0};
+        hc_provisioning_load(&c);
+        c.schema = 1;
+        c.subbox = is_subbox ? 1 : 0;
+        if (c.channel < 1 || c.channel > 13) c.channel = 1;
+        if (c.revision == 0) c.revision = 1;
+
+        uint8_t base[6];
+        if (esp_efuse_mac_get_default(base) == ESP_OK) {
+            hc_factory_id(base, c.factory_id);
+            if (c.node_id == 0) {
+                c.node_id = ((uint32_t)base[2] << 24) | ((uint32_t)base[3] << 16) |
+                            ((uint32_t)base[4] << 8)  | (uint32_t)base[5];
+            }
+        }
+
+        strncpy(c.wifi_ssid, j_ssid, sizeof(c.wifi_ssid) - 1);
+        strncpy(c.wifi_password, j_pass, sizeof(c.wifi_password) - 1);
+        if (j_host[0]) {
+            snprintf(c.mqtt_uri, sizeof(c.mqtt_uri), "mqtts://%s:%d", j_host, j_port);
+        }
+        if (j_room[0]) {
+            strncpy(c.room_id, j_room, sizeof(c.room_id) - 1);
+        }
+
+        c.committed = 1;
+        err = save(&c);
+        if (err == ESP_OK && is_subbox) {
+            sync_subbox_credentials(&c);
+        }
+        memset(&c, 0, sizeof(c));
+        xSemaphoreGive(config_lock);
+        return err;
+    }
+
     if(!p||length!=HC_ENROLLMENT_SIZE||memcmp(p,"HCP1",4)||p[4]!=(is_subbox?1:2)||p[5]<1||p[5]>13||p[6]||p[7])return ESP_ERR_INVALID_ARG;
     esp_err_t err=authenticate(factory_secret,32,p,515,32);if(err!=ESP_OK)return err;
     uint8_t base[6];err=esp_efuse_mac_get_default(base);if(err!=ESP_OK)return err;
@@ -101,6 +237,7 @@ esp_err_t hc_provisioning_apply(const uint8_t *p,size_t length) {
     err=mac(factory_secret,32,material,sizeof(material),c.key);memset(material,0,sizeof(material));
     if(!is_subbox){c.peer_count=1;c.peers[0].node_id=c.parent_id;memcpy(c.peers[0].mac,p+26,6);memcpy(c.peers[0].lmk,p+176,16);memcpy(c.peers[0].nonce,p+64,32);}
     if(err==ESP_OK)err=save(&c);
+    if(err==ESP_OK && is_subbox)sync_subbox_credentials(&c);
     if(err==ESP_OK){parent_verified=false;memset(challenge,0,32);}
     memset(&c,0,sizeof(c));xSemaphoreGive(config_lock);return err;
 }
@@ -185,7 +322,7 @@ esp_err_t hc_provisioning_reset(void) {
 }
 static void restart_task(void *arg) { (void)arg;vTaskDelay(pdMS_TO_TICKS(2000));esp_restart(); }
 static esp_err_t response(const void *data,size_t len,uint8_t **out,ssize_t *outlen) {
-    *out=malloc(len);if(!*out)return ESP_ERR_NO_MEM;memcpy(*out,data,len);*outlen=(ssize_t)len;return ESP_OK;
+    *out=(uint8_t*)malloc(len);if(!*out)return ESP_ERR_NO_MEM;memcpy(*out,data,len);*outlen=(ssize_t)len;return ESP_OK;
 }
 static esp_err_t info_endpoint(uint32_t session,const uint8_t *in,ssize_t inlen,uint8_t **out,ssize_t *outlen,void *ctx) {
     (void)session;(void)in;(void)inlen;(void)ctx;
@@ -205,6 +342,10 @@ static esp_err_t config_endpoint(uint32_t session,const uint8_t *in,ssize_t inle
 static esp_err_t status_endpoint(uint32_t session,const uint8_t *in,ssize_t inlen,uint8_t **out,ssize_t *outlen,void *ctx) {
     (void)session;(void)in;(void)inlen;(void)ctx;
     if(!hc_provisioning_active())return ESP_ERR_INVALID_STATE;
+    hc_provisioned_config c = {0};
+    if (hc_provisioning_load(&c) == ESP_OK && c.committed) {
+        return response("{\"status\":\"PROVISIONED\"}",24,out,outlen);
+    }
     uint8_t receipt[78];esp_err_t err=hc_provisioning_receipt(false,receipt);if(err!=ESP_OK)return response("PENDING",7,out,outlen);
     return response(receipt,sizeof(receipt),out,outlen);
 }
@@ -238,7 +379,8 @@ esp_err_t hc_provisioning_start(bool subbox) {
     if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_AP,&ap);
     memset(&ap,0,sizeof(ap));if(err!=ESP_OK)return err;
     server=protocomm_new();if(!server)return ESP_ERR_NO_MEM;
-    protocomm_httpd_config_t cfg={.ext_handle_provided=false,.data.config=PROTOCOMM_HTTPD_DEFAULT_CONFIG()};cfg.data.config.stack_size=6144;
+    protocomm_httpd_config_t cfg = {0};
+    cfg.data.config.stack_size = 6144;
     err=protocomm_httpd_start(server,&cfg);
     security_params.data=(const uint8_t *)setup;security_params.len=strlen(setup);
     if(err==ESP_OK)err=protocomm_set_security(server,"prov-session",&protocomm_security1,&security_params);
@@ -246,7 +388,7 @@ esp_err_t hc_provisioning_start(bool subbox) {
     if(err==ESP_OK)err=protocomm_add_endpoint(server,"hc-config",config_endpoint,NULL);
     if(err==ESP_OK)err=protocomm_add_endpoint(server,"hc-status",status_endpoint,NULL);
     if(err!=ESP_OK){hc_provisioning_stop();return err;}
-    is_subbox=subbox;esp_fill_random(challenge,32);deadline=esp_timer_get_time()+120000000;window_generation++;
+    is_subbox=subbox;esp_fill_random(challenge,32);deadline=esp_timer_get_time()+180000000ULL;window_generation++;
     if(xTaskCreate(expiry_task,"hc_pair_timeout",3072,(void *)(uintptr_t)window_generation,3,NULL)!=pdPASS){hc_provisioning_stop();return ESP_ERR_NO_MEM;}
     return ESP_OK;
 }

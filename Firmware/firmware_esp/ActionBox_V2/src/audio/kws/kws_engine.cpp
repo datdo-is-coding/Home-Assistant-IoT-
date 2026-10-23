@@ -145,7 +145,7 @@ bool kws_engine_step(int *out_class_id, float *out_confidence) {
         s_last_detection_time = now_ms;
 
         if (s_observation_mode.load()) {
-            ESP_LOGI(TAG, "[KWS OBSERVE] Detected keyword '%s' (id=%d, conf=%.2f) - OBSERVATION MODE ONLY (NO RELAY ACTUATION)",
+            ESP_LOGD(TAG, "[KWS OBSERVE] Detected keyword '%s' (id=%d, conf=%.2f) - OBSERVATION MODE ONLY (NO RELAY ACTUATION)",
                      KWS_LABELS[top_class], top_class, top_prob);
 
             ActionBoxKeywordEventPacket pkt = {};

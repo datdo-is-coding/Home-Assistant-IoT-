@@ -272,7 +272,15 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
                     children: [
                       const Text('Công suất tức thời', style: TextStyle(fontSize: 12, color: Colors.grey)),
                       const SizedBox(height: 4),
-                      Text('${widget.device.value.toStringAsFixed(1)} W', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text(
+                        () {
+                          final p = widget.device.powerWatts ??
+                              (widget.device.metadata['power'] as num?)?.toDouble();
+                          if (p != null && p > 0) return '${p.toStringAsFixed(1)} W';
+                          return 'Chưa có đo';
+                        }(),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
                 ],

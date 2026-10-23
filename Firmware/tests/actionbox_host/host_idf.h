@@ -15,7 +15,7 @@ using esp_err_t = int;
 constexpr int ESP_OK = 0, ESP_FAIL = -1, ESP_ERR_INVALID_ARG = 1,
     ESP_ERR_NO_MEM = 2, ESP_ERR_TIMEOUT = 3, ESP_ERR_INVALID_STATE = 4,
     ESP_ERR_INVALID_RESPONSE = 5, ESP_ERR_INVALID_CRC = 6,
-    ESP_ERR_INVALID_SIZE = 7, ESP_ERR_NOT_FOUND = 8, ESP_ERR_INVALID_VERSION = 9;
+    ESP_ERR_INVALID_SIZE = 7, ESP_ERR_NOT_FOUND = 8, ESP_ERR_INVALID_VERSION = 9, ESP_ERR_NOT_SUPPORTED = 10;
 #define ESP_ERROR_CHECK(x) assert((x) == ESP_OK)
 inline const char* esp_err_to_name(int) { return "host error"; }
 #define ESP_LOGI(...)
@@ -118,6 +118,7 @@ struct gpio_config_t {
 };
 esp_err_t gpio_config(const gpio_config_t*);
 esp_err_t gpio_set_level(gpio_num_t, uint32_t);
+int gpio_get_level(gpio_num_t);
 
 using uart_port_t = int;
 constexpr int UART_NUM_0 = 0, UART_NUM_1 = 1, UART_NUM_2 = 2,
@@ -143,12 +144,22 @@ inline esp_err_t esp_read_mac(uint8_t* mac, int) {
 inline uint32_t esp_random() { return UINT32_MAX; }
 using nvs_handle_t = int;
 constexpr int NVS_READONLY = 0, NVS_READWRITE = 1,
-    ESP_ERR_NVS_NO_FREE_PAGES = 10, ESP_ERR_NVS_NEW_VERSION_FOUND = 11;
+    ESP_ERR_NVS_NO_FREE_PAGES = 10, ESP_ERR_NVS_NEW_VERSION_FOUND = 11,
+    ESP_ERR_NVS_NOT_FOUND = 8;
 esp_err_t nvs_flash_init();
 esp_err_t nvs_flash_erase();
 esp_err_t nvs_open(const char*, int, nvs_handle_t*);
 esp_err_t nvs_get_blob(nvs_handle_t, const char*, void*, size_t*);
 esp_err_t nvs_set_blob(nvs_handle_t, const char*, const void*, size_t);
+esp_err_t nvs_get_str(nvs_handle_t, const char*, char*, size_t*);
+esp_err_t nvs_set_str(nvs_handle_t, const char*, const char*);
+esp_err_t nvs_get_u32(nvs_handle_t, const char*, uint32_t*);
+esp_err_t nvs_set_u32(nvs_handle_t, const char*, uint32_t);
+esp_err_t nvs_get_u8(nvs_handle_t, const char*, uint8_t*);
+esp_err_t nvs_set_u8(nvs_handle_t, const char*, uint8_t);
 esp_err_t nvs_commit(nvs_handle_t);
+esp_err_t nvs_erase_key(nvs_handle_t, const char*);
 esp_err_t nvs_erase_all(nvs_handle_t);
 void nvs_close(nvs_handle_t);
+extern "C" void esp_restart(void);
+

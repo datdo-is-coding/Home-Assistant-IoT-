@@ -1,11 +1,21 @@
-import tempfile
+import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tempfile
 import unittest
-from aiohttp.test_utils import TestClient, TestServer
-from gateway.core_v1.api import create_app
+try:
+    from aiohttp.test_utils import TestClient, TestServer
+    from gateway.core_v1.api import create_app
+    HAVE_AIOHTTP = True
+except ImportError:
+    HAVE_AIOHTTP = False
+    TestClient = TestServer = create_app = None
+
 from gateway.core_v1.registry import Registry
 
 
+@unittest.skipUnless(HAVE_AIOHTTP, "aiohttp not installed")
 class ApiTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp=tempfile.TemporaryDirectory()

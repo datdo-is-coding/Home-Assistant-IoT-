@@ -3,7 +3,6 @@
 #include "actionbox_protocol.h"
 #include "espnow_transport.h"
 #include "led_driver.h"
-#include "kws/kws_engine.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,8 +105,6 @@ esp_err_t voice_capture_init(void) {
     }
 
     init_wakenet();
-
-    kws_engine_init();
 
     biquad_init(&s_hpf1, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
     biquad_init(&s_hpf2, 0.9512454f, -1.9024908f, 0.9512454f, -1.9001124f, 0.9048693f);
@@ -329,10 +326,7 @@ static void voice_capture_task(void *pvParameters) {
             clean_buf[i] = (int16_t)filtered;
         }
 
-        if (!s_is_streaming) {
-            kws_engine_feed_samples(clean_buf, mono_samples);
-            kws_engine_step(NULL, NULL);
-        }
+        // Command recognition runs on Pi; synchronous KWS here overruns the 90 ms DMA buffer.
 
         for (int i = 0; i < mono_samples; i++) {
             chunk_buf[chunk_idx++] = clean_buf[i];

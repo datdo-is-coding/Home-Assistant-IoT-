@@ -183,11 +183,11 @@ class AutomationScreen extends ConsumerWidget {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   backgroundColor: Theme.of(context).colorScheme.error,
-                                  content: Row(
+                                  content: const Row(
                                     children: [
-                                      const Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
-                                      const SizedBox(width: 10),
-                                      const Expanded(
+                                      Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
+                                      SizedBox(width: 10),
+                                      Expanded(
                                         child: Text('Kích hoạt ngữ cảnh có một số thiết bị không phản hồi'),
                                       ),
                                     ],

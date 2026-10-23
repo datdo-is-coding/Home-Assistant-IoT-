@@ -74,6 +74,16 @@ PROACTIVE_QUIET_END = int(os.environ.get("PROACTIVE_QUIET_END", "7"))
 
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edgetts")
+
+TTS_VOICE = os.environ.get("TTS_VOICE", "vi-VN-HoaiMyNeural")
+TTS_FALLBACK_VOICE = "vi-VN-NamMinhNeural"
+TTS_RATE = os.environ.get("TTS_RATE", "-4%")
+TTS_PITCH = os.environ.get("TTS_PITCH", "+2Hz")
+
+VIENEU_MODE = os.environ.get("VIENEU_MODE", "v3nano")
+VIENEU_VOICE = os.environ.get("VIENEU_VOICE", "Ái Hân")
+
 _cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_config.json")
 if os.path.exists(_cfg_file):
     try:
@@ -111,15 +121,6 @@ ASR_MODEL_DIR = "/home/pi4/smarthome/models"
 ASR_NUM_THREADS = 2
 ASR_SAMPLE_RATE = 16000
 
-TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "edgetts")
-
-TTS_VOICE = os.environ.get("TTS_VOICE", "vi-VN-HoaiMyNeural")
-TTS_FALLBACK_VOICE = "vi-VN-NamMinhNeural"
-TTS_RATE = os.environ.get("TTS_RATE", "-4%")
-TTS_PITCH = os.environ.get("TTS_PITCH", "+2Hz")
-
-VIENEU_MODE = os.environ.get("VIENEU_MODE", "v3nano")
-VIENEU_VOICE = os.environ.get("VIENEU_VOICE", "Ái Hân")
 
 FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/home/pi4/Home-Assistant-IoT-/Gateway/firmware")
 if not os.path.exists(FIRMWARE_DIR):
@@ -135,6 +136,8 @@ WS_AUDIO_PORT = 8765
 WS_AUDIO_TLS_CERT = os.environ.get("WS_AUDIO_TLS_CERT", "")
 WS_AUDIO_TLS_KEY = os.environ.get("WS_AUDIO_TLS_KEY", "")
 WS_AUDIO_TOKEN = os.environ.get("WS_AUDIO_TOKEN", "")
+WS_AUDIO_AUTH_REQUIRED = os.environ.get("WS_AUDIO_AUTH_REQUIRED", "false").lower() in ("true", "1", "yes")
+ALLOW_BROADCAST_COMMANDS = False
 try:
     WS_AUDIO_TOKENS = json.loads(os.environ.get("WS_AUDIO_TOKENS", "{}"))
 except Exception:

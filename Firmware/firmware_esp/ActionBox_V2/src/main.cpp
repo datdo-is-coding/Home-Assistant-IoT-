@@ -23,6 +23,7 @@
 #include "hc_runtime.h"
 #include "hc_ota.h"
 #include "hc_provisioning.h"
+#include "device_reset.h"
 #include "esp_timer.h"
 
 static const char *TAG = "ACTIONBOX_MAIN";
@@ -107,9 +108,14 @@ extern "C" void app_main(void) {
 
     hardware_disable_speaker();
 
+    ESP_ERROR_CHECK(nvs_storage_init());
     ESP_ERROR_CHECK(relay_driver_init());
 
-    ESP_ERROR_CHECK(nvs_storage_init());
+    if (resume_interrupted_reset()) {
+        ESP_LOGI(TAG, "Interrupted reset resumed and completed. Rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_restart();
+    }
 
     protocol_init();
 
@@ -118,6 +124,8 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(led_driver_init());
 
     ESP_ERROR_CHECK(safety_supervisor_init());
+
+    safety_apply_startup_state();
 
     ESP_ERROR_CHECK(espnow_transport_init());
     ESP_ERROR_CHECK(hc_runtime_init(false,nullptr,hc_apply,hc_sample));

@@ -5,6 +5,9 @@
 #include "safety_supervisor.h"
 
 #include <string.h>
+#include <atomic>
+#include "esp_timer.h"
+#include "esp_random.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_event.h"
@@ -136,7 +139,24 @@ void espnow_transport_register_rx_callback(espnow_rx_cb_t cb) {
     s_rx_callback = cb;
 }
 
-esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
+static bool is_control_packet(const uint8_t *payload, size_t len) {
+    if (!payload || len == 0) return false;
+    const char *str = (const char *)payload;
+    if (len >= 4 && (str[0] == '{' || str[1] == '{')) {
+        if (strstr(str, "\"cmd\"") || strstr(str, "\"rl\"") || strstr(str, "\"relay\"") ||
+            strstr(str, "TURN_ON") || strstr(str, "TURN_OFF") ||
+            strstr(str, "turn_on") || strstr(str, "turn_off") ||
+            strstr(str, "\"action\"")) {
+            return true;
+        }
+    }
+    if (len >= 4 && payload[0] == 'H' && payload[1] == 'C' && (payload[2] == 'C' || payload[2] == 'M')) {
+        return true;
+    }
+    return false;
+}
+
+esp_err_t espnow_transport_pair_subbox_encrypted(const uint8_t *subbox_mac, const uint8_t *lmk) {
     if (!subbox_mac) return ESP_ERR_INVALID_ARG;
     if (hc_runtime_enabled()) return ESP_ERR_INVALID_STATE;
 
@@ -152,15 +172,20 @@ esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
     memcpy(peer.peer_addr, subbox_mac, 6);
     peer.channel = 0;
     peer.ifidx = WIFI_IF_STA;
-    peer.encrypt = false;
+    if (lmk) {
+        memcpy(peer.lmk, lmk, 16);
+        peer.encrypt = true;
+    } else {
+        peer.encrypt = false;
+    }
 
     esp_err_t err = esp_now_add_peer(&peer);
     if (err == ESP_OK) {
         memcpy(s_subbox_mac, subbox_mac, 6);
         s_has_paired_subbox = true;
-        ESP_LOGI(TAG, "Successfully paired with SubBox MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+        ESP_LOGI(TAG, "Successfully paired with SubBox MAC: %02X:%02X:%02X:%02X:%02X:%02X (encrypt=%s)",
                  s_subbox_mac[0], s_subbox_mac[1], s_subbox_mac[2],
-                 s_subbox_mac[3], s_subbox_mac[4], s_subbox_mac[5]);
+                 s_subbox_mac[3], s_subbox_mac[4], s_subbox_mac[5], lmk ? "true" : "false");
     } else {
         ESP_LOGE(TAG, "Failed to add SubBox peer: %s", esp_err_to_name(err));
     }
@@ -169,20 +194,52 @@ esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
     return err;
 }
 
+esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac) {
+    return espnow_transport_pair_subbox_encrypted(subbox_mac, NULL);
+}
+
+esp_err_t espnow_transport_clear_peers(void) {
+    if (xSemaphoreTake(s_transport_mutex, portMAX_DELAY) != pdTRUE) return ESP_ERR_TIMEOUT;
+    if (s_has_paired_subbox) {
+        esp_now_del_peer(s_subbox_mac);
+        memset(s_subbox_mac, 0, 6);
+        s_has_paired_subbox = false;
+        ESP_LOGI(TAG, "SubBox peer link and runtime caches cleared.");
+    }
+    xSemaphoreGive(s_transport_mutex);
+    return ESP_OK;
+}
+
 esp_err_t espnow_transport_send(const uint8_t *payload, size_t len) {
     if (!payload || len == 0 || len > ESP_NOW_MAX_DATA_LEN_V2) return ESP_ERR_INVALID_ARG;
 
     uint8_t core_parent[6];
     if (hc_runtime_enabled()) {
         if (!hc_runtime_parent_mac(core_parent)) return ESP_ERR_INVALID_STATE;
-        return espnow_transport_send_to(core_parent,payload,len);
+        return espnow_transport_send_to(core_parent, payload, len);
     }
+
+    // Never send relay/control commands over broadcast!
+    if (is_control_packet(payload, len)) {
+        if (!s_has_paired_subbox) {
+            ESP_LOGW(TAG, "Refusing to broadcast relay/control command: no paired SubBox");
+            return ESP_ERR_INVALID_STATE;
+        }
+        return espnow_transport_send_to(s_subbox_mac, payload, len);
+    }
+
     const uint8_t *target_mac = s_has_paired_subbox ? s_subbox_mac : s_broadcast_mac;
     return espnow_transport_send_to(target_mac, payload, len);
 }
 
 esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *payload, size_t len) {
     if (!dest_mac || !payload || len == 0 || len > ESP_NOW_MAX_DATA_LEN_V2) return ESP_ERR_INVALID_ARG;
+
+    // Security policy: never send relay/control commands to broadcast MAC
+    if (memcmp(dest_mac, s_broadcast_mac, 6) == 0 && is_control_packet(payload, len)) {
+        ESP_LOGE(TAG, "Security violation: broadcast relay/control commands are forbidden");
+        return ESP_ERR_INVALID_ARG;
+    }
 
     if (xSemaphoreTake(s_transport_mutex, portMAX_DELAY) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -206,15 +263,21 @@ esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *paylo
     return err;
 }
 
-static bool s_pairing_mode = false;
+static std::atomic<int64_t> s_pairing_deadline_us{0};
+static std::atomic<uint32_t> s_setup_session{0};
 
 void espnow_transport_set_pairing_mode(bool enable) {
-    s_pairing_mode = enable;
+    if (enable && hc_runtime_enabled()) return;
+    if (enable) {
+        s_setup_session.store(esp_random() | 1U);
+        if (!nvs_storage_is_claimed()) espnow_transport_clear_peers();
+    }
+    s_pairing_deadline_us.store(enable ? esp_timer_get_time() + 180000000LL : 0);
     ESP_LOGI(TAG, "ESP-NOW pairing mode %s", enable ? "ENABLED" : "DISABLED");
 }
 
 bool espnow_transport_is_pairing_mode(void) {
-    return s_pairing_mode;
+    return esp_timer_get_time() < s_pairing_deadline_us.load();
 }
 
 bool espnow_transport_is_paired(void) {
@@ -261,4 +324,10 @@ void espnow_transport_hop_channel(void) {
     s_scan_ch = (s_scan_ch % 13) + 1;
     esp_wifi_set_channel(s_scan_ch, WIFI_SECOND_CHAN_NONE);
     ESP_LOGD(TAG, "Scanning Wi-Fi channel %u for SubBox heartbeat...", s_scan_ch);
+}
+
+uint32_t espnow_transport_setup_session(void) { return s_setup_session.load(); }
+uint32_t espnow_transport_setup_remaining_ms(void) {
+    const auto remaining = (s_pairing_deadline_us.load() - esp_timer_get_time()) / 1000;
+    return remaining > 0 ? static_cast<uint32_t>(remaining) : 0;
 }

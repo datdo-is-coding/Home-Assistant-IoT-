@@ -9,10 +9,11 @@ services:
     environment:
       TZ: Asia/Ho_Chi_Minh
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "127.0.0.1:1883:1883"
+      - "8883:8883"
+      - "127.0.0.1:9001:9001"
     volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
 
@@ -54,6 +55,8 @@ services:
       MQTT_BROKER: iot_mosquitto
       MQTT_PORT: 1883
       MQTT_TOPIC: esp32/sensor/data
+      MQTT_USER: subscriber
+      MQTT_PASSWORD: subscriber_secret_pass
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: iot_db

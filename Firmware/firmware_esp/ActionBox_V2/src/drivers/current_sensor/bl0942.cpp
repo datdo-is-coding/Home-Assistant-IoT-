@@ -192,7 +192,7 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
 
     const uint8_t *rx_buf = &rx_raw[frame_start];
     if (frame_start > 0) {
-        ESP_LOGI(TAG, "Ch%u BL0942 frame synced at offset +%d", channel, frame_start);
+        ESP_LOGD(TAG, "Ch%u BL0942 frame synced at offset +%d", channel, frame_start);
     }
 
     uint32_t raw_i = (uint32_t)rx_buf[1] | ((uint32_t)rx_buf[2] << 8) | ((uint32_t)rx_buf[3] << 16);
@@ -217,7 +217,7 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     static uint32_t s_last_log_ms[BOARD_RELAY_CHANNEL_COUNT] = {0};
     if (s_latest_measurements[idx].timestamp_ms - s_last_log_ms[idx] >= 1000) {
         s_last_log_ms[idx] = s_latest_measurements[idx].timestamp_ms;
-        ESP_LOGI(TAG, "Ch%u: I_RMS=%lu mA (raw_i=%lu, 0x%06lX), V_RMS=%lu V, P=%ld W",
+        ESP_LOGD(TAG, "Ch%u: I_RMS=%lu mA (raw_i=%lu, 0x%06lX), V_RMS=%lu V, P=%ld W",
                  (unsigned)channel,
                  (unsigned long)s_latest_measurements[idx].current_rms_ma,
                  (unsigned long)raw_i, (unsigned long)raw_i,

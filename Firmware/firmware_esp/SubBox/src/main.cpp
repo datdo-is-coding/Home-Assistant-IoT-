@@ -152,9 +152,28 @@ extern "C" void app_main(void) {
         snprintf(cfg.wifi_ssid,sizeof(cfg.wifi_ssid),"%s",enrollment.wifi_ssid);
         snprintf(cfg.wifi_pass,sizeof(cfg.wifi_pass),"%s",enrollment.wifi_password);
         snprintf(cfg.mqtt_broker_uri,sizeof(cfg.mqtt_broker_uri),"%s",enrollment.mqtt_uri);
+        if (enrollment.room_id[0]) {
+            snprintf(cfg.room_name, sizeof(cfg.room_name), "%s", enrollment.room_id);
+        }
+        if (cfg.ws_gateway_uri[0] == 0 && cfg.mqtt_broker_uri[0] != 0) {
+            const char* proto = strstr(cfg.mqtt_broker_uri, "://");
+            const char* host_start = proto ? proto + 3 : cfg.mqtt_broker_uri;
+            char host[64] = {0};
+            size_t hi = 0;
+            while (host_start[hi] && host_start[hi] != ':' && host_start[hi] != '/' && hi < sizeof(host) - 1) {
+                host[hi] = host_start[hi];
+                hi++;
+            }
+            host[hi] = 0;
+            if (hi > 0) {
+                snprintf(cfg.ws_gateway_uri, sizeof(cfg.ws_gateway_uri), "ws://%s:8765/ws/audio", host);
+            }
+        }
+        NVSManager::saveConfig(cfg);
     }else if(cfg.wifi_ssid[0]==0){
         cfg.wifi_ssid[0]=cfg.wifi_pass[0]=cfg.mqtt_broker_uri[0]=0;
-        ESP_LOGW(TAG,"Factory/unavailable enrollment: hold BOOT 3s for secure commissioning");
+        ESP_LOGW(TAG,"Blank NVS / First setup detected: opening secure 180s provisioning window");
+        hc_provisioning_start(true);
     }else{
         ESP_LOGI(TAG,"Factory enrollment absent: continuing with loaded NVS credentials (SSID '%s')",cfg.wifi_ssid);
     }

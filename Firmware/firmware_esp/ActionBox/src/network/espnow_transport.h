@@ -19,8 +19,18 @@ esp_err_t espnow_transport_send(const uint8_t *payload, size_t len);
 esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *payload, size_t len);
 
 esp_err_t espnow_transport_pair_subbox(const uint8_t *subbox_mac);
+esp_err_t espnow_transport_pair_subbox_encrypted(const uint8_t *subbox_mac, const uint8_t *lmk);
+esp_err_t espnow_transport_clear_peers(void);
 
 bool espnow_transport_is_paired(void);
+
+bool espnow_transport_get_subbox_mac(uint8_t *out_mac);
+
+bool espnow_transport_is_paired_subbox(const uint8_t *mac);
+
+void espnow_transport_set_pairing_mode(bool enable);
+
+bool espnow_transport_is_pairing_mode(void);
 
 void espnow_transport_get_local_mac(uint8_t *out_mac);
 

@@ -5,6 +5,7 @@
 #include "config/subbox_config.h"
 #include <cstring>
 #include "esp_mac.h"
+#include "security_config.h"
 
 static const char* TAG = "NVS_MGR";
 static const char* NVS_NAMESPACE = "subbox_cfg";
@@ -90,14 +91,40 @@ esp_err_t NVSManager::saveConfig(const SubBoxPersistentConfig& config) {
     return err;
 }
 
+esp_err_t NVSManager::networkReset() {
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return err;
+
+    nvs_erase_key(handle, "ssid");
+    nvs_erase_key(handle, "pass");
+    nvs_commit(handle);
+    nvs_close(handle);
+
+    SecurityConfig::networkReset();
+    ESP_LOGW(TAG, "SubBox Network Reset performed: Wi-Fi credentials cleared, 180s setup window open.");
+    return ESP_OK;
+}
+
 esp_err_t NVSManager::factoryReset() {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) return err;
 
+    char subbox_id[32] = {0};
+    size_t id_len = sizeof(subbox_id);
+    nvs_get_str(handle, "id", subbox_id, &id_len);
+
     nvs_erase_all(handle);
+
+    // Restore factory UID so device identity is never lost
+    if (strlen(subbox_id) > 0) {
+        nvs_set_str(handle, "id", subbox_id);
+    }
     nvs_commit(handle);
     nvs_close(handle);
-    ESP_LOGW(TAG, "NVS configuration erased for factory reset.");
+
+    SecurityConfig::factoryReset();
+    ESP_LOGW(TAG, "SubBox Factory Reset performed: User config & credentials wiped, factory UID preserved.");
     return ESP_OK;
 }

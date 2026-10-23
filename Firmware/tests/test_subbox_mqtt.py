@@ -22,6 +22,7 @@ constexpr int ESP_OK = 0, ESP_EVENT_ANY_ID = -1;
 using esp_event_base_t = const char*;
 inline const char* esp_err_to_name(int) { return "error"; }
 #define ESP_LOGI(...)
+#define ESP_LOGD(...)
 #define ESP_LOGW(...)
 #define ESP_LOGE(...)
 inline uint32_t esp_random() { return 1; }
@@ -97,7 +98,7 @@ int main() {
 ''')
             subprocess.run([
                 'g++', '-std=c++17', '-pthread', '-I', str(root), '-I', str(SRC),
-                '-I', str(CJSON), str(root / 'check.cpp'),
+                '-I', str(CJSON), '-I', str(SRC.parent.parent / 'common'), str(root / 'check.cpp'),
                 str(SRC / 'mqtt/subbox_mqtt_client.cpp'), str(CJSON / 'cJSON.c'),
                 '-o', str(root / 'check')], check=True, capture_output=True, text=True)
             run = subprocess.run([str(root / 'check')], capture_output=True, text=True)

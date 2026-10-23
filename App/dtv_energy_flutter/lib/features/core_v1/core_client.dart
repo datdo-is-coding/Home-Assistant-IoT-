@@ -227,7 +227,7 @@ class CoreClient extends ChangeNotifier {
       try {
         d = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
       } on Object {
-
+        // Ignore JSON decode error on non-json error responses
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         final e = d?['error'] as Map<String, dynamic>?;
@@ -426,7 +426,7 @@ class CoreClient extends ChangeNotifier {
           _resolve(entry.key, result);
           notifyListeners();
         } on CoreException {
-
+          // Command will be retried or handled on next cycle
         }
       }
       if (pending.isEmpty) {

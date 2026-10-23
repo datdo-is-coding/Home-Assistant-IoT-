@@ -1,6 +1,7 @@
 #include "button_driver.h"
 #include "board_pins.h"
 #include "app_config.h"
+#include "device_manager.h"
 
 #include <string.h>
 #include "driver/gpio.h"
@@ -22,8 +23,7 @@ typedef struct {
     BtnInternalState state;
     int64_t          press_start_time_us;
     int64_t          last_transition_time_us;
-    bool             long_press_dispatched;
-    bool             factory_reset_dispatched;
+    bool             is_stuck_boot;
 } ButtonChannel;
 
 static ButtonChannel s_buttons[BOARD_BUTTON_COUNT];
@@ -72,8 +72,10 @@ esp_err_t button_driver_init(void) {
         s_buttons[i].state = BTN_STATE_RELEASED;
         s_buttons[i].press_start_time_us = 0;
         s_buttons[i].last_transition_time_us = 0;
-        s_buttons[i].long_press_dispatched = false;
-        s_buttons[i].factory_reset_dispatched = false;
+        s_buttons[i].is_stuck_boot = read_pin_pressed(s_buttons[i].gpio_pin);
+        if (s_buttons[i].is_stuck_boot) {
+            ESP_LOGW(TAG, "Ch%u button held at boot (is_stuck_boot); release required", ch);
+        }
     }
 
     s_initialized = true;
@@ -110,34 +112,15 @@ void button_driver_tick(void) {
                     if (elapsed_ms >= BUTTON_DEBOUNCE_TIME_MS) {
                         btn->state = BTN_STATE_PRESSED;
                         btn->press_start_time_us = now_us;
-                        btn->long_press_dispatched = false;
-                        btn->factory_reset_dispatched = false;
                         ESP_LOGD(TAG, "Ch%u Button Pressed", btn->channel);
                     }
                 } else {
-
                     btn->state = BTN_STATE_RELEASED;
                 }
                 break;
 
             case BTN_STATE_PRESSED:
-                if (is_pressed) {
-                    int64_t held_ms = (now_us - btn->press_start_time_us) / 1000;
-
-                    if (held_ms >= BUTTON_HOLD_FACTORY_RESET_MS && !btn->factory_reset_dispatched) {
-                        btn->factory_reset_dispatched = true;
-                        ESP_LOGW(TAG, "Ch%u Button Held 10s: TRIGGERING FACTORY RESET EVENT", btn->channel);
-                        if (s_event_callback) {
-                            s_event_callback(btn->channel, BUTTON_EVENT_FACTORY_RST, s_callback_user_data);
-                        }
-                    } else if (held_ms >= BUTTON_LONG_PRESS_TIME_MS && !btn->long_press_dispatched && !btn->factory_reset_dispatched) {
-                        btn->long_press_dispatched = true;
-                        ESP_LOGI(TAG, "Ch%u Button Held 3s: LONG PRESS EVENT", btn->channel);
-                        if (s_event_callback) {
-                            s_event_callback(btn->channel, BUTTON_EVENT_LONG_PRESS, s_callback_user_data);
-                        }
-                    }
-                } else {
+                if (!is_pressed) {
                     btn->state = BTN_STATE_DEBOUNCING_RELEASE;
                     btn->last_transition_time_us = now_us;
                 }
@@ -149,22 +132,32 @@ void button_driver_tick(void) {
                     if (elapsed_ms >= BUTTON_DEBOUNCE_TIME_MS) {
                         btn->state = BTN_STATE_RELEASED;
                         int64_t total_press_ms = (now_us - btn->press_start_time_us) / 1000;
-                        ESP_LOGD(TAG, "Ch%u Button Released after %lld ms", btn->channel, total_press_ms);
+                        ESP_LOGD(TAG, "Ch%u Button Released after %lld ms", btn->channel, (long long)total_press_ms);
 
-                        if (!btn->long_press_dispatched && !btn->factory_reset_dispatched) {
+                        bool stuck = btn->is_stuck_boot;
+                        btn->is_stuck_boot = false;
 
-                            ESP_LOGI(TAG, "Ch%u Button SHORT PRESS -> Toggle Relay", btn->channel);
-                            if (s_event_callback) {
-                                s_event_callback(btn->channel, BUTTON_EVENT_SHORT_PRESS, s_callback_user_data);
+                        bool is_claimed = device_manager_is_claimed();
+                        ArmedKind armed_kind = (btn->channel == 1) ? device_manager_get_armed_kind() : ArmedKind::NONE;
+
+                        ButtonAction action = ButtonAction::NONE;
+                        if (btn->channel == 2) {
+                            if (stuck || total_press_ms < 40 || total_press_ms >= 20000) {
+                                action = ButtonAction::NONE;
+                            } else if (total_press_ms < 700) {
+                                action = ButtonAction::SHORT_PRESS;
+                            } else {
+                                // Giữ >= 700ms trên BUT2 là cử chỉ kích hoạt voice
+                                action = ButtonAction::VOICE_TRIGGER;
                             }
                         } else {
-                            if (s_event_callback) {
-                                s_event_callback(btn->channel, BUTTON_EVENT_RELEASE, s_callback_user_data);
-                            }
+                            action = classify_release((uint64_t)total_press_ms, is_claimed, armed_kind, stuck);
+                        }
+                        if (s_event_callback && action != ButtonAction::NONE) {
+                            s_event_callback(btn->channel, action, s_callback_user_data);
                         }
                     }
                 } else {
-
                     btn->state = BTN_STATE_PRESSED;
                 }
                 break;

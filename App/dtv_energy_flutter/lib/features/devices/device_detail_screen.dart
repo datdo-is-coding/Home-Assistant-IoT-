@@ -5,6 +5,8 @@ import '../../core/theme/app_theme.dart';
 import '../../models/device.dart';
 import '../../providers/smart_home_providers.dart';
 
+typedef DeviceDetailScreen = FeatureDeviceDetailScreen;
+
 class FeatureDeviceDetailScreen extends ConsumerStatefulWidget {
   final String deviceId;
 
@@ -16,6 +18,18 @@ class FeatureDeviceDetailScreen extends ConsumerStatefulWidget {
 
 class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailScreen> {
   bool _showAdvanced = false;
+
+  String _getChannelPin(String? channel) {
+    switch (channel) {
+      case 'ch2':
+        return 'GPIO 5';
+      case 'ch3':
+        return 'GPIO 6 / 7 (Latching)';
+      case 'ch1':
+      default:
+        return 'GPIO 4';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +59,8 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
             title: Text(device.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
             actions: [
               IconButton(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                tooltip: device.isFavorite ? 'Xóa khỏi yêu thích' : 'Thêm vào yêu thích',
                 icon: Icon(
                   device.isFavorite ? Icons.star_rounded : Icons.star_outline_rounded,
                   color: device.isFavorite ? const Color(0xFFF59E0B) : null,
@@ -111,7 +127,7 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                       ),
                       const SizedBox(height: 24),
 
-                      if (device.metadata['can_dim'] == true || device.type == DeviceType.airConditioner) ...[
+                      if (device.metadata['can_dim'] == true || device.metadata['has_slider'] == true) ...[
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
                             trackHeight: 12,
@@ -131,25 +147,31 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                           ),
                         ),
                         const SizedBox(height: 12),
-                      ] else if (device.metadata['power'] != null && (device.metadata['power'] as num) > 0) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Công suất tiêu thụ: ${(device.metadata['power'] as num).toStringAsFixed(1)} W',
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
                       ],
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          () {
+                            final p = device.powerWatts ?? (device.metadata['power'] as num?)?.toDouble();
+                            if (p != null && p > 0) {
+                              return 'Công suất tiêu thụ: ${p.toStringAsFixed(1)} W';
+                            }
+                            return 'Chưa có dữ liệu đo';
+                          }(),
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
 
                       FilledButton.icon(
                         icon: Icon(device.isOn ? Icons.power_settings_new_rounded : Icons.power_rounded),
                         label: Text(device.isOn ? 'Tắt nguồn' : 'Bật nguồn'),
                         style: FilledButton.styleFrom(
+                          minimumSize: const Size(160, 48),
                           backgroundColor: device.isOn ? accentColor : (isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9)),
                           foregroundColor: device.isOn ? Colors.white : theme.colorScheme.onSurface,
                           padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
@@ -229,11 +251,11 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                             const Divider(height: 1),
                             const SizedBox(height: 12),
                             _TechRow(label: 'Node ID', value: device.actionBoxId ?? device.id),
-                            _TechRow(label: 'Kênh phần cứng', value: '${device.channel ?? "ch1"} (${device.channel == "ch2" ? "GPIO 5" : "GPIO 4"})'),
+                            _TechRow(label: 'Kênh phần cứng', value: '${device.channel ?? "ch1"} (${_getChannelPin(device.channel)})'),
                             _TechRow(label: 'Địa chỉ MAC', value: device.metadata['mac']?.toString().isNotEmpty == true ? device.metadata['mac'].toString() : '30:ED:A0:BD:69:D4'),
                             _TechRow(label: 'Chủ đề MQTT Lệnh', value: 'smarthome/cmd/${device.actionBoxId ?? "esp32s3_master"}'),
                             _TechRow(label: 'Chủ đề MQTT Trạng thái', value: 'smarthome/status/${device.actionBoxId ?? "esp32s3_master"}'),
-                            _TechRow(label: 'Phần cứng', value: 'ESP32-S3 N16R8 (Active-LOW)'),
+                            const _TechRow(label: 'Phần cứng', value: 'ESP32-S3 N16R8 (Active-LOW)'),
                           ],
                         ),
                       ),
@@ -277,12 +299,24 @@ class _SettingTile extends StatelessWidget {
         border: Border.all(color: colors.cardBorder),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(width: 12),
-          Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-          const Spacer(),
-          Text(value, style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant)),
+          Expanded(
+            child: Text(
+              title,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
         ],
       ),
     );
@@ -301,9 +335,19 @@ class _TechRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          Text(value, style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
+          Flexible(
+            child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+            ),
+          ),
         ],
       ),
     );

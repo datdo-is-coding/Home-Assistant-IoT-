@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/device.dart';
@@ -9,7 +10,30 @@ import '../models/scene.dart';
 import '../models/automation.dart';
 import '../models/voice_alias.dart';
 
+import '../services/app_preferences_service.dart';
 import '../services/gateway_client.dart';
+import '../services/gateway_event_stream.dart';
+
+class ChangedResources {
+  final bool devicesChanged;
+  final bool roomsChanged;
+  final bool actionBoxesChanged;
+  final bool vocabularyChanged;
+  final bool scenesChanged;
+  const ChangedResources({
+    this.devicesChanged = false,
+    this.roomsChanged = false,
+    this.actionBoxesChanged = false,
+    this.vocabularyChanged = false,
+    this.scenesChanged = false,
+  });
+  bool get hasChanges =>
+      devicesChanged ||
+      roomsChanged ||
+      actionBoxesChanged ||
+      vocabularyChanged ||
+      scenesChanged;
+}
 
 abstract class DeviceRepository {
   Future<List<Device>> getDevices();
@@ -69,11 +93,15 @@ abstract class SmartHomeRepository
         AutomationRepository,
         SceneRepository,
         VoiceRepository {
+  Map<String, Device> get deviceMap;
   void dispose();
 }
 
 class GatewaySmartHomeRepository implements SmartHomeRepository {
   final GatewayClient gateway;
+  final AppPreferencesService preferencesService;
+  String _currentLoadedScopeKey = '';
+  Future<void>? _currentFavoritesLoad;
 
   final _deviceStreamCtrl = StreamController<List<Device>>.broadcast();
   final _roomStreamCtrl = StreamController<List<Room>>.broadcast();
@@ -83,14 +111,25 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   final _voiceStreamCtrl = StreamController<List<VoiceVocabularyItem>>.broadcast();
 
   final Set<String> _favoriteIds = {};
+  final Map<String, Device> _deviceMap = {};
+  final Map<String, ActionBox> _actionBoxMap = {};
   List<Device> _devices = [];
   List<Room> _rooms = [];
   List<ActionBox> _actionBoxes = [];
+  List<Scene> _scenes = [];
   final List<Automation> _automations = [];
   static const String _kAutomationsPrefKey = 'aetheria_saved_automations';
 
-  GatewaySmartHomeRepository(this.gateway) {
+  StreamSubscription<GatewayEvent>? _eventSub;
+
+  GatewaySmartHomeRepository(
+    this.gateway, {
+    AppPreferencesService? preferencesService,
+  }) : preferencesService = preferencesService ?? AppPreferencesService() {
     gateway.addListener(_syncFromGateway);
+    _eventSub = gateway.eventStreamBroadcast.listen((evt) {
+      applyEvent(evt.name, evt.data);
+    });
     _loadPersistedAutomations();
     _syncFromGateway();
   }
@@ -132,25 +171,432 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     }
   }
 
-  void _syncFromGateway() {
-    _devices = _buildDevices();
-    _rooms = _buildRooms(_devices);
-    _actionBoxes = _buildActionBoxes();
+  String get _currentScopeKey => gateway.authenticated
+      ? AppPreferencesService.scopeKey(gateway.serverUrl, gateway.currentUserId)
+      : '';
 
-    if (!_deviceStreamCtrl.isClosed) _deviceStreamCtrl.add(List.unmodifiable(_devices));
-    if (!_roomStreamCtrl.isClosed) _roomStreamCtrl.add(List.unmodifiable(_rooms));
-    if (!_actionBoxStreamCtrl.isClosed) _actionBoxStreamCtrl.add(List.unmodifiable(_actionBoxes));
-    if (!_voiceStreamCtrl.isClosed) _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
-    if (!_sceneStreamCtrl.isClosed) _sceneStreamCtrl.add(List.unmodifiable(_buildScenes(_devices)));
-    if (!_automationStreamCtrl.isClosed) _automationStreamCtrl.add(List.unmodifiable(_automations));
+  void _syncFromGateway() {
+    final scopeKey = _currentScopeKey;
+    if (scopeKey != _currentLoadedScopeKey) {
+      _currentLoadedScopeKey = scopeKey;
+      if (!gateway.authenticated) {
+        _favoriteIds.clear();
+        _applyFavoritesToDeviceMap();
+        _currentFavoritesLoad = null;
+      } else {
+        _currentFavoritesLoad = _loadFavoritesForCurrentScope();
+      }
+    }
+    applySnapshot(gateway.nodes);
   }
 
-  List<Device> _buildDevices() {
+  Future<void> _loadFavoritesForCurrentScope() async {
+    if (!gateway.authenticated) {
+      _favoriteIds.clear();
+      _applyFavoritesToDeviceMap();
+      return;
+    }
+    final targetScope = _currentScopeKey;
+    final loaded = await preferencesService.loadFavoriteIds(
+      gatewayUrl: gateway.serverUrl,
+      userId: gateway.currentUserId,
+    );
+    if (targetScope != _currentScopeKey) return;
+    _favoriteIds.clear();
+    _favoriteIds.addAll(loaded);
+    _applyFavoritesToDeviceMap();
+  }
+
+  void _applyFavoritesToDeviceMap() {
+    bool changed = false;
+    for (final entry in _deviceMap.entries) {
+      final isFav = _favoriteIds.contains(entry.key);
+      if (entry.value.isFavorite != isFav) {
+        _deviceMap[entry.key] = entry.value.copyWith(isFavorite: isFav);
+        changed = true;
+      }
+    }
+    if (changed) {
+      _devices = _deviceMap.values.toList();
+      if (!_deviceStreamCtrl.isClosed) {
+        _deviceStreamCtrl.add(List.unmodifiable(_devices));
+      }
+    }
+  }
+
+  static bool _isDeviceEqual(Device a, Device b) {
+    if (identical(a, b)) return true;
+    return a.name == b.name &&
+        a.isOn == b.isOn &&
+        a.online == b.online &&
+        a.powerWatts == b.powerWatts &&
+        a.channel == b.channel &&
+        a.roomId == b.roomId &&
+        a.type == b.type &&
+        listEquals(a.voiceAliases, b.voiceAliases) &&
+        a.isFavorite == b.isFavorite &&
+        a.value == b.value &&
+        a.actionBoxId == b.actionBoxId &&
+        mapEquals(a.metadata, b.metadata);
+  }
+
+  static bool _isActionBoxEqual(ActionBox a, ActionBox b) {
+    if (identical(a, b)) return true;
+    if (a.name != b.name ||
+        a.online != b.online ||
+        a.subboxId != b.subboxId ||
+        a.ownerEpoch != b.ownerEpoch ||
+        a.protocolVersion != b.protocolVersion ||
+        a.roomId != b.roomId ||
+        a.firmwareVersion != b.firmwareVersion ||
+        a.boardModel != b.boardModel ||
+        a.boardRevision != b.boardRevision ||
+        !listEquals(a.capabilities, b.capabilities) ||
+        a.channels.length != b.channels.length) {
+      return false;
+    }
+    for (int i = 0; i < a.channels.length; i++) {
+      final cA = a.channels[i];
+      final cB = b.channels[i];
+      if (cA.isOn != cB.isOn ||
+          cA.name != cB.name ||
+          cA.type != cB.type ||
+          cA.channelKey != cB.channelKey ||
+          cA.configured != cB.configured) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  ChangedResources applySnapshot(Map<String, dynamic> nodes, {int? revision}) {
+    final candidateDevices = _buildCandidateDevices(nodes);
+    final candidateActionBoxes = _buildCandidateActionBoxes(nodes);
+
+    bool devicesChanged = false;
+    bool vocabularyChanged = false;
+
+    final candidateDeviceIds = <String>{};
+    for (final candidate in candidateDevices) {
+      candidateDeviceIds.add(candidate.id);
+      final existing = _deviceMap[candidate.id];
+      if (existing != null && _isDeviceEqual(existing, candidate)) {
+        // Keep the exact object reference!
+      } else {
+        if (existing == null ||
+            existing.name != candidate.name ||
+            !listEquals(existing.voiceAliases, candidate.voiceAliases)) {
+          vocabularyChanged = true;
+        }
+        _deviceMap[candidate.id] = candidate;
+        devicesChanged = true;
+      }
+    }
+
+    final removedDeviceIds = _deviceMap.keys.where((id) => !candidateDeviceIds.contains(id)).toList();
+    if (removedDeviceIds.isNotEmpty) {
+      for (final id in removedDeviceIds) {
+        _deviceMap.remove(id);
+      }
+      devicesChanged = true;
+      vocabularyChanged = true;
+    }
+
+    bool actionBoxesChanged = false;
+    final candidateBoxIds = <String>{};
+    for (final candidate in candidateActionBoxes) {
+      candidateBoxIds.add(candidate.id);
+      final existing = _actionBoxMap[candidate.id];
+      if (existing != null && _isActionBoxEqual(existing, candidate)) {
+        // Keep existing object reference!
+      } else {
+        _actionBoxMap[candidate.id] = candidate;
+        actionBoxesChanged = true;
+      }
+    }
+
+    final removedBoxIds = _actionBoxMap.keys.where((id) => !candidateBoxIds.contains(id)).toList();
+    if (removedBoxIds.isNotEmpty) {
+      for (final id in removedBoxIds) {
+        _actionBoxMap.remove(id);
+      }
+      actionBoxesChanged = true;
+    }
+
+    final currentDevices = _deviceMap.values.toList();
+    final candidateRooms = _buildRooms(currentDevices);
+    bool roomsChanged = false;
+    if (_rooms.length != candidateRooms.length) {
+      roomsChanged = true;
+    } else {
+      for (final cr in candidateRooms) {
+        final er = _rooms.where((r) => r.id == cr.id).firstOrNull;
+        if (er == null) {
+          roomsChanged = true;
+          break;
+        }
+        final oldCount = _devices.where((d) => d.roomId == cr.id).length;
+        final newCount = currentDevices.where((d) => d.roomId == cr.id).length;
+        if (oldCount != newCount) {
+          roomsChanged = true;
+          break;
+        }
+      }
+    }
+
+    final candidateScenes = _buildScenes(currentDevices);
+    bool scenesChanged = false;
+    if (_scenes.length != candidateScenes.length) {
+      scenesChanged = true;
+    } else {
+      for (int i = 0; i < candidateScenes.length; i++) {
+        if (_scenes[i].id != candidateScenes[i].id ||
+            _scenes[i].deviceCount != candidateScenes[i].deviceCount) {
+          scenesChanged = true;
+          break;
+        }
+      }
+    }
+
+    _devices = currentDevices;
+    _actionBoxes = _actionBoxMap.values.toList();
+    if (roomsChanged) _rooms = candidateRooms;
+    if (scenesChanged) _scenes = candidateScenes;
+
+    if (devicesChanged && !_deviceStreamCtrl.isClosed) {
+      _deviceStreamCtrl.add(List.unmodifiable(_devices));
+    }
+    if (roomsChanged && !_roomStreamCtrl.isClosed) {
+      _roomStreamCtrl.add(List.unmodifiable(_rooms));
+    }
+    if (actionBoxesChanged && !_actionBoxStreamCtrl.isClosed) {
+      _actionBoxStreamCtrl.add(List.unmodifiable(_actionBoxes));
+    }
+    if (vocabularyChanged && !_voiceStreamCtrl.isClosed) {
+      _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
+    }
+    if (scenesChanged && !_sceneStreamCtrl.isClosed) {
+      _sceneStreamCtrl.add(List.unmodifiable(_scenes));
+    }
+
+    return ChangedResources(
+      devicesChanged: devicesChanged,
+      roomsChanged: roomsChanged,
+      actionBoxesChanged: actionBoxesChanged,
+      vocabularyChanged: vocabularyChanged,
+      scenesChanged: scenesChanged,
+    );
+  }
+
+  ChangedResources applyEvent(String eventName, Map<String, dynamic> data) {
+    bool devicesChanged = false;
+    bool roomsChanged = false;
+    bool actionBoxesChanged = false;
+    bool vocabularyChanged = false;
+    bool scenesChanged = false;
+
+    final nodeId = (data['node_id'] ?? data['device_id'])?.toString();
+
+    switch (eventName) {
+      case 'relay_state':
+        if (nodeId != null) {
+          final rl = data['relay_state'];
+          if (rl is List) {
+            for (int i = 0; i < rl.length; i++) {
+              final chKey = 'ch${i + 1}';
+              final devId = '$nodeId::$chKey';
+              final dev = _deviceMap[devId];
+              if (dev != null) {
+                final val = rl[i];
+                final bool targetOn = (val == 1 || val == true || val == 'ON');
+                if (dev.isOn != targetOn) {
+                  _deviceMap[devId] = dev.copyWith(isOn: targetOn);
+                  devicesChanged = true;
+                }
+              }
+            }
+          } else if (data.containsKey('channel') && data.containsKey('state')) {
+            final chKey = data['channel'].toString();
+            final devId = '$nodeId::$chKey';
+            final dev = _deviceMap[devId];
+            if (dev != null) {
+              final state = data['state'];
+              final bool targetOn = (state == 1 || state == true || state == 'ON');
+              if (dev.isOn != targetOn) {
+                _deviceMap[devId] = dev.copyWith(isOn: targetOn);
+                devicesChanged = true;
+              }
+            }
+          }
+
+          final ab = _actionBoxMap[nodeId];
+          if (ab != null && devicesChanged) {
+            final newChannels = ab.channels.map((ch) {
+              final dev = _deviceMap[ch.deviceId ?? '$nodeId::${ch.channelKey}'];
+              if (dev != null && ch.isOn != dev.isOn) {
+                return ch.copyWith(isOn: dev.isOn);
+              }
+              return ch;
+            }).toList();
+            _actionBoxMap[nodeId] = ab.copyWith(channels: newChannels);
+            actionBoxesChanged = true;
+          }
+        }
+        break;
+
+      case 'node_status':
+        if (nodeId != null) {
+          if (data.containsKey('online') || data.containsKey('status')) {
+            final isOnline = data['online'] == true || data['status'] == 'online';
+            for (final dev in _deviceMap.values.where((d) => d.actionBoxId == nodeId).toList()) {
+              if (dev.online != isOnline) {
+                _deviceMap[dev.id] = dev.copyWith(online: isOnline);
+                devicesChanged = true;
+              }
+            }
+            final ab = _actionBoxMap[nodeId];
+            if (ab != null && ab.online != isOnline) {
+              _actionBoxMap[nodeId] = ab.copyWith(online: isOnline);
+              actionBoxesChanged = true;
+            }
+          }
+          if (data.containsKey('relay_state') && data['relay_state'] is List) {
+            final rl = data['relay_state'] as List;
+            for (int i = 0; i < rl.length; i++) {
+              final chKey = 'ch${i + 1}';
+              final devId = '$nodeId::$chKey';
+              final dev = _deviceMap[devId];
+              if (dev != null) {
+                final val = rl[i];
+                final bool targetOn = (val == 1 || val == true || val == 'ON');
+                if (dev.isOn != targetOn) {
+                  _deviceMap[devId] = dev.copyWith(isOn: targetOn);
+                  devicesChanged = true;
+                }
+              }
+            }
+          }
+        }
+        break;
+
+      case 'node_telemetry':
+        if (nodeId != null) {
+          final p = readNumber(data['power'] ?? data['power_w'] ?? data['telemetry']?['power'] ?? data['telemetry']?['power_w']);
+          if (data['channels'] is Map) {
+            final chMap = asMap(data['channels']);
+            for (final entry in chMap.entries) {
+              final chKey = entry.key;
+              final chData = asMap(entry.value);
+              final chPower = readNumber(chData['power'] ?? chData['power_w'] ?? chData['telemetry']?['power']);
+              final devId = '$nodeId::$chKey';
+              final dev = _deviceMap[devId];
+              if (dev != null && chPower != null && dev.powerWatts != chPower) {
+                _deviceMap[devId] = dev.copyWith(powerWatts: chPower);
+                devicesChanged = true;
+              }
+            }
+          } else if (p != null) {
+            final chKey = data['channel']?.toString() ?? 'ch1';
+            final devId = '$nodeId::$chKey';
+            final dev = _deviceMap[devId];
+            if (dev != null && dev.powerWatts != p) {
+              _deviceMap[devId] = dev.copyWith(powerWatts: p);
+              devicesChanged = true;
+            }
+          }
+        }
+        break;
+
+      case 'device_deleted':
+        if (nodeId != null) {
+          final removedDevIds = _deviceMap.values
+              .where((d) => d.id == nodeId || d.actionBoxId == nodeId)
+              .map((d) => d.id)
+              .toList();
+          if (removedDevIds.isNotEmpty) {
+            for (final id in removedDevIds) {
+              _deviceMap.remove(id);
+            }
+            devicesChanged = true;
+            roomsChanged = true;
+            vocabularyChanged = true;
+            scenesChanged = true;
+          }
+          if (_actionBoxMap.containsKey(nodeId)) {
+            _actionBoxMap.remove(nodeId);
+            actionBoxesChanged = true;
+          }
+        }
+        break;
+
+      case 'device_claimed':
+      case 'operation_updated':
+      case 'device_rebooted':
+        return applySnapshot(gateway.nodes);
+
+      default:
+        break;
+    }
+
+    if (devicesChanged) {
+      _devices = _deviceMap.values.toList();
+      _deviceStreamCtrl.add(List.unmodifiable(_devices));
+
+      final newScenes = _buildScenes(_devices);
+      bool sChanged = _scenes.length != newScenes.length;
+      if (!sChanged) {
+        for (int i = 0; i < newScenes.length; i++) {
+          if (_scenes[i].id != newScenes[i].id || _scenes[i].deviceCount != newScenes[i].deviceCount) {
+            sChanged = true;
+            break;
+          }
+        }
+      }
+      if (sChanged) {
+        _scenes = newScenes;
+        scenesChanged = true;
+        if (!_sceneStreamCtrl.isClosed) {
+          _sceneStreamCtrl.add(List.unmodifiable(_scenes));
+        }
+      }
+    }
+
+    if (actionBoxesChanged) {
+      _actionBoxes = _actionBoxMap.values.toList();
+      if (!_actionBoxStreamCtrl.isClosed) {
+        _actionBoxStreamCtrl.add(List.unmodifiable(_actionBoxes));
+      }
+    }
+
+    if (roomsChanged) {
+      _rooms = _buildRooms(_devices);
+      if (!_roomStreamCtrl.isClosed) {
+        _roomStreamCtrl.add(List.unmodifiable(_rooms));
+      }
+    }
+
+    if (vocabularyChanged) {
+      if (!_voiceStreamCtrl.isClosed) {
+        _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
+      }
+    }
+
+    return ChangedResources(
+      devicesChanged: devicesChanged,
+      roomsChanged: roomsChanged,
+      actionBoxesChanged: actionBoxesChanged,
+      vocabularyChanged: vocabularyChanged,
+      scenesChanged: scenesChanged,
+    );
+  }
+
+  List<Device> _buildCandidateDevices(Map<String, dynamic> nodes) {
     final list = <Device>[];
-    for (final entry in gateway.nodes.entries) {
+    for (final entry in nodes.entries) {
       final nodeId = entry.key;
       final node = asMap(entry.value);
-      final nodeOnline = (node['status'] == 'online') || (node['is_online'] == true);
+      final nodeOnline = gateway.connected &&
+          ((node['status'] == 'online') || (node['is_online'] == true));
       final rawRl = node['relay_state'];
       final List<dynamic> rlList = rawRl is List ? rawRl : const [0, 0];
       final nodeRoom = (node['room'] ?? '').toString();
@@ -158,8 +604,11 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       final pzem = asMap(node['pzem']).isNotEmpty ? asMap(node['pzem']) : asMap(node['last_telemetry']);
       final double powerWatts = readNumber(pzem['power']) ?? 0.0;
 
+      final boardModel = (node['board_model'] ?? node['hardware'] ?? '').toString().toLowerCase();
       final has3Ch = channelsMap.containsKey('ch3') ||
           rlList.length >= 3 ||
+          boardModel.contains('actionbox_v2') ||
+          boardModel.contains('v2') ||
           (node['capabilities'] is List && (node['capabilities'] as List).contains('relay_3ch'));
       final channelKeys = has3Ch ? const ['ch1', 'ch2', 'ch3'] : const ['ch1', 'ch2'];
       for (int i = 0; i < channelKeys.length; i++) {
@@ -180,14 +629,14 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         final aliases = rawAliases is List ? rawAliases.map((a) => a.toString()).toList() : <String>[];
         final devId = '$nodeId::$chKey';
 
-        final chPowerRaw = readNumber(chInfo['power'] ?? chInfo['power_w']);
-        final double channelPower;
-        if (chPowerRaw != null) {
+        final chPowerRaw = readNumber(chInfo['power'] ?? chInfo['power_w'] ?? asMap(chInfo['telemetry'])['power_w'] ?? asMap(chInfo['telemetry'])['power']);
+        final double? channelPower;
+        if (chPowerRaw != null && chPowerRaw > 0) {
           channelPower = chPowerRaw;
-        } else if (i == 0) {
+        } else if (i == 0 && powerWatts > 0) {
           channelPower = powerWatts;
         } else {
-          channelPower = 0.0;
+          channelPower = null;
         }
 
         list.add(Device(
@@ -199,7 +648,8 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
           channel: chKey,
           online: nodeOnline,
           isOn: isOn,
-          value: channelPower > 0 ? channelPower : 0.0,
+          value: 0.0,
+          powerWatts: channelPower,
           voiceAliases: aliases,
           isFavorite: _favoriteIds.contains(devId),
           metadata: {
@@ -209,7 +659,8 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
             'ip': node['ip'] ?? '',
             'can_dim': false,
             'can_speed': false,
-            'power': channelPower,
+            'has_thermostat': false,
+            'power': channelPower ?? 0.0,
             'voltage': i == 0 ? readNumber(pzem['voltage']) : null,
             'current': i == 0 ? readNumber(pzem['current']) : null,
             'energy': i == 0 ? readNumber(pzem['energy']) : null,
@@ -237,12 +688,13 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     }).toList();
   }
 
-  List<ActionBox> _buildActionBoxes() {
+  List<ActionBox> _buildCandidateActionBoxes(Map<String, dynamic> nodes) {
     final list = <ActionBox>[];
-    for (final entry in gateway.nodes.entries) {
+    for (final entry in nodes.entries) {
       final nodeId = entry.key;
       final node = asMap(entry.value);
-      final nodeOnline = (node['status'] == 'online') || (node['is_online'] == true);
+      final nodeOnline = gateway.connected &&
+          ((node['status'] == 'online') || (node['is_online'] == true));
       final rawRl = node['relay_state'];
       final List<dynamic> rlList = rawRl is List ? rawRl : const [0, 0];
       final nodeRoom = (node['room'] ?? '').toString();
@@ -282,9 +734,16 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         roomId: nodeRoom,
         online: nodeOnline,
         channels: channels,
-        firmwareVersion: node['fw'] ?? node['firmware_version'] ?? 'v1.2.0-esp32s3',
+        firmwareVersion: node['fw'] ?? node['firmware_version'] ?? 'v2.1.0-esp32s3',
         ipAddress: node['ip'] ?? (gateway.serverUrl.isNotEmpty ? Uri.tryParse(gateway.serverUrl)?.host ?? '192.168.11.181' : '192.168.11.181'),
         signalStrength: readNumber(node['rssi'])?.toInt() ?? -62,
+        boardModel: node['board_model'] ?? node['model'] ?? 'actionbox_v2',
+        boardRevision: node['board_revision'] ?? 'v2.1',
+        subboxId: node['subbox_id'] ?? node['parent_subbox'],
+        ownerEpoch: readNumber(node['owner_epoch'])?.toInt() ?? 1,
+        capabilities: (node['capabilities'] as List?)?.map((e) => e.toString()).toList() ?? const ['relay', 'energy_meter'],
+        protocolVersion: readNumber(node['protocol_version'])?.toInt() ?? 2,
+        metadata: Map<String, dynamic>.from(node),
       ));
     }
     return list;
@@ -369,7 +828,12 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   };
 
   @override
-  Future<List<Device>> getDevices() async => List.unmodifiable(_devices);
+  Future<List<Device>> getDevices() async {
+    if (_currentFavoritesLoad != null) {
+      await _currentFavoritesLoad;
+    }
+    return List.unmodifiable(_devices);
+  }
 
   @override
   Stream<List<Device>> watchDevices() {
@@ -380,7 +844,15 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   }
 
   @override
+  Map<String, Device> get deviceMap => Map.unmodifiable(_deviceMap);
+
+  Map<String, ActionBox> get actionBoxMap => Map.unmodifiable(_actionBoxMap);
+
+  @override
   Future<void> toggleDevice(String id, bool isOn) async {
+    if (!gateway.connected) {
+      throw const GatewayException('Không thể gửi lệnh khi Gateway đang ngoại tuyến');
+    }
     final parts = id.split('::');
     if (parts.length != 2) return;
     final nodeId = parts[0];
@@ -401,12 +873,29 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
   @override
   Future<void> toggleFavorite(String id) async {
+    if (_currentFavoritesLoad != null) {
+      await _currentFavoritesLoad;
+    }
     if (_favoriteIds.contains(id)) {
       _favoriteIds.remove(id);
     } else {
       _favoriteIds.add(id);
     }
-    _syncFromGateway();
+    if (gateway.authenticated) {
+      await preferencesService.saveFavoriteIds(
+        _favoriteIds,
+        gatewayUrl: gateway.serverUrl,
+        userId: gateway.currentUserId,
+      );
+    }
+    final dev = _deviceMap[id];
+    if (dev != null) {
+      _deviceMap[id] = dev.copyWith(isFavorite: _favoriteIds.contains(id));
+      _devices = _deviceMap.values.toList();
+      if (!_deviceStreamCtrl.isClosed) {
+        _deviceStreamCtrl.add(List.unmodifiable(_devices));
+      }
+    }
   }
 
   @override
@@ -531,12 +1020,14 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   }
 
   @override
-  Future<List<Scene>> getScenes() async => _buildScenes(_devices);
+  Future<List<Scene>> getScenes() async => List.unmodifiable(_scenes.isNotEmpty ? _scenes : _buildScenes(_devices));
 
   @override
   Stream<List<Scene>> watchScenes() {
     scheduleMicrotask(() {
-      if (!_sceneStreamCtrl.isClosed) _sceneStreamCtrl.add(List.unmodifiable(_buildScenes(_devices)));
+      if (!_sceneStreamCtrl.isClosed) {
+        _sceneStreamCtrl.add(List.unmodifiable(_scenes.isNotEmpty ? _scenes : _buildScenes(_devices)));
+      }
     });
     return _sceneStreamCtrl.stream;
   }
@@ -588,14 +1079,15 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     final cleanAlias = alias.trim().toLowerCase();
     if (cleanAlias.isEmpty) return;
 
-    final devIdx = _devices.indexWhere((d) => d.id == deviceId);
-    if (devIdx == -1) return;
-    final dev = _devices[devIdx];
+    final dev = _deviceMap[deviceId];
+    if (dev == null) return;
     if (dev.voiceAliases.contains(cleanAlias)) return;
 
     final previousAliases = List<String>.from(dev.voiceAliases);
     final updatedAliases = List<String>.from(dev.voiceAliases)..add(cleanAlias);
-    _devices[devIdx] = dev.copyWith(voiceAliases: updatedAliases);
+    _deviceMap[deviceId] = dev.copyWith(voiceAliases: updatedAliases);
+    _devices = _deviceMap.values.toList();
+    if (!_deviceStreamCtrl.isClosed) _deviceStreamCtrl.add(List.unmodifiable(_devices));
     if (!_voiceStreamCtrl.isClosed) _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
 
     try {
@@ -607,10 +1099,11 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         alias: cleanAlias,
       );
     } catch (e) {
-
-      final rollbackIdx = _devices.indexWhere((d) => d.id == deviceId);
-      if (rollbackIdx != -1) {
-        _devices[rollbackIdx] = _devices[rollbackIdx].copyWith(voiceAliases: previousAliases);
+      final currentDev = _deviceMap[deviceId];
+      if (currentDev != null) {
+        _deviceMap[deviceId] = currentDev.copyWith(voiceAliases: previousAliases);
+        _devices = _deviceMap.values.toList();
+        if (!_deviceStreamCtrl.isClosed) _deviceStreamCtrl.add(List.unmodifiable(_devices));
         if (!_voiceStreamCtrl.isClosed) {
           _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
         }
@@ -624,13 +1117,14 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     final cleanAlias = alias.trim().toLowerCase();
     if (cleanAlias.isEmpty) return;
 
-    final devIdx = _devices.indexWhere((d) => d.id == deviceId);
-    if (devIdx == -1) return;
-    final dev = _devices[devIdx];
+    final dev = _deviceMap[deviceId];
+    if (dev == null) return;
 
     final previousAliases = List<String>.from(dev.voiceAliases);
     final updatedAliases = List<String>.from(dev.voiceAliases)..remove(cleanAlias);
-    _devices[devIdx] = dev.copyWith(voiceAliases: updatedAliases);
+    _deviceMap[deviceId] = dev.copyWith(voiceAliases: updatedAliases);
+    _devices = _deviceMap.values.toList();
+    if (!_deviceStreamCtrl.isClosed) _deviceStreamCtrl.add(List.unmodifiable(_devices));
     if (!_voiceStreamCtrl.isClosed) _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
 
     try {
@@ -642,10 +1136,11 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         alias: cleanAlias,
       );
     } catch (e) {
-
-      final rollbackIdx = _devices.indexWhere((d) => d.id == deviceId);
-      if (rollbackIdx != -1) {
-        _devices[rollbackIdx] = _devices[rollbackIdx].copyWith(voiceAliases: previousAliases);
+      final currentDev = _deviceMap[deviceId];
+      if (currentDev != null) {
+        _deviceMap[deviceId] = currentDev.copyWith(voiceAliases: previousAliases);
+        _devices = _deviceMap.values.toList();
+        if (!_deviceStreamCtrl.isClosed) _deviceStreamCtrl.add(List.unmodifiable(_devices));
         if (!_voiceStreamCtrl.isClosed) {
           _voiceStreamCtrl.add(List.unmodifiable(_buildVocabulary(_devices)));
         }
@@ -656,6 +1151,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
   @override
   void dispose() {
+    _eventSub?.cancel();
     gateway.removeListener(_syncFromGateway);
     _deviceStreamCtrl.close();
     _roomStreamCtrl.close();
@@ -674,14 +1170,17 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
   final _sceneStreamCtrl = StreamController<List<Scene>>.broadcast();
   final _voiceStreamCtrl = StreamController<List<VoiceVocabularyItem>>.broadcast();
 
-  List<Room> _rooms = [
+  @override
+  Map<String, Device> get deviceMap => {for (final d in _devices) d.id: d};
+
+  final List<Room> _rooms = [
     const Room(id: 'living_room', name: 'Phòng khách', icon: Icons.weekend_rounded, temperature: 27.5, humidity: 65),
     const Room(id: 'bedroom', name: 'Phòng ngủ', icon: Icons.bed_rounded, temperature: 26.0, humidity: 60),
     const Room(id: 'kitchen', name: 'Nhà bếp', icon: Icons.kitchen_rounded, temperature: 28.2, humidity: 70),
     const Room(id: 'office', name: 'Phòng làm việc', icon: Icons.desk_rounded, temperature: 25.5, humidity: 55),
   ];
 
-  List<Device> _devices = [
+  final List<Device> _devices = [
     const Device(
       id: 'dev_light_living',
       name: 'Đèn trần phòng khách',
@@ -717,7 +1216,8 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       channel: 'ch3',
       online: true,
       isOn: true,
-      value: 120.5,
+      value: 0.0,
+      powerWatts: 120.5,
       isFavorite: true,
       voiceAliases: ['ổ cắm máy tính', 'ổ cắm bàn'],
     ),
@@ -731,6 +1231,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       value: 24.0,
       isFavorite: true,
       voiceAliases: ['điều hòa phòng ngủ', 'máy lạnh'],
+      metadata: {'has_thermostat': true},
     ),
     const Device(
       id: 'dev_light_bed',
@@ -744,6 +1245,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       value: 50.0,
       isFavorite: true,
       voiceAliases: ['đèn ngủ', 'đèn đầu giường'],
+      metadata: {'can_dim': true},
     ),
     const Device(
       id: 'dev_fan_bed',
@@ -757,6 +1259,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       value: 1.0,
       isFavorite: false,
       voiceAliases: ['quạt phòng ngủ'],
+      metadata: {'can_speed': true},
     ),
     const Device(
       id: 'dev_kitchen_light',
@@ -765,7 +1268,7 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       roomId: 'kitchen',
       online: true,
       isOn: false,
-      value: 100.0,
+      value: 0.0,
       isFavorite: false,
       voiceAliases: ['đèn bếp', 'đèn nấu ăn'],
     ),
@@ -776,13 +1279,14 @@ class InMemorySmartHomeRepository implements SmartHomeRepository {
       roomId: 'kitchen',
       online: true,
       isOn: true,
-      value: 850.0,
+      value: 0.0,
+      powerWatts: 850.0,
       isFavorite: false,
       voiceAliases: ['ổ cắm lò', 'ổ cắm bếp'],
     ),
   ];
 
-  List<ActionBox> _actionBoxes = [
+  final List<ActionBox> _actionBoxes = [
     const ActionBox(
       id: 'ab_01',
       name: 'ActionBox 1 (Phòng khách)',

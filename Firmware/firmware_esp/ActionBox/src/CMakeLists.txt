@@ -7,6 +7,8 @@ idf_component_register(
     SRCS ${app_sources}
     INCLUDE_DIRS
         "."
+        "common"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
         "config"
         "drivers/relay"
         "drivers/current_sensor"

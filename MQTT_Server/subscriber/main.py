@@ -7,6 +7,8 @@ import psycopg2
 MQTT_BROKER = os.getenv("MQTT_BROKER", "mosquitto")
 MQTT_PORT = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "esp32/sensor/data")
+MQTT_USER = os.getenv("MQTT_USER")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 
 DB_HOST = os.getenv("DB_HOST", "postgres")
 DB_PORT = int(os.getenv("DB_PORT", 5432))
@@ -93,6 +95,8 @@ def on_message(client, userdata, msg):
         print(f" ❌ Lỗi xử lý tin nhắn: {e}")
 
 client = mqtt.Client("MQTT_DB_Subscriber")
+if MQTT_USER and MQTT_PASSWORD:
+    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
 client.on_connect = on_connect
 client.on_message = on_message
 

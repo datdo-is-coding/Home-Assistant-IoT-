@@ -339,7 +339,7 @@ static void voice_capture_task(void *pvParameters) {
                 s_latest_rms = sqrtf((float)energy);
 
                 if (++diagnostic_counter % 400 == 0) {
-                    ESP_LOGI(TAG, "Capture VAD: Stream=%d | RMS=%.0f | Energy=%lld | Cooldown=%lu",
+                    ESP_LOGD(TAG, "Capture VAD: Stream=%d | RMS=%.0f | Energy=%lld | Cooldown=%lu",
                              s_is_streaming, s_latest_rms, (long long)energy, (unsigned long)s_cooldown_frames);
                 }
 

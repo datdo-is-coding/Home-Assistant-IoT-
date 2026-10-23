@@ -9,6 +9,7 @@
 #include "device_manager.h"
 #include "espnow_transport.h"
 #include "hc_runtime.h"
+#include "registration.h"
 #include "nvs_storage.h"
 
 #include <string.h>
@@ -115,12 +116,29 @@ static void network_task(void *pvParameters) {
 
             if (hc_runtime_enabled()) continue;
 
+            // Audio and keyword packets from other ActionBoxes are binary, not commands.
+            if (rx_pkt.len == sizeof(ClaimFrame) && rx_pkt.payload[0] == CLAIM_FRAME) {
+                ClaimFrame claim; memcpy(&claim, rx_pkt.payload, sizeof(claim));
+                ClaimReceipt receipt{};
+                if (registration_apply(rx_pkt.mac, claim, receipt))
+                    espnow_transport_send_to(rx_pkt.mac, reinterpret_cast<const uint8_t*>(&receipt), sizeof(receipt));
+                continue;
+            }
+            if (rx_pkt.len == 0 || rx_pkt.payload[0] != '{') continue;
+
             char json_buf[512];
             size_t copy_len = (rx_pkt.len < sizeof(json_buf) - 1) ? rx_pkt.len : (sizeof(json_buf) - 1);
             memcpy(json_buf, rx_pkt.payload, copy_len);
             json_buf[copy_len] = '\0';
 
-            if (strstr(json_buf, "\"heartbeat\"") != NULL || strstr(json_buf, "\"subbox_id\"") != NULL) {
+            cJSON* heartbeat = cJSON_Parse(json_buf);
+            const cJSON* hb_type = heartbeat ? cJSON_GetObjectItemCaseSensitive(heartbeat,"type") : nullptr;
+            const cJSON* hb_version = heartbeat ? cJSON_GetObjectItemCaseSensitive(heartbeat,"protocol_version") : nullptr;
+            const bool is_heartbeat = cJSON_IsString(hb_type) && strcmp(hb_type->valuestring,"heartbeat")==0 &&
+                cJSON_IsNumber(hb_version) && hb_version->valueint==3;
+            const bool setup_open = cJSON_IsTrue(heartbeat ? cJSON_GetObjectItemCaseSensitive(heartbeat,"setup") : nullptr);
+            cJSON_Delete(heartbeat);
+            if (is_heartbeat) {
                 if (espnow_transport_is_paired()) {
                     uint8_t paired_mac[6] = {0};
                     if (espnow_transport_get_subbox_mac(paired_mac) && memcmp(rx_pkt.mac, paired_mac, 6) != 0) {
@@ -128,11 +146,11 @@ static void network_task(void *pvParameters) {
                                  rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
                         continue;
                     }
-                } else if (espnow_transport_is_pairing_mode()) {
+                } else if (espnow_transport_is_pairing_mode() && setup_open) {
                     ESP_LOGI(TAG, "Pairing mode active: pairing with SubBox MAC %02X:%02X:%02X:%02X:%02X:%02X",
                              rx_pkt.mac[0], rx_pkt.mac[1], rx_pkt.mac[2], rx_pkt.mac[3], rx_pkt.mac[4], rx_pkt.mac[5]);
-                    espnow_transport_pair_subbox(rx_pkt.mac);
-                    espnow_transport_set_pairing_mode(false);
+                    if (espnow_transport_pair_subbox(rx_pkt.mac) != ESP_OK) continue;
+                    // Discovery does not commit ownership or close the setup window.
                 } else {
                     ESP_LOGD(TAG, "Heartbeat ignored: ActionBox not paired and pairing mode inactive");
                     continue;
@@ -158,6 +176,7 @@ static void network_task(void *pvParameters) {
                 continue;
             }
 
+            if (!nvs_storage_is_claimed() || !espnow_transport_is_paired_subbox(rx_pkt.mac)) continue;
             ActionBoxCommand cmd;
             esp_err_t err = protocol_parse_command(json_buf, &cmd);
             if (err == ESP_OK) {
@@ -219,16 +238,38 @@ static void telemetry_task(void *pvParameters) {
 
     while (1) {
 
-        const bool fault = relay_get_fault(1) != RELAY_FAULT_NONE || relay_get_fault(2) != RELAY_FAULT_NONE;
-        const int code = fault ? 4 : (hc_runtime_enabled() ? (hc_runtime_online()?0:1) : (safety_is_network_timed_out() ? 1 : s_upstream_error.load()));
-        static int previous = -1;
-        if (code != previous) {
-            previous = code;
-            const char* labels[] = {"READY", "SUBBOX_MISSING", "SUBBOX_WIFI_OFFLINE", "GATEWAY_MQTT_OFFLINE", "RELAY_FAULT"};
-            ESP_LOGI(TAG, "LED1 code=%d %s", code, labels[code]);
+        bool fault = false;
+        for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ch++) {
+            if (relay_get_fault(ch) != RELAY_FAULT_NONE) {
+                fault = true;
+                break;
+            }
         }
-        led_set_pattern(1, code == 0 ? LED_PATTERN_BLINK_FAST : static_cast<LedPattern>(LED_PATTERN_ERROR_1 + code - 1));
 
+        ArmedKind armed = device_manager_get_armed_kind();
+        bool is_claimed = device_manager_is_claimed();
+
+        ::LedPattern p1;
+        if (fault) {
+            p1 = ::LedPattern::FAULT;
+        } else if (armed == ArmedKind::FACTORY_RESET) {
+            p1 = ::LedPattern::AWAITING_FACTORY_RESET;
+        } else if (armed == ArmedKind::NETWORK_RESET) {
+            p1 = ::LedPattern::AWAITING_NETWORK_RESET;
+        } else if (espnow_transport_is_pairing_mode()) {
+            p1 = ::LedPattern::CLAIMING;
+        } else if (!is_claimed) {
+            p1 = ::LedPattern::UNCLAIMED;
+        } else {
+            const int code = (hc_runtime_enabled() ? (hc_runtime_online() ? 0 : 1) : (safety_is_network_timed_out() ? 1 : s_upstream_error.load()));
+            if (code == 0) {
+                p1 = ::LedPattern::READY;
+            } else {
+                p1 = ::LedPattern::OFFLINE;
+            }
+        }
+
+        led_set_pattern(1, p1);
         led_driver_tick();
 
         TickType_t now = xTaskGetTickCount();
@@ -239,10 +280,20 @@ static void telemetry_task(void *pvParameters) {
                 espnow_transport_hop_channel();
             }
 
+            if (!hc_runtime_enabled() && espnow_transport_is_pairing_mode() && !is_claimed) {
+                char setup[250];
+                const char* uid = protocol_get_hardware_uid();
+                int length=snprintf(setup,sizeof(setup),
+                    "{\"type\":\"SETUP\",\"protocol_version\":3,\"hardware_uid\":\"%s\",\"node_id\":\"AB%s\",\"config_version\":%lu,\"setup_session\":%lu,\"setup_remaining_ms\":%lu,\"channel_count\":3}",
+                    uid,uid,(unsigned long)nvs_storage_get_cached_config()->config_version,
+                    (unsigned long)espnow_transport_setup_session(),(unsigned long)espnow_transport_setup_remaining_ms());
+                if(length>0 && length<(int)sizeof(setup)) espnow_transport_send((const uint8_t*)setup,length);
+            }
+
             char telem_json[APP_TELEMETRY_BUFFER_SIZE];
             if (!hc_runtime_enabled() && protocol_serialize_telemetry(telem_json, sizeof(telem_json)) == ESP_OK) {
                 espnow_transport_send((const uint8_t*)telem_json, strlen(telem_json));
-                ESP_LOGI(TAG, "Telemetry: %s", telem_json);
+                ESP_LOGD(TAG, "Telemetry: %s", telem_json);
             }
         }
 

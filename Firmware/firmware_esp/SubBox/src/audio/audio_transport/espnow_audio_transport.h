@@ -22,18 +22,24 @@ public:
     bool init() override;
     bool sendAudio(const char* target_node_id, const AudioPacket& packet) override;
     bool sendCommand(const char* target_node_id, const std::string& json_cmd, std::string* response = nullptr) override;
+    bool claimDevice(const std::string& request, std::string& receipt) override;
     void registerJsonCallback(std::function<void(const std::string&)> callback) override;
     void registerRxCallback(std::function<void(const AudioPacket&)> callback) override;
     void stop() override;
     bool isRunning() const override { return m_running; }
 
-    bool isPairingDiscoveryActive() const { return m_pairing_discovery || SecurityConfig::physicalPresence(); }
+    bool isPairingDiscoveryActive() const { return m_pairing_discovery || SecurityConfig::physicalPresence() || SecurityConfig::isPairingAllowed(); }
     void setPairingDiscovery(bool enable) { m_pairing_discovery = enable; }
 
     static EspNowAudioTransport* getInstance() { return s_instance; }
 
 private:
     bool m_pairing_discovery = false;
+    struct Candidate { uint32_t session; int64_t expires_us; };
+    std::map<std::string, Candidate> m_candidates;
+    std::vector<RegisteredPeer> m_registered_peers;
+    std::string m_claim_operation;
+    ClaimReceipt m_claim_receipt{};
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
     static void onEspNowSend(const wifi_tx_info_t *tx_info, esp_now_send_status_t status);
 #else

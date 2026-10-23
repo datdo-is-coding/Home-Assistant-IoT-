@@ -251,3 +251,97 @@ class AudioRelayTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class RegisteredRelayTests(unittest.IsolatedAsyncioTestCase):
+    def make_server(self, parent='SB1', status='online', pending=False):
+        self.nodes = {
+            'SB1': {'status': 'online'},
+            'AB1': {'status': status, 'subbox_id': parent, 'owner_epoch': 6, 'room': 'bedroom'},
+            'AB2': {'status': 'online', 'subbox_id': 'SB1', 'owner_epoch': 2, 'room': 'kitchen'},
+        }
+        registry = SimpleNamespace(
+            get_all_nodes=lambda: self.nodes,
+            get_pending=lambda: {'AB1': {}} if pending else {},
+            on_hello=lambda *a, **k: {'node_id': 'SB1', 'action': 'known'},
+            get_provision_payload=lambda *a: {},
+        )
+        server = AudioServer(SimpleNamespace(registry=registry))
+        server._process_audio = AsyncMock()
+        return server
+
+    def messages(self, source='AB1'):
+        return [json.dumps({'t': 'hello', 'id': 'SB1', 'speaker': True, 'audio_relay': True}),
+                json.dumps({'type': 'start', 'node_id': source, 'audio_relay': True, 'speaker': False}),
+                b'\x10\x00'*160, json.dumps({'type': 'stop'})]
+
+    async def test_registered_children_keep_source_and_parent_speaker_identity(self):
+        server = self.make_server()
+        ws = Socket(self.messages())
+        await server._handle_client(ws)
+        server._process_audio.assert_awaited_once()
+        self.assertEqual(server._process_audio.call_args.kwargs['client_node_id'], 'AB1')
+        self.assertEqual(server._process_audio.call_args.kwargs['detected_room'], 'bedroom')
+        self.assertEqual(ws.client_node_id, 'SB1')
+        self.assertEqual(ws.node_id, 'SB1')
+        self.assertTrue(ws.has_speaker)
+        await server._send_pcm_stream(ws, b'\x00\x00'*160)
+        self.assertTrue(any(isinstance(m,bytes) for m in ws.sent))
+
+    async def test_unknown_foreign_pending_or_revoked_source_is_rejected(self):
+        for parent,status,pending,source in [('SB2','online',False,'AB1'),
+                                             ('SB1','online',False,'unknown'),
+                                             ('SB1','NEEDS_REPROVISION',False,'AB1'),
+                                             ('SB1','online',True,'AB1')]:
+            with self.subTest(parent=parent,status=status,pending=pending,source=source):
+                server=self.make_server(parent,status,pending)
+                ws=Socket(self.messages(source))
+                await server._handle_client(ws)
+                server._process_audio.assert_not_awaited()
+                self.assertTrue(any(isinstance(m,dict) and m.get('error')=='forbidden' for m in ws.sent))
+
+    async def test_ownership_changed_mid_recording_prevents_execution(self):
+        server=self.make_server()
+        owner=self
+        class RevokedSocket(Socket):
+            async def __anext__(self):
+                message=await super().__anext__()
+                if isinstance(message,str) and json.loads(message).get('type')=='stop':
+                    owner.nodes['AB1']['owner_epoch']=7
+                return message
+        ws=RevokedSocket(self.messages())
+        await server._handle_client(ws)
+        server._process_audio.assert_not_awaited()
+
+class VoiceReplyFormatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancel_and_unknown_reply_are_pcm_not_encoded_audio(self):
+        from main import SmartHomeGateway
+        from dialog_manager import DialogManager
+        for phrase in ('hủy', 'xin chào'):
+            with self.subTest(phrase=phrase):
+                gateway=SmartHomeGateway.__new__(SmartHomeGateway)
+                gateway.dialog=DialogManager()
+                gateway.intent=IntentEngine()
+                gateway.tts=SimpleNamespace(synthesize=AsyncMock(return_value=b'RIFFencoded-wave'),
+                                            synthesize_pcm=AsyncMock(return_value=b'\x01\x00'*160))
+                gateway.broadcast_event=Mock()
+                result=await gateway.process_voice_command(phrase,client_node_id='AB1')
+                self.assertEqual(result['tts_audio'],b'\x01\x00'*160)
+                gateway.tts.synthesize.assert_not_awaited()
+
+    async def test_local_tts_is_initialized_before_audio_server_accepts_speech(self):
+        from main import SmartHomeGateway
+        from unittest.mock import patch
+        import config
+        gateway=SmartHomeGateway.__new__(SmartHomeGateway)
+        gateway.registry=SimpleNamespace(inventory_for_prompt=lambda:'')
+        gateway.asr=SimpleNamespace(initialize=Mock())
+        warmed=[]
+        async def initialize():warmed.append(True)
+        async def start_audio():
+            self.assertTrue(warmed)
+            raise RuntimeError('stop after readiness check')
+        gateway.tts=SimpleNamespace(vieneu=SimpleNamespace(initialize=initialize))
+        gateway.audio_server=SimpleNamespace(start=start_audio)
+        with patch.object(config,'TTS_PROVIDER','vieneu'):
+            with self.assertRaisesRegex(RuntimeError,'readiness check'):
+                await gateway.start()

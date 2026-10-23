@@ -45,6 +45,7 @@ void main() {
     await tester.pumpWidget(const DTVEnergyApp());
     expect(find.text('Ngôi nhà của bạn'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Kết nối'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).first, '');
     await tester.tap(find.widgetWithText(FilledButton, 'Kết nối'));
     await tester.pump();
     expect(find.text('Nhập địa chỉ Gateway'), findsOneWidget);

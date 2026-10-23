@@ -224,6 +224,29 @@ void TaskManager::commandTask(void* pvParameters) {
             if (item.gateway_command[0]) {
                 cJSON* root = cJSON_Parse(item.gateway_command);
                 if (root) {
+                    const cJSON* command=cJSON_GetObjectItem(root,"cmd");
+                    if(cJSON_IsString(command) && strcmp(command->valuestring,"claim")==0) {
+                        std::string receipt;
+                        if(self->m_transport->claimDevice(item.gateway_command,receipt)) {
+                            if(self->m_mqtt) self->m_mqtt->publishEvent("actionbox",receipt);
+                        } else {
+                            const auto* uid=cJSON_GetObjectItem(root,"device_uid");
+                            const auto* op=cJSON_GetObjectItem(root,"op_id");
+                            if(cJSON_IsString(uid) && strlen(uid->valuestring)==14 && cJSON_IsString(op)) {
+                                cJSON* failure=cJSON_CreateObject();
+                                cJSON_AddStringToObject(failure,"type","CLAIM_FAILED");
+                                cJSON_AddNumberToObject(failure,"protocol_version",3);
+                                cJSON_AddStringToObject(failure,"node_id",uid->valuestring);
+                                cJSON_AddStringToObject(failure,"hardware_uid",uid->valuestring+2);
+                                cJSON_AddStringToObject(failure,"operation_id",op->valuestring);
+                                cJSON_AddStringToObject(failure,"error_code","DEVICE_REGISTRATION_FAILED");
+                                char* encoded=cJSON_PrintUnformatted(failure);
+                                if(encoded && self->m_mqtt) self->m_mqtt->publishEvent("actionbox",encoded);
+                                cJSON_free(encoded); cJSON_Delete(failure);
+                            }
+                        }
+                        cJSON_Delete(root); continue;
+                    }
                     const cJSON* id = cJSON_GetObjectItem(root, "node_id");
                     ActionBoxNode node{};
                     if (cJSON_IsString(id) && self->m_registry->findNodeById(id->valuestring, node))

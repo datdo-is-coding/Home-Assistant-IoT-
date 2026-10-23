@@ -221,7 +221,7 @@ class OTAManager:
         }
         return ticket
 
-    def validate_download_ticket(self, ticket: str, device_id: Optional[str], filename: str) -> bool:
+    def validate_download_ticket(self, ticket: str, device_id: Optional[str] = None, filename: Optional[str] = None) -> bool:
         """Validate an active download ticket."""
         if not ticket:
             return False
@@ -231,14 +231,21 @@ class OTAManager:
         if time.time() > meta.get("expires_at", 0):
             self._download_tickets.pop(ticket, None)
             return False
-        if meta.get("filename") != filename:
+        if filename is not None and meta.get("filename") != filename:
             return False
         expected_dev = meta.get("device_id")
         if expected_dev and expected_dev != "all":
-            if device_id and device_id != expected_dev:
+            if device_id is not None and device_id != expected_dev:
                 return False
-            if not device_id:
-                return False
+        return True
+
+    def consume_download_ticket(self, ticket: str) -> bool:
+        """Validate and consume a download ticket (single-use). Returns True if consumed, False otherwise."""
+        if not ticket:
+            return False
+        if not self.validate_download_ticket(ticket):
+            return False
+        self._download_tickets.pop(ticket, None)
         return True
 
     def _purge_expired_tickets(self):

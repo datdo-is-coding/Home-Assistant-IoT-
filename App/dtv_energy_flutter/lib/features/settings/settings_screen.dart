@@ -14,16 +14,33 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  bool _offlineAlerts = true;
-  bool _sensorNotifications = true;
   bool _showEngineering = false;
   String _homeName = 'My Home';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHomeName();
+  }
+
+  Future<void> _loadHomeName() async {
+    final gateway = ref.read(gatewayClientProvider);
+    final saved = await ref.read(appPreferencesServiceProvider).loadHomeName(
+      gatewayUrl: gateway.serverUrl,
+      userId: gateway.currentUserId,
+    );
+    if (mounted) {
+      setState(() => _homeName = saved);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeMode = ref.watch(themeModeProvider);
     final gateway = ref.watch(gatewayClientProvider);
+    final homeNameWatched = ref.watch(homeNameProvider);
+    final currentHomeName = homeNameWatched.isNotEmpty ? homeNameWatched : _homeName;
 
     final roomsAsync = ref.watch(roomsStreamProvider);
     final actionBoxesAsync = ref.watch(actionBoxesStreamProvider);
@@ -91,29 +108,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                           ),
                           const SizedBox(height: 14),
-                          SegmentedButton<ThemeMode>(
-                            segments: const [
-                              ButtonSegment(
-                                value: ThemeMode.light,
-                                label: Text('Sáng'),
-                                icon: Icon(Icons.light_mode_rounded, size: 16),
-                              ),
-                              ButtonSegment(
-                                value: ThemeMode.dark,
-                                label: Text('Tối'),
-                                icon: Icon(Icons.dark_mode_rounded, size: 16),
-                              ),
-                              ButtonSegment(
-                                value: ThemeMode.system,
-                                label: Text('Hệ thống'),
-                                icon: Icon(Icons.settings_suggest_rounded, size: 16),
-                              ),
-                            ],
-                            selected: {themeMode},
-                            onSelectionChanged: (Set<ThemeMode> newSelection) {
-                              HapticFeedback.lightImpact();
-                              ref.read(themeModeProvider.notifier).state = newSelection.first;
-                            },
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: SegmentedButton<ThemeMode>(
+                              segments: const [
+                                ButtonSegment(
+                                  value: ThemeMode.light,
+                                  label: Text('Sáng'),
+                                  icon: Icon(Icons.light_mode_rounded, size: 16),
+                                ),
+                                ButtonSegment(
+                                  value: ThemeMode.dark,
+                                  label: Text('Tối'),
+                                  icon: Icon(Icons.dark_mode_rounded, size: 16),
+                                ),
+                                ButtonSegment(
+                                  value: ThemeMode.system,
+                                  label: Text('Hệ thống'),
+                                  icon: Icon(Icons.settings_suggest_rounded, size: 16),
+                                ),
+                              ],
+                              selected: {themeMode},
+                              onSelectionChanged: (Set<ThemeMode> newSelection) {
+                                HapticFeedback.lightImpact();
+                                ref.read(themeModeProvider.notifier).state = newSelection.first;
+                              },
+                            ),
                           ),
                         ],
                       ),
@@ -133,7 +154,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       icon: Icons.home_rounded,
                       iconColor: const Color(0xFF1E88E5),
                       title: 'Tên ngôi nhà',
-                      subtitle: _homeName,
+                      subtitle: currentHomeName,
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => _showEditHomeNameDialog(context),
                     ),
@@ -224,46 +245,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               sliver: SliverToBoxAdapter(
                 child: _SettingsGroup(
                   children: [
-                    SwitchListTile(
-                      secondary: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE53935).withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.notification_important_rounded,
-                            size: 20, color: Color(0xFFE53935)),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.info_outline_rounded,
+                              size: 22,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Thông báo & Trạng thái hệ thống',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: theme.colorScheme.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Cảnh báo ngắt kết nối và trạng thái thiết bị được hiển thị trực tiếp theo thời gian thực (In-app Live Alerts). Tính năng thông báo đẩy nền (Push Notification) sẽ khả dụng trong phiên bản Cloud tiếp theo.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    height: 1.4,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      title: const Text('Cảnh báo thiết bị mất mạng',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Nhận thông báo khi ActionBox ngắt kết nối',
-                          style: TextStyle(fontSize: 12)),
-                      value: _offlineAlerts,
-                      onChanged: (val) {
-                        HapticFeedback.lightImpact();
-                        setState(() => _offlineAlerts = val);
-                      },
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    SwitchListTile(
-                      secondary: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFB8C00).withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.sensors_rounded,
-                            size: 20, color: Color(0xFFFB8C00)),
-                      ),
-                      title: const Text('Thông báo cảm biến',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Báo động mở cửa hoặc phát hiện bất thường',
-                          style: TextStyle(fontSize: 12)),
-                      value: _sensorNotifications,
-                      onChanged: (val) {
-                        HapticFeedback.lightImpact();
-                        setState(() => _sensorNotifications = val);
-                      },
                     ),
                   ],
                 ),
@@ -394,14 +419,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ),
         actions: [
           TextButton(
+            style: TextButton.styleFrom(minimumSize: const Size(64, 48)),
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Hủy'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(64, 48)),
             onPressed: () {
               final newName = ctrl.text.trim();
               if (newName.isNotEmpty) {
                 setState(() => _homeName = newName);
+                ref.read(homeNameProvider.notifier).updateHomeName(newName);
+                final gateway = ref.read(gatewayClientProvider);
+                ref.read(appPreferencesServiceProvider).saveHomeName(
+                  newName,
+                  gatewayUrl: gateway.serverUrl,
+                  userId: gateway.currentUserId,
+                );
               }
               Navigator.pop(ctx);
             },
@@ -776,25 +810,34 @@ class _SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return ListTile(
-      onTap: onTap,
-      leading: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: iconColor.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(12),
+    return Semantics(
+      button: true,
+      label: '$title, $subtitle',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: ListTile(
+          onTap: onTap,
+          minLeadingWidth: 24,
+          minVerticalPadding: 12,
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          title: Text(
+            title,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          subtitle: Text(
+            subtitle,
+            style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+          ),
+          trailing: trailing,
         ),
-        child: Icon(icon, color: iconColor, size: 20),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
-      ),
-      trailing: trailing,
     );
   }
 }

@@ -73,6 +73,11 @@ void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, co
             break;
         }
     }
+    if (!trusted) {
+        std::lock_guard<std::mutex> lock(s_instance->m_macs_mutex);
+        for(const auto& peer:s_instance->m_registered_peers)
+            if(memcmp(peer.mac,recv_info->src_addr,6)==0) {trusted=true;break;}
+    }
     if (!trusted && s_instance->isPairingDiscoveryActive()) {
         trusted = true;
     }
@@ -99,8 +104,19 @@ void EspNowAudioTransport::receiveTask(void* arg) {
 void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_t* data, int len) {
     if (!m_running || len <= 0) return;
 
+    if (!hc_runtime_enabled() && len==sizeof(ClaimReceipt) && data[0]==CLAIM_RECEIPT) {
+        ClaimReceipt receipt; memcpy(&receipt,data,sizeof(receipt));
+        if(receipt.version!=3 || !memchr(receipt.node_id,0,sizeof(receipt.node_id)) ||
+            !memchr(receipt.operation,0,sizeof(receipt.operation))) return;
+        std::lock_guard<std::mutex> lock(m_ack_mutex);
+        if(!m_claim_operation.empty() && m_claim_operation==receipt.operation &&
+            m_pending_node==receipt.node_id && memcmp(m_pending_mac,mac,6)==0) {
+            m_claim_receipt=receipt; xSemaphoreGive(m_ack_sem);
+        }
+        return;
+    }
     uint8_t msg_type = data[0];
-    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == 0x25);
+    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == 0x25) || (msg_type == '{');
     if (!is_known_type) return;
 
     if (msg_type == MSG_TYPE_KEYWORD_EVENT) {
@@ -207,6 +223,38 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         snprintf(expected_uid, sizeof(expected_uid), "%02X%02X%02X%02X%02X%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
         if (!cJSON_IsNumber(version) || version->valueint != 3 || !cJSON_IsString(uid) ||
             strcmp(uid->valuestring, expected_uid) != 0) { cJSON_Delete(root); return; }
+        bool registered=false;
+        { std::lock_guard<std::mutex> lock(m_macs_mutex);
+          for(const auto& peer:m_registered_peers) if(memcmp(peer.mac,mac,6)==0) {registered=true;break;} }
+        if (!registered && !SecurityConfig::isPeerTrusted(mac) && !SecurityConfig::isPairingAllowed()) {
+            ESP_LOGW(TAG, "Rejected untrusted ActionBox peer %02X:%02X:%02X:%02X:%02X:%02X (pairing not open)",
+                     mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            cJSON_Delete(root);
+            return;
+        }
+
+        const cJSON* type=cJSON_GetObjectItem(root,"type");
+        const bool setup=cJSON_IsString(type) && strcmp(type->valuestring,"SETUP")==0;
+        if(!registered && !SecurityConfig::isPeerTrusted(mac) && !setup) {cJSON_Delete(root);return;}
+        if(setup) {
+            const auto* session=cJSON_GetObjectItem(root,"setup_session");
+            const auto* remaining=cJSON_GetObjectItem(root,"setup_remaining_ms");
+            std::string canonical="AB"+std::string(expected_uid);
+            if(!SecurityConfig::isPairingAllowed() || !cJSON_IsString(node) || canonical!=node->valuestring ||
+               !cJSON_IsNumber(session) || session->valuedouble<1 || session->valuedouble>UINT32_MAX ||
+               !cJSON_IsNumber(remaining) || remaining->valuedouble<=0 || remaining->valuedouble>180000) {
+                cJSON_Delete(root);return;
+            }
+            std::lock_guard<std::mutex> lock(m_macs_mutex);
+            // Expired discoveries must not occupy slots needed by another board.
+            for(auto it=m_candidates.begin();it!=m_candidates.end();) {
+                if(it->second.expires_us<esp_timer_get_time()) {m_node_macs.erase(it->first);it=m_candidates.erase(it);}
+                else ++it;
+            }
+            if(!m_candidates.count(canonical) && m_candidates.size()>=4) {cJSON_Delete(root);return;}
+            m_candidates[canonical]={static_cast<uint32_t>(session->valuedouble),
+                esp_timer_get_time()+static_cast<int64_t>(remaining->valuedouble)*1000};
+        }
         if (cJSON_IsString(node) && strlen(node->valuestring) < 32) {
             {
                 std::lock_guard<std::mutex> lock(m_macs_mutex);
@@ -300,6 +348,18 @@ bool EspNowAudioTransport::init() {
         else ESP_LOGE(TAG, "Failed to load encrypted peer slot %u", slot);
     }
 
+    for(unsigned slot=0;slot<4;++slot) {
+        RegisteredPeer registered{};
+        if(!SecurityConfig::loadRegistration(slot,registered)) continue;
+        esp_now_peer_info_t peer{};
+        memcpy(peer.peer_addr,registered.mac,6); peer.ifidx=WIFI_IF_STA;
+        // Never replace or downgrade an existing encrypted peer.
+        if(!esp_now_is_peer_exist(registered.mac) && esp_now_add_peer(&peer)==ESP_OK) {
+            m_registered_peers.push_back(registered);
+            m_node_macs[registered.claim.node_id]=std::vector<uint8_t>(registered.mac,registered.mac+6);
+        }
+    }
+
     const uint8_t bcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     if (!esp_now_is_peer_exist(bcast_mac)) {
         esp_now_peer_info_t bcast_peer = {};
@@ -327,13 +387,16 @@ void EspNowAudioTransport::heartbeatTask(void* arg) {
         uint8_t channel=0; wifi_second_chan_t secondary;
         esp_wifi_get_channel(&channel, &secondary);
         char payload[192];
-        int length = snprintf(payload, sizeof(payload), "{\"type\":\"heartbeat\",\"protocol_version\":3,\"subbox_id\":\"%s\",\"channel\":%u,\"wifi\":%s,\"mqtt\":%s}", cfg.subbox_id, channel, subbox_led_wifi_connected() ? "true" : "false", subbox_led_mqtt_connected() ? "true" : "false");
+        int length = snprintf(payload, sizeof(payload), "{\"type\":\"heartbeat\",\"protocol_version\":3,\"subbox_id\":\"%s\",\"channel\":%u,\"wifi\":%s,\"mqtt\":%s,\"setup\":%s}", cfg.subbox_id, channel, subbox_led_wifi_connected() ? "true" : "false", subbox_led_mqtt_connected() ? "true" : "false", SecurityConfig::isPairingAllowed() ? "true" : "false");
 
         esp_now_send(bcast_mac, reinterpret_cast<const uint8_t*>(payload), length);
 
         for (const auto& peer : self->m_trusted_peers)
             esp_now_send(peer.mac, reinterpret_cast<const uint8_t*>(payload), length);
 
+        { std::lock_guard<std::mutex> lock(self->m_macs_mutex);
+          for(const auto& peer:self->m_registered_peers)
+              esp_now_send(peer.mac,reinterpret_cast<const uint8_t*>(payload),length); }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     vTaskDelete(nullptr);
@@ -416,4 +479,93 @@ void EspNowAudioTransport::stop() {
     esp_now_unregister_send_cb();
     esp_now_deinit();
     ESP_LOGI(TAG, "ESP-NOW Audio Transport stopped.");
+}
+
+bool EspNowAudioTransport::claimDevice(const std::string& request, std::string& result) {
+    result.clear();
+    if(hc_runtime_enabled() || !m_running || !m_ack_sem) return false;
+    cJSON* root=cJSON_Parse(request.c_str());
+    if(!root) return false;
+    ClaimFrame claim{}; claim.type=CLAIM_FRAME; claim.version=3;
+    auto copy=[root](const char* key,char* out,size_t capacity) {
+        const auto* value=cJSON_GetObjectItem(root,key);
+        if(!cJSON_IsString(value) || !value->valuestring[0] || strlen(value->valuestring)>=capacity) return false;
+        strcpy(out,value->valuestring);return true;
+    };
+    const auto* revision=cJSON_GetObjectItem(root,"revision");
+    const auto* session=cJSON_GetObjectItem(root,"setup_session");
+    bool valid=copy("device_uid",claim.node_id,sizeof(claim.node_id)) &&
+        copy("op_id",claim.operation,sizeof(claim.operation)) && copy("room_key",claim.room,sizeof(claim.room));
+    valid &= cJSON_IsNumber(revision) && revision->valuedouble>=1 && revision->valuedouble<=UINT32_MAX &&
+        cJSON_IsNumber(session) && session->valuedouble>=1 && session->valuedouble<=UINT32_MAX;
+    if(valid) {claim.revision=static_cast<uint32_t>(revision->valuedouble);claim.session=static_cast<uint32_t>(session->valuedouble);}
+    const auto* channels=cJSON_GetObjectItem(root,"channels");
+    const char* defaults[]={"light","fan","switch"};
+    for(int i=0;i<3;++i) {
+        char key[]="ch1"; key[2]+=i;
+        const auto* channel=cJSON_GetObjectItem(channels,key);
+        const auto* type=cJSON_IsObject(channel)?cJSON_GetObjectItem(channel,"type"):channel;
+        const char* value=cJSON_IsString(type)?type->valuestring:defaults[i];
+        if(strlen(value)>=sizeof(claim.channels[i])) valid=false;
+        else strcpy(claim.channels[i],value);
+    }
+    cJSON_Delete(root);
+    if(!valid || !valid_claim(claim)) return false;
+    std::lock_guard<std::mutex> command_lock(m_command_mutex);
+    RegisteredPeer registration{}; registration.claim=claim;
+    {
+        std::lock_guard<std::mutex> lock(m_macs_mutex);
+        const auto peer=m_node_macs.find(claim.node_id);
+        if(peer==m_node_macs.end() || peer->second.size()!=6) return false;
+        memcpy(registration.mac,peer->second.data(),6);
+        bool retry=false, already_registered=false;
+        for(const auto& registered:m_registered_peers) {
+            retry |= memcmp(&registered,&registration,sizeof(registration))==0;
+            already_registered |= memcmp(registered.mac,registration.mac,6)==0;
+        }
+        if(!already_registered && m_registered_peers.size()+m_trusted_peers.size()>=4) return false;
+        for(const auto& encrypted:m_trusted_peers)
+            if(memcmp(encrypted.mac,registration.mac,6)==0) return false;
+        const auto candidate=m_candidates.find(claim.node_id);
+        if(!retry && (!SecurityConfig::isPairingAllowed() || candidate==m_candidates.end() ||
+            candidate->second.session!=claim.session || candidate->second.expires_us<=esp_timer_get_time())) return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_ack_mutex);
+        m_claim_operation=claim.operation; m_pending_node=claim.node_id;
+        memcpy(m_pending_mac,registration.mac,6); m_claim_receipt={};
+        xSemaphoreTake(m_ack_sem,0);
+    }
+    bool received=false;
+    for(int attempt=0;attempt<3 && !received;++attempt) {
+        if(esp_now_send(registration.mac,reinterpret_cast<const uint8_t*>(&claim),sizeof(claim))==ESP_OK)
+            received=xSemaphoreTake(m_ack_sem,pdMS_TO_TICKS(1000))==pdTRUE;
+    }
+    ClaimReceipt receipt{};
+    {
+        std::lock_guard<std::mutex> lock(m_ack_mutex);
+        receipt=m_claim_receipt; m_claim_operation.clear();
+    }
+    if(!received || receipt.success!=1 || receipt.revision!=claim.revision || !receipt.owner_epoch) return false;
+    if(SecurityConfig::saveRegistration(registration)!=ESP_OK) return false;
+    {
+        std::lock_guard<std::mutex> lock(m_macs_mutex);
+        auto old=std::find_if(m_registered_peers.begin(),m_registered_peers.end(),[&](const RegisteredPeer& p) {
+            return memcmp(p.mac,registration.mac,6)==0;
+        });
+        if(old==m_registered_peers.end()) m_registered_peers.push_back(registration); else *old=registration;
+        m_candidates.erase(claim.node_id);
+    }
+    cJSON* applied=cJSON_CreateObject();
+    cJSON_AddStringToObject(applied,"type","CLAIM_APPLIED");
+    cJSON_AddNumberToObject(applied,"protocol_version",3);
+    cJSON_AddStringToObject(applied,"node_id",claim.node_id);
+    cJSON_AddStringToObject(applied,"hardware_uid",claim.node_id+2);
+    cJSON_AddStringToObject(applied,"operation_id",claim.operation);
+    cJSON_AddNumberToObject(applied,"config_version",receipt.revision);
+    cJSON_AddNumberToObject(applied,"owner_epoch",receipt.owner_epoch);
+    char* encoded=cJSON_PrintUnformatted(applied);
+    if(encoded) {result=encoded;cJSON_free(encoded);}
+    cJSON_Delete(applied);
+    return !result.empty();
 }

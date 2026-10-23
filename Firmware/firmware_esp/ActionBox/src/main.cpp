@@ -20,6 +20,7 @@
 #include "device_manager.h"
 #include "task_manager.h"
 #include "voice_capture.h"
+#include "device_reset.h"
 
 static const char *TAG = "ACTIONBOX_MAIN";
 
@@ -84,10 +85,16 @@ extern "C" void app_main(void) {
     hardware_disable_speaker();
 
     ESP_ERROR_CHECK(nvs_storage_init());
+    ESP_ERROR_CHECK(relay_driver_init());
+
+    if (resume_interrupted_reset()) {
+        ESP_LOGI(TAG, "Interrupted reset resumed and completed. Rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_restart();
+    }
 
     protocol_init();
 
-    ESP_ERROR_CHECK(relay_driver_init());
     ESP_ERROR_CHECK(bl0942_driver_init());
     ESP_ERROR_CHECK(button_driver_init());
     ESP_ERROR_CHECK(led_driver_init());
