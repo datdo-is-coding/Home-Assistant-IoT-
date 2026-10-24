@@ -96,6 +96,12 @@ extern "C" void app_main(void) {
     protocol_init();
 
     ESP_ERROR_CHECK(bl0942_driver_init());
+    const ActionBoxPersistentConfig *meter_config = nvs_storage_get_cached_config();
+    for (uint8_t channel = 1; channel <= BOARD_RELAY_CHANNEL_COUNT; ++channel) {
+        if (bl0942_set_calibration(channel, &meter_config->calibrations[channel - 1]) != ESP_OK) {
+            ESP_LOGE(TAG, "Invalid stored meter calibration on channel %u; using defaults", channel);
+        }
+    }
     ESP_ERROR_CHECK(button_driver_init());
     ESP_ERROR_CHECK(led_driver_init());
 
