@@ -4,18 +4,41 @@
 #include <driver/i2s.h>
 #include <stdint.h>
 
-#define I2S_PORT I2S_NUM_0
-#define MIC_I2S_GPIO_BCLK GPIO_NUM_15
-#define MIC_I2S_GPIO_WS GPIO_NUM_16
-#define MIC_I2S_GPIO_DIN GPIO_NUM_8
+// Microphone I2S Master RX (ActionBox V2: BCLK=IO47, WS=IO48, DIN=IO8)
+#define I2S_PORT                I2S_NUM_0
+#define MIC_I2S_GPIO_BCLK       GPIO_NUM_47
+#define MIC_I2S_GPIO_WS         GPIO_NUM_48
+#define MIC_I2S_GPIO_DIN        GPIO_NUM_8
 
-#define RELAY_1_PIN GPIO_NUM_4
-#define RELAY_2_PIN GPIO_NUM_5
+// Speaker Amplifier Shutdown Pin (MAX98357 SD: LOW = shutdown)
+#define SPEAKER_SD_PIN          GPIO_NUM_38
 
-#define RELAY_ON_LEVEL LOW
-#define RELAY_OFF_LEVEL HIGH
+// Đèn LED chỉ báo (ActionBox V2: LED1 = IO3, LED2/Voice = IO2)
+#define LED_1_PIN               3
+#define LED_2_PIN               2
+#define LED_STATUS_PIN          LED_2_PIN
+#define LED_ACTIVE_LEVEL        HIGH
 
-#define LED_STATUS_PIN 2
+// Relay Latching Dual-Coil HKE3-LT-S (ActionBox V2: 3 kênh, xung kích 50ms)
+#define RELAY_LATCH_PULSE_MS    50
+
+// Kênh 1: ĐÈN
+#define RELAY_1_SET_PIN         GPIO_NUM_16
+#define RELAY_1_RESET_PIN       GPIO_NUM_15
+
+// Kênh 2: QUẠT
+#define RELAY_2_SET_PIN         GPIO_NUM_7
+#define RELAY_2_RESET_PIN       GPIO_NUM_6
+
+// Kênh 3: Dự phòng
+#define RELAY_3_SET_PIN         GPIO_NUM_5
+#define RELAY_3_RESET_PIN       GPIO_NUM_4
+
+// Macro tương thích ngược
+#define RELAY_1_PIN             RELAY_1_SET_PIN
+#define RELAY_2_PIN             RELAY_2_SET_PIN
+#define RELAY_ON_LEVEL          HIGH
+#define RELAY_OFF_LEVEL         LOW
 
 #define SAMPLE_RATE 16000
 #define AUDIO_WINDOW_MS 1000

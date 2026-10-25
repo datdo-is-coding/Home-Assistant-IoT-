@@ -24,14 +24,28 @@ static int pending_action = -1;
 static int pending_device = -1;
 static unsigned long state_timeout = 0;
 
+static void pulse_latching_relay(int set_pin, int reset_pin, bool turn_on) {
+  if (turn_on) {
+    digitalWrite(reset_pin, LOW);
+    digitalWrite(set_pin, HIGH);
+    delay(RELAY_LATCH_PULSE_MS);
+    digitalWrite(set_pin, LOW);
+  } else {
+    digitalWrite(set_pin, LOW);
+    digitalWrite(reset_pin, HIGH);
+    delay(RELAY_LATCH_PULSE_MS);
+    digitalWrite(reset_pin, LOW);
+  }
+}
+
 void set_lamp_relay(bool turn_on) {
   lamp_state = turn_on;
-  digitalWrite(RELAY_1_PIN, lamp_state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
+  pulse_latching_relay(RELAY_1_SET_PIN, RELAY_1_RESET_PIN, turn_on);
 
   Serial.println("\n***************************************************");
-  Serial.printf("💡 [RELAY 1 - ĐÈN (IO4)] => %s (Chân IO4 = %d)\n",
-                lamp_state ? "ĐÃ BẬT (ON)" : "ĐÃ TẮT (OFF)",
-                lamp_state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
+  Serial.printf("💡 [RELAY 1 - ĐÈN (SET: IO%d, RESET: IO%d)] => %s\n",
+                RELAY_1_SET_PIN, RELAY_1_RESET_PIN,
+                lamp_state ? "ĐÃ BẬT (ON)" : "ĐÃ TẮT (OFF)");
   Serial.println("***************************************************\n");
 
   digitalWrite(LED_STATUS_PIN, HIGH);
@@ -41,12 +55,12 @@ void set_lamp_relay(bool turn_on) {
 
 void set_fan_relay(bool turn_on) {
   fan_state = turn_on;
-  digitalWrite(RELAY_2_PIN, fan_state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
+  pulse_latching_relay(RELAY_2_SET_PIN, RELAY_2_RESET_PIN, turn_on);
 
   Serial.println("\n***************************************************");
-  Serial.printf("🌀 [RELAY 2 - QUẠT (IO5)] => %s (Chân IO5 = %d)\n",
-                fan_state ? "ĐÃ BẬT (ON)" : "ĐÃ TẮT (OFF)",
-                fan_state ? RELAY_ON_LEVEL : RELAY_OFF_LEVEL);
+  Serial.printf("🌀 [RELAY 2 - QUẠT (SET: IO%d, RESET: IO%d)] => %s\n",
+                RELAY_2_SET_PIN, RELAY_2_RESET_PIN,
+                fan_state ? "ĐÃ BẬT (ON)" : "ĐÃ TẮT (OFF)");
   Serial.println("***************************************************\n");
 
   digitalWrite(LED_STATUS_PIN, HIGH);
@@ -149,16 +163,46 @@ void setup() {
   Serial.printf(">> CẤU HÌNH MÔ HÌNH: [FLOAT32 GỐC] (15,104 bytes weights - ESP32-S3 FPU Hardware)\n");
 #endif
 
-  pinMode(RELAY_1_PIN, OUTPUT);
-  pinMode(RELAY_2_PIN, OUTPUT);
-  pinMode(LED_STATUS_PIN, OUTPUT);
+  // Cấu hình các chân Relay Latching ActionBox V2 (Dual-Coil)
+  pinMode(RELAY_1_SET_PIN, OUTPUT);
+  pinMode(RELAY_1_RESET_PIN, OUTPUT);
+  pinMode(RELAY_2_SET_PIN, OUTPUT);
+  pinMode(RELAY_2_RESET_PIN, OUTPUT);
+  pinMode(RELAY_3_SET_PIN, OUTPUT);
+  pinMode(RELAY_3_RESET_PIN, OUTPUT);
 
-  digitalWrite(RELAY_1_PIN, RELAY_OFF_LEVEL);
-  digitalWrite(RELAY_2_PIN, RELAY_OFF_LEVEL);
+  // Đảm bảo ban đầu các chân kích cuộn hút đều ở mức LOW
+  digitalWrite(RELAY_1_SET_PIN, LOW);
+  digitalWrite(RELAY_1_RESET_PIN, LOW);
+  digitalWrite(RELAY_2_SET_PIN, LOW);
+  digitalWrite(RELAY_2_RESET_PIN, LOW);
+  digitalWrite(RELAY_3_SET_PIN, LOW);
+  digitalWrite(RELAY_3_RESET_PIN, LOW);
+
+  // Ban đầu kích xung RESET để đảm bảo trạng thái an toàn (TẮT) sau khởi động
+  pulse_latching_relay(RELAY_1_SET_PIN, RELAY_1_RESET_PIN, false);
+  pulse_latching_relay(RELAY_2_SET_PIN, RELAY_2_RESET_PIN, false);
+  pulse_latching_relay(RELAY_3_SET_PIN, RELAY_3_RESET_PIN, false);
+
+  // Tắt phần cứng amplifier MAX98357 (IO38 -> LOW) để tránh sôi loa và tiết kiệm điện
+  pinMode(SPEAKER_SD_PIN, OUTPUT);
+  digitalWrite(SPEAKER_SD_PIN, LOW);
+
+  // Cấu hình LED chỉ báo trạng thái (ActionBox V2: LED 2 / Voice LED - IO2)
+  pinMode(LED_STATUS_PIN, OUTPUT);
   digitalWrite(LED_STATUS_PIN, LOW);
 
-  Serial.printf("[CẤU HÌNH RELAY] Relay 1 (ĐÈN): IO%d | Relay 2 (QUẠT): IO%d (0=ON, 1=OFF)\n",
-                RELAY_1_PIN, RELAY_2_PIN);
+  Serial.println("\n[CẤU HÌNH PHẦN CỨNG THEO ACTIONBOX V2]");
+  Serial.printf("  🎙️ Mic INMP441 : BCLK=IO%d, WS=IO%d, DIN=IO%d\n",
+                MIC_I2S_GPIO_BCLK, MIC_I2S_GPIO_WS, MIC_I2S_GPIO_DIN);
+  Serial.printf("  🔇 Speaker SD   : IO%d (Disabled/LOW)\n", SPEAKER_SD_PIN);
+  Serial.printf("  💡 Relay 1 (ĐÈN): SET=IO%d, RESET=IO%d (Xung %dms)\n",
+                RELAY_1_SET_PIN, RELAY_1_RESET_PIN, RELAY_LATCH_PULSE_MS);
+  Serial.printf("  🌀 Relay 2 (QUẠT): SET=IO%d, RESET=IO%d (Xung %dms)\n",
+                RELAY_2_SET_PIN, RELAY_2_RESET_PIN, RELAY_LATCH_PULSE_MS);
+  Serial.printf("  🔌 Relay 3      : SET=IO%d, RESET=IO%d (Xung %dms)\n",
+                RELAY_3_SET_PIN, RELAY_3_RESET_PIN, RELAY_LATCH_PULSE_MS);
+  Serial.printf("  🔴 LED Voice    : IO%d\n", LED_STATUS_PIN);
 
   memset(audio_buffer, 0, sizeof(audio_buffer));
   memset(preroll_buf, 0, sizeof(preroll_buf));
@@ -177,10 +221,10 @@ void setup() {
   }
 
   Serial.println("\n[SẴN SÀNG LẮNG NGHE LỆNH GIỌNG NÓI - VAD TÁCH ÂM TIẾT]");
-  Serial.println("👉 Nói liền mạch: 'BẬT' ... 'ĐÈN'  => Đóng Relay 1 (IO4)");
-  Serial.println("👉 Nói liền mạch: 'TẮT' ... 'ĐÈN'  => Ngắt Relay 1 (IO4)");
-  Serial.println("👉 Nói liền mạch: 'BẬT' ... 'QUẠT' => Đóng Relay 2 (IO5)");
-  Serial.println("👉 Nói liền mạch: 'TẮT' ... 'QUẠT' => Ngắt Relay 2 (IO5)\n");
+  Serial.printf("👉 Nói liền mạch: 'BẬT' ... 'ĐÈN'  => Đóng Relay 1 (Xung SET IO%d)\n", RELAY_1_SET_PIN);
+  Serial.printf("👉 Nói liền mạch: 'TẮT' ... 'ĐÈN'  => Ngắt Relay 1 (Xung RESET IO%d)\n", RELAY_1_RESET_PIN);
+  Serial.printf("👉 Nói liền mạch: 'BẬT' ... 'QUẠT' => Đóng Relay 2 (Xung SET IO%d)\n", RELAY_2_SET_PIN);
+  Serial.printf("👉 Nói liền mạch: 'TẮT' ... 'QUẠT' => Ngắt Relay 2 (Xung RESET IO%d)\n\n", RELAY_2_RESET_PIN);
 }
 
 void loop() {
