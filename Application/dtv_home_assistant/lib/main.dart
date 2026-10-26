@@ -1,6 +1,7 @@
 import 'package:dtv_home_assistant/views/pages/welcome_page.dart';
 import 'package:dtv_home_assistant/views/widget_tree.dart';
 import 'package:dtv_home_assistant/data/services/auth_service.dart';
+import 'package:dtv_home_assistant/data/services/realtime_energy_service.dart';
 import 'package:dtv_home_assistant/firebase_options.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -14,8 +15,9 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
   } catch (e) {
-    debugPrint("Firebase init error: $e");
+    debugPrint("Firebase init note: $e");
   }
+  RealtimeEnergyService.instance.init();
   runApp(const MyApp());
 }
 

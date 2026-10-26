@@ -31,6 +31,7 @@ class DefaultFirebaseOptions {
     projectId: 'home-companion-fed2e',
     authDomain: 'home-companion-fed2e.firebaseapp.com',
     storageBucket: 'home-companion-fed2e.firebasestorage.app',
+    databaseURL: 'https://home-companion-fed2e-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
@@ -39,6 +40,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '369954212466',
     projectId: 'home-companion-fed2e',
     storageBucket: 'home-companion-fed2e.firebasestorage.app',
+    databaseURL: 'https://home-companion-fed2e-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -48,6 +50,7 @@ class DefaultFirebaseOptions {
     projectId: 'home-companion-fed2e',
     storageBucket: 'home-companion-fed2e.firebasestorage.app',
     iosBundleId: 'com.dtv.homeassistant.dtvHomeAssistant',
+    databaseURL: 'https://home-companion-fed2e-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -57,5 +60,6 @@ class DefaultFirebaseOptions {
     projectId: 'home-companion-fed2e',
     storageBucket: 'home-companion-fed2e.firebasestorage.app',
     iosBundleId: 'com.dtv.homeassistant.dtvHomeAssistant',
+    databaseURL: 'https://home-companion-fed2e-default-rtdb.asia-southeast1.firebasedatabase.app',
   );
 }

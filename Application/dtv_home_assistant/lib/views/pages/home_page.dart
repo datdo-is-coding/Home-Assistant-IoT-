@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:dtv_home_assistant/views/widgets/consumption_chart.dart';
+import 'package:dtv_home_assistant/data/services/realtime_energy_service.dart';
 
 class DeviceItem {
   final String id;
   final String name;
   final IconData icon;
-  final int watt;
+  int watt;
   bool isOn;
 
   DeviceItem({
@@ -130,6 +131,44 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     selectedRoomId = rooms.first.id;
+    RealtimeEnergyService.instance.deviceDataNotifier.addListener(_onDeviceDataUpdated);
+  }
+
+  @override
+  void dispose() {
+    RealtimeEnergyService.instance.deviceDataNotifier.removeListener(_onDeviceDataUpdated);
+    super.dispose();
+  }
+
+  void _onDeviceDataUpdated() {
+    final data = RealtimeEnergyService.instance.deviceDataNotifier.value;
+    if (data == null || !mounted) return;
+    setState(() {
+      final lr = rooms.firstWhere((r) => r.id == 'living_room');
+      if (data.channels.containsKey('ch1')) {
+        final ch1 = data.channels['ch1']!;
+        final light = lr.devices.firstWhere((d) => d.id == 'lr_light');
+        light.isOn = ch1.state;
+        light.watt = ch1.power.round();
+      }
+      if (data.channels.containsKey('ch2')) {
+        final ch2 = data.channels['ch2']!;
+        final fan = lr.devices.firstWhere((d) => d.id == 'lr_fan');
+        fan.isOn = ch2.state;
+        fan.watt = ch2.power.round();
+      }
+    });
+  }
+
+  void _toggleDevice(DeviceItem device, bool val) {
+    setState(() {
+      device.isOn = val;
+    });
+    if (device.id == 'lr_light') {
+      RealtimeEnergyService.instance.setChannelState('ch1', val);
+    } else if (device.id == 'lr_fan') {
+      RealtimeEnergyService.instance.setChannelState('ch2', val);
+    }
   }
 
   IconData _getRoomIcon(String roomName) {
@@ -145,6 +184,161 @@ class _HomePageState extends State<HomePage> {
         .fold(0, (sum, device) => sum + device.watt);
   }
 
+  Widget _buildActionBoxTelemetryCard(ActionBoxData? data) {
+    final isOnline = data != null && data.online;
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 15,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                      boxShadow: isOnline
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                                blurRadius: 6,
+                                spreadRadius: 2,
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    data?.name ?? 'Action Box (ESP32-S3)',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isOnline
+                      ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                      : Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isOnline ? const Color(0xFF10B981) : Colors.white24,
+                    width: 0.8,
+                  ),
+                ),
+                child: Text(
+                  isOnline ? 'ONLINE' : 'OFFLINE',
+                  style: TextStyle(
+                    color: isOnline ? const Color(0xFF34D399) : Colors.white60,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetricItem(
+                  icon: Icons.electric_bolt_rounded,
+                  label: 'Điện áp',
+                  value: '${data?.voltage.toStringAsFixed(1) ?? "--"} V',
+                  color: const Color(0xFFFBBF24),
+                ),
+              ),
+              Expanded(
+                child: _buildMetricItem(
+                  icon: Icons.speed_rounded,
+                  label: 'Dòng điện',
+                  value: '${data?.totalCurrent.toStringAsFixed(2) ?? "--"} A',
+                  color: const Color(0xFF38BDF8),
+                ),
+              ),
+              Expanded(
+                child: _buildMetricItem(
+                  icon: Icons.power_rounded,
+                  label: 'Công suất',
+                  value: '${data?.totalPower.toStringAsFixed(1) ?? "--"} W',
+                  color: const Color(0xFFA78BFA),
+                ),
+              ),
+              Expanded(
+                child: _buildMetricItem(
+                  icon: Icons.timelapse_rounded,
+                  label: 'Điện năng',
+                  value: '${data?.totalEnergyKwh.toStringAsFixed(3) ?? "--"} kWh',
+                  color: const Color(0xFF34D399),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Column(
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.6),
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentRoom = rooms.firstWhere(
@@ -152,29 +346,33 @@ class _HomePageState extends State<HomePage> {
       orElse: () => rooms.first,
     );
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(
-            height: 360,
-            child: ConsumptionChart(showDropdown: false, initialMode: 'hourly'),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 20,
-                  offset: const Offset(0, 6),
+    return ValueListenableBuilder<ActionBoxData?>(
+      valueListenable: RealtimeEnergyService.instance.deviceDataNotifier,
+      builder: (context, actionBoxData, _) {
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(
+                height: 360,
+                child: ConsumptionChart(showDropdown: false, initialMode: 'hourly'),
+              ),
+              _buildActionBoxTelemetryCard(actionBoxData),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.04),
+                      blurRadius: 20,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
-              ],
-            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -306,9 +504,7 @@ class _HomePageState extends State<HomePage> {
                     final device = currentRoom.devices[index];
                     return GestureDetector(
                       onTap: () {
-                        setState(() {
-                          device.isOn = !device.isOn;
-                        });
+                        _toggleDevice(device, !device.isOn);
                       },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
@@ -352,9 +548,7 @@ class _HomePageState extends State<HomePage> {
                                   value: device.isOn,
                                   activeThumbColor: const Color(0xFF6366F1),
                                   onChanged: (val) {
-                                    setState(() {
-                                      device.isOn = val;
-                                    });
+                                    _toggleDevice(device, val);
                                   },
                                 ),
                               ],
@@ -399,5 +593,7 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  },
+);
   }
 }
