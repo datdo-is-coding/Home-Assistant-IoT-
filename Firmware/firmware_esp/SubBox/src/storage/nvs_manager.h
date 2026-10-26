@@ -21,6 +21,8 @@ public:
     static esp_err_t init();
     static esp_err_t loadConfig(SubBoxPersistentConfig& config);
     static esp_err_t saveConfig(const SubBoxPersistentConfig& config);
+    static esp_err_t loadKwsSnapshot(std::string& snapshot);
+    static esp_err_t saveKwsSnapshot(const std::string& snapshot);
     static esp_err_t networkReset();
     static esp_err_t factoryReset();
 };

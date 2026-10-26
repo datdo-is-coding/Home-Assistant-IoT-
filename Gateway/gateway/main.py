@@ -10,6 +10,7 @@ Nâng cấp:
 
 import asyncio
 import time
+import math
 from datetime import datetime, timezone
 import logging
 import signal
@@ -27,7 +28,7 @@ from mqtt_handler import MQTTHandler
 from intent_engine import IntentEngine
 from dialog_manager import DialogManager, DialogSession
 from tts_engine import TTSEngine
-from asr_engine import ASREngine
+from kws_service import KwsService
 from audio_server import AudioServer
 from verify_engine import CommandVerifier, VerifyResult
 from display_names import get_room_name, get_device_name, clean_voice_text
@@ -37,6 +38,7 @@ from ota_manager import OTAManager
 from auth_manager import AuthManager
 from sound_manager import SoundManager
 from device_lifecycle import DeviceLifecycleManager
+from gateway_beacon import GatewayBeacon
 
 if getattr(config, "AI_ENABLED", False):
     try:
@@ -68,13 +70,13 @@ class SmartHomeGateway:
     def __init__(self):
         self.registry = RegistryManager()
         self.mqtt = MQTTHandler()
-        self.intent = IntentEngine(registry=self.registry)
-
-        self.intent.set_registry(self.registry)
+        self.local_kws_enabled = True
+        self.intent = None
         self.dialog = DialogManager(registry=self.registry)
         self.tts = TTSEngine()
-        self.asr = ASREngine()
+        self.asr = None
         self.audio_server = AudioServer(self)
+        self.kws = KwsService(self)
         self.verifier = CommandVerifier(self.mqtt, self.registry)
 
         self.verifier.audio_server = self.audio_server
@@ -83,6 +85,7 @@ class SmartHomeGateway:
         self.auth = AuthManager()
         self.sound = SoundManager(self)
         self.web_server = WebServer(self)
+        self.beacon = GatewayBeacon(self)
         self.lifecycle = DeviceLifecycleManager(
             db_path=self.registry.db_path,
             registry=self.registry,
@@ -107,13 +110,14 @@ class SmartHomeGateway:
         logger.info("  Inventory: %s", self.registry.inventory_for_prompt())
         logger.info("=" * 60)
 
-        logger.info("Initializing ASR engine (with dynamic registry hotwords)...")
-        self.asr.initialize(self.registry)
+        logger.info("SubBox local KWS enabled; Pi microphone recognition disabled")
         if config.TTS_PROVIDER.strip().lower() == "vieneu":
             await self.tts.vieneu.initialize()
 
         await self.audio_server.start()
         await self.web_server.start()
+        if hasattr(self, "beacon") and self.beacon:
+            await self.beacon.start()
 
         if self.telemetry_writer:
             self.telemetry_writer.initialize()
@@ -121,7 +125,10 @@ class SmartHomeGateway:
         self._subbox_voice_requests = {}
         self.mqtt.on_message("home/subbox/+/state", self._on_subbox_state)
         self.mqtt.on_message("home/subbox/+/voice/request", self._on_subbox_voice)
+        self.mqtt.on_message("home/subbox/+/event/kws_result", self.kws.on_result)
+        self.mqtt.on_message("home/subbox/+/event/kws_config", self.kws.on_config_ack)
         self.mqtt.on_message("home/subbox/+/event/actionbox", self._on_subbox_actionbox)
+        self.mqtt.on_message("home/subbox/+/event/operation", self._on_subbox_operation_ack)
         self.mqtt.on_message("smarthome/hello", self._on_hello)
         self.mqtt.on_message("smarthome/register", self._on_node_register)
         self.mqtt.on_message("smarthome/discovery/#", self._on_native_discovery)
@@ -207,6 +214,9 @@ class SmartHomeGateway:
         client_node_id: str = "default",
         detected_room: Optional[str] = None
     ) -> dict:
+        if self.intent is None:
+            self.intent = IntentEngine(registry=self.registry)
+            self.intent.set_registry(self.registry)
         result = {
             "user_text": user_text, "intent": None,
             "engine": None,
@@ -713,6 +723,8 @@ class SmartHomeGateway:
         if node is None or node.get("status") == "NEEDS_REPROVISION":
             return
         self.registry.update_heartbeat(node_id)
+        if getattr(self, "kws", None):
+            await self.kws.sync_config(node_id)
         if getattr(self, "lifecycle", None):
             self.lifecycle.resume_claims(node_id)
         self.broadcast_event("node_status", {
@@ -721,6 +733,9 @@ class SmartHomeGateway:
         })
 
     async def _on_subbox_voice(self, topic, payload):
+        if getattr(self, "local_kws_enabled", False):
+            logger.warning("Rejected obsolete SubBox voice request")
+            return
         if not isinstance(payload, dict):
             return
         text, origin, request = payload.get("text"), payload.get("origin_node"), payload.get("request_id")
@@ -838,18 +853,10 @@ class SmartHomeGateway:
 
         node = self.registry.get_all_nodes().get(target_node_id)
         if node:
-            for c in channels:
-                if isinstance(c, dict):
-                    ch_num = c.get("channel")
-                    pw = c.get("power_w", c.get("power", c.get("p")))
-                    if ch_num is not None and pw is not None:
-                        ch_key = f"ch{ch_num}"
-                        if "channels" in node and ch_key in node["channels"]:
-                            try:
-                                node["channels"][ch_key]["power"] = float(pw)
-                            except (ValueError, TypeError):
-                                pass
-
+            if type(payload.get("owner_epoch")) is int:
+                node["reported_owner_epoch"] = payload["owner_epoch"]
+            if type(payload.get("claimed")) is bool:
+                node["reported_claimed"] = payload["claimed"]
             existing_channels = node.setdefault("channels", {})
             if len(existing_channels) < len(sorted_channels):
                 updated = False
@@ -887,7 +894,49 @@ class SmartHomeGateway:
                     self.registry.save(changed_node=target_node_id)
                     if hasattr(self, "discovery") and self.discovery:
                         await self.discovery.publish_ha_discovery_for_node(target_node_id)
+        meters = {}
+        if node:
+            for c in channels:
+                if not isinstance(c, dict) or type(c.get("channel")) is not int or not 1 <= c["channel"] <= 3:
+                    continue
+                ch_key = f"ch{c['channel']}"
+                channel = node.get("channels", {}).get(ch_key)
+                if not isinstance(channel, dict):
+                    continue
+                if "valid" not in c:
+                    # Older boards only publish power; preserve that contract.
+                    power = c.get("power_w", c.get("power", c.get("p")))
+                    if type(power) in (int, float) and math.isfinite(power):
+                        channel["power"] = power
+                    continue
+                sample = c.get("sample_uptime_ms")
+                uptime = payload.get("uptime_s")
+                sample_fresh = (type(sample) is int and 0 < sample <= 0xffffffff
+                    and type(uptime) is int and uptime >= 0
+                    and ((uptime * 1000 + 999 - sample) & 0xffffffff) <= 5999)
+                values = {k: c.get(k) for k in ("current_ma", "voltage_v", "power_w")}
+                shape_valid = all(
+                    (v is None and k != "current_ma") or
+                    (type(v) in (int, float) and math.isfinite(v) and (k == "power_w" or v >= 0))
+                    for k, v in values.items())
+                valid = c["valid"] is True and sample_fresh and shape_valid
+                if valid:
+                    quality = "good"
+                elif c["valid"] is True and not sample_fresh and shape_valid:
+                    quality = "stale"
+                else:
+                    quality = "invalid"
+                meter = {k: v if valid else None for k, v in values.items()}
+                meter.update(valid=valid, quality=quality, received_at=time.time(),
+                             sample_uptime_ms=sample)
+                channel["telemetry"] = meter
+                channel["power"] = meter["power_w"]
+                meters[ch_key] = meter
         self.registry.update_heartbeat(target_node_id)
+        if meters:
+            self.registry.record_channel_telemetry(target_node_id, meters)
+            self.broadcast_event("node_telemetry", {"node_id": target_node_id, "channels": meters})
+
 
     async def _on_hello(self, topic: str, payload: dict):
         """Node mới hoặc đã provision gửi hello qua MQTT (compact)."""
@@ -1101,6 +1150,27 @@ class SmartHomeGateway:
             if hasattr(self, "lifecycle") and self.lifecycle:
                 self.lifecycle.on_device_reconnected(device_id)
 
+    async def _on_subbox_operation_ack(self, topic: str, payload: Any):
+        parts = topic.split("/")
+        if len(parts) != 5 or parts[:2] != ["home", "subbox"] or parts[3:] != ["event", "operation"] or not isinstance(payload, dict):
+            return
+        if not isinstance(payload.get("operation_id"), str) or not isinstance(payload.get("status"), str):
+            return
+        op = self.lifecycle.get_operation(payload["operation_id"])
+        if not op:
+            return
+        meta = op.metadata or {}
+        if (payload.get("node_id") != op.device_uid
+                or payload.get("hardware_uid") != op.device_uid[2:]
+                or payload.get("protocol_version") != 3
+                or parts[2] != meta.get("route")
+                or payload.get("request_id") != meta.get("request_id")
+                or payload.get("session_id") != meta.get("session_id")):
+            return
+        self.lifecycle.on_operation_ack(op.device_uid, op.operation_id,
+            status=payload.get("status", "ERROR"), error_code=payload.get("error_code"),
+            error_message=payload.get("error_message"))
+
     async def _on_device_operation_ack(self, topic: str, payload: Any):
         """Nhận operation feedback / ACK từ thiết bị: home/devices/{device_id}/operation/ack"""
         parts = topic.split("/")
@@ -1112,6 +1182,10 @@ class SmartHomeGateway:
                 payload = {}
         dev_id = payload.get("device_uid") or payload.get("node_id") or device_id
         op_id = payload.get("operation_id") or payload.get("op_id")
+        if op_id and hasattr(self, "lifecycle"):
+            op = self.lifecycle.get_operation(op_id)
+            if op and (op.metadata or {}).get("route"):
+                return  # Routed operations require their authenticated SubBox receipt.
         status = payload.get("status", "succeeded")
         err_code = payload.get("error_code")
         err_msg = payload.get("error_message")
@@ -1374,6 +1448,12 @@ class SmartHomeGateway:
         self.broadcast_event("device_deleted", {"device_id": device_id})
         return ok
 
+    async def stop(self):
+        if getattr(self, "kws", None):
+            await self.kws.stop()
+        if hasattr(self, "beacon") and self.beacon:
+            await self.beacon.stop()
+
 def setup_logging():
     logging.basicConfig(
         level=getattr(logging, config.LOG_LEVEL, logging.INFO),
@@ -1394,6 +1474,7 @@ async def main():
 
 async def _shutdown(gateway):
     logger.info("Shutting down...")
+    await gateway.stop()
     gateway._running = False
     if hasattr(gateway, "proactive") and gateway.proactive:
         await gateway.proactive.stop()

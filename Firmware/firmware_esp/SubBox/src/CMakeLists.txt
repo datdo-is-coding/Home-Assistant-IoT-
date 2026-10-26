@@ -4,7 +4,9 @@ file(GLOB_RECURSE app_sources
 )
 
 idf_component_register(
-    SRCS ${app_sources}
+    SRCS
+        ${app_sources}
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws/kws_mfcc.cpp"
     INCLUDE_DIRS
         "."
         "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
@@ -16,6 +18,8 @@ idf_component_register(
         "audio/audio_buffer"
         "audio/vad"
         "audio/asr"
+        "audio/kws"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws"
         "audio/audio_output"
         "nlu"
         "nlu/normalizer"
@@ -55,3 +59,10 @@ idf_component_register(
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation -Wno-stringop-truncation -Wno-error=missing-field-initializers -Wno-missing-field-initializers)
+
+# Debug optimization exceeded the 250 ms KWS stride on ESP32-S3.
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio/kws/local_kws.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws/kws_mfcc.cpp"
+    PROPERTIES COMPILE_OPTIONS "-O2"
+)

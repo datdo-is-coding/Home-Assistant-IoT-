@@ -64,7 +64,7 @@ class ActionBoxCard extends StatelessWidget {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '${actionBox.roomId} · ${actionBox.channels.length} kênh rơ-le',
+                              actionBox.isSubBox ? '${actionBox.roomId} · SubBox trung tâm' : '${actionBox.roomId} · ${actionBox.channels.length} kênh rơ-le',
                               style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                             ),
                           ],

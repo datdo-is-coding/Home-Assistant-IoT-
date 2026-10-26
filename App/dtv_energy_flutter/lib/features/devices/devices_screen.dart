@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/room.dart';
 import '../../providers/smart_home_providers.dart';
 import '../../widgets/device_card.dart';
+import '../../widgets/action_box_card.dart';
 import '../../widgets/quick_control_sheet.dart';
 
 class FeatureDevicesScreen extends ConsumerWidget {
@@ -24,6 +25,16 @@ class FeatureDevicesScreen extends ConsumerWidget {
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
+            SliverToBoxAdapter(
+              child: ref.watch(actionBoxesStreamProvider).when(
+                data: (boxes) => Column(children: boxes.where((box) => box.isSubBox).map((box) => Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: ActionBoxCard(actionBox: box, onTap: () => context.push('/actionbox/${box.id}')),
+                )).toList()),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+            ),
 
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
@@ -167,7 +178,7 @@ class FeatureDevicesScreen extends ConsumerWidget {
                               crossAxisCount: 2,
                               mainAxisSpacing: 12,
                               crossAxisSpacing: 12,
-                              mainAxisExtent: 156,
+                              mainAxisExtent: 176,
                             ),
                             itemCount: roomDevices.length,
                             itemBuilder: (context, idx) {

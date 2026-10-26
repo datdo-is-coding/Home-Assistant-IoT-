@@ -6,7 +6,7 @@ back to ESP32 speaker.
 
 Protocol (ESP32 → Pi):
   TEXT:   {"type":"start","codec":"pcm","sample_rate":16000}
-  BINARY: [640 bytes PCM 16kHz/16bit/mono per 20ms frame]
+  BINARY: [PCM 16kHz/16bit/mono; SubBox batches 960 bytes / 30ms, final chunk may be shorter]
   TEXT:   {"type":"stop"}
 
 Protocol (Pi → ESP32):
@@ -19,6 +19,8 @@ Protocol (Pi → ESP32):
 """
 
 import asyncio
+import collections
+import contextlib
 import json
 import logging
 import secrets
@@ -85,15 +87,16 @@ logger = logging.getLogger("audio_server")
 class StreamArbiter:
     """Đo lường năng lượng âm thanh (RMS) đa node để định vị phòng người dùng đang đứng."""
 
+    NEAR_FIELD_RMS_THRESHOLD = 600.0
+
     def __init__(self, gateway=None):
         self.gateway = gateway
-
         self.active_streams: dict = {}
 
     def register_start(self, node_id: str):
-        now = time.time()
-
-        self.active_streams = {nid: d for nid, d in self.active_streams.items() if (now - d["start_time"]) < 5.0}
+        now = time.monotonic()
+        prune_window = max(getattr(config, "VAD_MAX_DURATION_S", 10.0) + 2.0, 12.0)
+        self.active_streams = {nid: d for nid, d in self.active_streams.items() if (now - d["start_time"]) < prune_window}
         self.active_streams[node_id] = {"rms_values": [], "start_time": now}
 
     def add_rms(self, node_id: str, rms: float):
@@ -108,10 +111,13 @@ class StreamArbiter:
         if not self.active_streams:
             return current_node_id, self._get_room(current_node_id)
 
-        now = time.time()
+        now = time.monotonic()
+        prune_window = max(getattr(config, "VAD_MAX_DURATION_S", 10.0) + 2.0, 12.0)
+        self.active_streams = {nid: d for nid, d in self.active_streams.items() if (now - d["start_time"]) < prune_window}
+        active_window = getattr(config, "VAD_MAX_DURATION_S", 10.0)
         candidates = {}
         for nid, data in self.active_streams.items():
-            if (now - data["start_time"]) <= 3.0 and data["rms_values"]:
+            if (now - data["start_time"]) <= active_window and data["rms_values"]:
                 top_rms = sorted(data["rms_values"], reverse=True)[:10]
                 avg_top = sum(top_rms) / len(top_rms) if top_rms else 0
                 candidates[nid] = avg_top
@@ -119,17 +125,47 @@ class StreamArbiter:
         if not candidates or current_node_id not in candidates:
             return current_node_id, self._get_room(current_node_id)
 
-        dominant_nid = max(candidates, key=candidates.get)
-        dominant_room = self._get_room(dominant_nid)
-        logger.info(f"📍 Spatial Audio Arbiter: {candidates} -> Dominant node '{dominant_nid}' in room '{dominant_room}'")
-        return dominant_nid, dominant_room
+        current_room = self._get_room(current_node_id)
+        curr_rms = candidates.get(current_node_id, 0.0)
+
+        # Intra-room suppression: Check if other candidates in the SAME room have higher RMS
+        same_room_cands = {
+            nid: rms for nid, rms in candidates.items()
+            if current_room is not None and self._get_room(nid) == current_room and nid != current_node_id
+        }
+        if same_room_cands and max(same_room_cands.values()) > curr_rms:
+            dominant_same = max(same_room_cands, key=same_room_cands.get)
+            logger.info(
+                f"🔇 Spatial Arbiter: Suppressed weaker intra-room node '{current_node_id}' "
+                f"in favor of '{dominant_same}' ({current_room})"
+            )
+            return dominant_same, current_room
+
+        # Cross-room sound leakage suppression
+        other_room_cands = {
+            nid: rms for nid, rms in candidates.items()
+            if self._get_room(nid) != current_room
+        }
+        if curr_rms < self.NEAR_FIELD_RMS_THRESHOLD and other_room_cands and max(other_room_cands.values()) > curr_rms * 2.5:
+            loudest_nid = max(candidates, key=candidates.get)
+            loudest_room = self._get_room(loudest_nid)
+            logger.info(
+                f"🔇 Spatial Arbiter: Suppressed acoustic room leak '{current_node_id}' ({curr_rms:.0f}) "
+                f"in favor of louder room '{loudest_nid}' ({loudest_room})"
+            )
+            return loudest_nid, loudest_room
+
+        return current_node_id, current_room
 
     def _get_room(self, node_id: str) -> Optional[str]:
         if self.gateway and hasattr(self.gateway, "registry") and self.gateway.registry:
-            node = self.gateway.registry.get_all_nodes().get(node_id, {})
-            room = node.get("room")
-            if room and room != "unknown":
-                return room
+            nodes = self.gateway.registry.get_all_nodes()
+            if isinstance(nodes, dict):
+                node_info = nodes.get(node_id)
+                if isinstance(node_info, dict):
+                    room = node_info.get("room")
+                    if room and room != "unknown":
+                        return room
         return None
 
 class AudioServer:
@@ -145,12 +181,37 @@ class AudioServer:
         self._ws_nodes: dict = {}
 
         self._active_speakers: set = set()
-        self._playback_lock = asyncio.Lock()
+        self._playback_locks: dict = collections.defaultdict(asyncio.Lock)
+        self._default_playback_lock = asyncio.Lock()
 
         self._asr_lock = asyncio.Lock()
         self._followup_pending = {}
-        self._active_voice_session = None
+        self._active_voice_sessions: dict = {}
         self.arbiter = StreamArbiter(gateway=self.gateway)
+
+    @property
+    def _active_voice_session(self) -> Optional[dict]:
+        if not self._active_voice_sessions:
+            return None
+        latest = max(self._active_voice_sessions.values(), key=lambda s: s.get("timestamp", 0), default=None)
+        if latest and (time.monotonic() - latest.get("timestamp", 0)) < 3.5:
+            return latest
+        return None
+
+    @_active_voice_session.setter
+    def _active_voice_session(self, val: Optional[dict]):
+        if not val:
+            self._active_voice_sessions.clear()
+        elif isinstance(val, dict):
+            room = val.get("room") or val.get("detected_room")
+            if not room and "node_id" in val:
+                room = self.arbiter._get_room(val["node_id"]) or val["node_id"]
+            room = room or "default"
+            self._active_voice_sessions[room] = val
+
+    @property
+    def _playback_lock(self) -> asyncio.Lock:
+        return self._default_playback_lock
 
     def _is_ws_alive(self, ws) -> bool:
         """Kiểm tra websocket còn sống không (tương thích mọi version websockets)."""
@@ -466,6 +527,7 @@ class AudioServer:
                                 websocket.node_id = node_id
                                 websocket.asr_only = cmd.get("asr_only") is True
                                 websocket.audio_relay = cmd.get("audio_relay") is True
+                                websocket.local_kws = cmd.get("local_kws") is True
                                 if is_spk:
                                     self._active_speakers.add(websocket)
                                     logger.info(f"📢 ESP32 speaker registered from {client_addr} (Active speaker pool: {len(self._active_speakers)})")
@@ -553,6 +615,9 @@ class AudioServer:
                             continue
 
                         if msg_type == "start":
+                            if getattr(self.gateway, "local_kws_enabled", False) or getattr(websocket, "local_kws", False):
+                                await websocket.send(json.dumps({"type": "error", "error": "local_kws_only"}))
+                                continue
                             if not is_authenticated:
                                 logger.warning(f"Rejected start from unauthenticated socket {client_addr}")
                                 await websocket.send(json.dumps({"type": "error", "error": "unauthorized"}))
@@ -585,7 +650,9 @@ class AudioServer:
 
                             websocket.asr_only = cmd.get("asr_only") is True
                             websocket.audio_relay = cmd.get("audio_relay") is True
-                            if self._playback_lock.locked():
+                            client_room = self.arbiter._get_room(client_node_id) if client_node_id else None
+                            room_playback_lock = self._playback_locks[client_room] if client_room else self._default_playback_lock
+                            if room_playback_lock.locked() or (client_room and self._default_playback_lock.locked()):
                                 curr_node = client_node_id or "node_voice"
                                 logger.info(f"🔇 Rejecting mic stream from '{curr_node}': speaker is actively playing TTS audio")
                                 await websocket.send(json.dumps({
@@ -658,18 +725,6 @@ class AudioServer:
                                 await websocket.send(json.dumps({"type": "error", "error": "forbidden"}))
                                 continue
 
-                            if self._active_voice_session and (now_ts - self._active_voice_session.get("timestamp", 0)) < 3.5:
-                                active_nid = self._active_voice_session.get("node_id")
-                                if active_nid and active_nid != curr_node:
-                                    logger.info(f"🔇 Spatial Arbiter: Suppressed concurrent stream from '{curr_node}' (active session already on '{active_nid}')")
-                                    await websocket.send(json.dumps({
-                                        "type": "suppressed",
-                                        "dominant_node": active_nid,
-                                        "detected_room": self.arbiter._get_room(active_nid)
-                                    }))
-                                    pcm_chunks.clear()
-                                    continue
-
                             dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
                             logger.info(
                                 f"🛑 Voice recording ENDED — "
@@ -688,7 +743,21 @@ class AudioServer:
                                 pcm_chunks.clear()
                                 continue
 
-                            self._active_voice_session = {"node_id": curr_node, "timestamp": now_ts}
+                            curr_room = detected_room or self.arbiter._get_room(curr_node) or curr_node
+                            active_session = self._active_voice_sessions.get(curr_room)
+                            if active_session and (now_ts - active_session.get("timestamp", 0)) < 3.5:
+                                active_nid = active_session.get("node_id")
+                                if active_nid and active_nid != curr_node:
+                                    logger.info(f"🔇 Spatial Arbiter: Suppressed concurrent stream from '{curr_node}' (active session already on '{active_nid}' in {curr_room})")
+                                    await websocket.send(json.dumps({
+                                        "type": "suppressed",
+                                        "dominant_node": active_nid,
+                                        "detected_room": curr_room
+                                    }))
+                                    pcm_chunks.clear()
+                                    continue
+
+                            self._active_voice_sessions[curr_room] = {"node_id": curr_node, "timestamp": now_ts}
 
                             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                                 self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
@@ -761,9 +830,6 @@ class AudioServer:
                             f"reached — auto-stopping"
                         )
                         recording = False
-                        await websocket.send(json.dumps({
-                            "type": "status", "state": "processing"
-                        }))
                         if pcm_chunks:
                             full_pcm = np.concatenate(pcm_chunks)
                             curr_node = stream_source_id or client_node_id or "node_voice"
@@ -771,7 +837,40 @@ class AudioServer:
                                 pcm_chunks.clear()
                                 await websocket.send(json.dumps({"type": "error", "error": "forbidden"}))
                                 continue
+
                             dominant_nid, detected_room = self.arbiter.determine_dominant_room(curr_node)
+                            if dominant_nid and dominant_nid != curr_node:
+                                logger.info(f"🔇 Spatial Arbiter: Suppressed weaker stream '{curr_node}' in favor of dominant '{dominant_nid}' ({detected_room})")
+                                await websocket.send(json.dumps({
+                                    "type": "suppressed",
+                                    "dominant_node": dominant_nid,
+                                    "detected_room": detected_room
+                                }))
+                                pcm_chunks.clear()
+                                continue
+
+                            now_ts = time.monotonic()
+                            curr_room = detected_room or self.arbiter._get_room(curr_node) or curr_node
+                            active_session = self._active_voice_sessions.get(curr_room)
+                            if active_session and (now_ts - active_session.get("timestamp", 0)) < 3.5:
+                                active_nid = active_session.get("node_id")
+                                if active_nid and active_nid != curr_node:
+                                    logger.info(f"🔇 Spatial Arbiter: Suppressed concurrent stream from '{curr_node}' (active session already on '{active_nid}' in {curr_room})")
+                                    await websocket.send(json.dumps({
+                                        "type": "suppressed",
+                                        "dominant_node": active_nid,
+                                        "detected_room": curr_room
+                                    }))
+                                    pcm_chunks.clear()
+                                    continue
+
+                            self._active_voice_sessions[curr_room] = {"node_id": curr_node, "timestamp": now_ts}
+
+                            if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                                self.gateway.broadcast_event("audio_state", {"state": "PROCESSING"})
+                            await websocket.send(json.dumps({
+                                "type": "status", "state": "processing"
+                            }))
                             await self._process_audio(
                                 websocket, full_pcm, sample_rate,
                                 client_node_id=curr_node,
@@ -840,6 +939,13 @@ class AudioServer:
           3. Command Dispatch (MQTT)
           4. TTS Response → PCM → stream to ESP32 speaker
         """
+        if getattr(self.gateway, "local_kws_enabled", False) or not getattr(self.gateway, "asr", None):
+            logger.warning("Rejected obsolete microphone/ASR uplink; SubBox owns local KWS")
+            await websocket.send(json.dumps({
+                "type": "transcript", "text": "", "accepted": False, "reason": "local_kws"
+            }))
+            return
+
         followup_deadline = self._followup_pending.pop(client_node_id, 0)
         was_followup = followup_deadline > time.monotonic()
         duration_s = len(pcm_samples) / sample_rate
@@ -848,23 +954,20 @@ class AudioServer:
             f"from {client_node_id} (detected_room={detected_room})"
         )
 
-        if not self.gateway or not hasattr(self.gateway, "asr"):
-            logger.error("Gateway ASR engine not available")
-            return
-
-        if self._asr_lock.locked():
+        try:
+            async with asyncio.timeout(5.0):
+                async with self._asr_lock:
+                    inference = asyncio.create_task(asyncio.to_thread(
+                        self.gateway.asr.transcribe_with_confidence, pcm_samples, sample_rate))
+                    try:
+                        text, confidence = await asyncio.shield(inference)
+                    except asyncio.CancelledError:
+                        await inference
+                        raise
+        except (TimeoutError, asyncio.TimeoutError):
             await websocket.send(json.dumps({"type": "transcript", "text": "", "accepted": False,
                                              "reason": "asr_busy"}))
             return
-        async with self._asr_lock:
-            inference = asyncio.create_task(asyncio.to_thread(
-                self.gateway.asr.transcribe_with_confidence, pcm_samples, sample_rate))
-            try:
-                text, confidence = await asyncio.shield(inference)
-            except asyncio.CancelledError:
-
-                await inference
-                raise
 
         if was_followup and not text:
             dialog = getattr(self.gateway, "dialog", None)
@@ -930,6 +1033,17 @@ class AudioServer:
         elif voice_reply:
             await self._send_voice_reply(websocket, voice_reply, follow_up=follow_up, broadcast=False, follow_up_node_id=client_node_id)
 
+    async def speak_kws(self, subbox_id, text, result, synthesis_slots):
+        """Reply only to the identified speaker; local firmware owns follow-up."""
+        ws = self._ws_nodes.get(subbox_id)
+        if not ws or not self._is_ws_alive(ws) or not getattr(ws, "has_speaker", False):
+            return False
+        async with synthesis_slots:
+            pcm = await self.gateway.tts.synthesize_pcm(text, sample_rate=config.AUDIO_SAMPLE_RATE)
+        if not pcm or self._ws_nodes.get(subbox_id) is not ws or not self._is_ws_alive(ws):
+            return False
+        return await self._broadcast_pcm_stream([ws], pcm, kws_result=result)
+
     async def speak_proactive(self, text: str, node_id: str = None) -> bool:
         """
         Chủ động phát âm thanh ra loa ESP32 (không cần user gọi trước).
@@ -964,7 +1078,8 @@ class AudioServer:
                 text, sample_rate=config.AUDIO_SAMPLE_RATE
             )
             if pcm_audio:
-                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=False)
+                is_bcast = not node_id or str(node_id).lower() in ("all", "broadcast", "*")
+                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=False, broadcast=is_bcast)
                 return True
             else:
                 mp3_audio = await self.gateway.tts.synthesize(text)
@@ -1013,7 +1128,7 @@ class AudioServer:
         )
 
         if pcm_audio:
-            await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id)
+            await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id, broadcast=broadcast)
         else:
 
             logger.warning("PCM synthesis failed, trying raw MP3 fallback")
@@ -1037,7 +1152,7 @@ class AudioServer:
             if target:
                 await self._broadcast_pcm_stream([target], pcm_bytes, follow_up=follow_up, initiator_ws=websocket, follow_up_node_id=follow_up_node_id)
 
-    async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None, follow_up_node_id=None):
+    async def _broadcast_pcm_stream(self, targets: list, pcm_bytes: bytes, follow_up: bool = False, initiator_ws=None, follow_up_node_id=None, broadcast: bool = False, kws_result=None):
         """
         Stream raw PCM audio data to ESP32 speaker(s).
         Protected by self._playback_lock so multiple streams can never interleave or corrupt audio.
@@ -1047,7 +1162,35 @@ class AudioServer:
         targets = [ws for ws in targets if (getattr(ws, "has_speaker", False) or (getattr(ws, "has_speaker", True) and not getattr(ws, "audio_relay", False))) and self._is_ws_alive(ws)]
         if not targets:
             return
-        async with self._playback_lock:
+
+        valid_targets = [ws for ws in targets if self._is_ws_alive(ws)]
+        if not valid_targets:
+            return
+
+        active_spk_count = len([w for w in self._active_speakers if self._is_ws_alive(w)])
+        is_broadcast = broadcast or (len(valid_targets) > 1 and len(valid_targets) == active_spk_count)
+
+        target_rooms = set()
+        lock_keys = set()
+        for ws in valid_targets:
+            nid = getattr(ws, "node_id", None) or getattr(ws, "client_node_id", None)
+            rm = self.arbiter._get_room(nid) if nid else None
+            # All playback paths share the physical speaker lock.
+            lock_keys.add(f"speaker_{nid or id(ws)}")
+            if kws_result is None and rm:
+                target_rooms.add(rm)
+                lock_keys.add(rm)
+
+        locks_to_acquire = []
+        if is_broadcast:
+            locks_to_acquire.append(self._default_playback_lock)
+        for k in sorted(lock_keys):
+            locks_to_acquire.append(self._playback_locks[k])
+
+        async with contextlib.AsyncExitStack() as stack:
+            for lock in locks_to_acquire:
+                await stack.enter_async_context(lock)
+
             valid_targets = [ws for ws in targets if self._is_ws_alive(ws)]
             if not valid_targets:
                 return
@@ -1063,91 +1206,110 @@ class AudioServer:
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("audio_state", {"state": "PLAYING"})
 
+            if kws_result is not None:
+                notify_nodes = list(valid_targets)
+            elif is_broadcast:
+                notify_nodes = list({ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)})
+            else:
+                notify_nodes = list({
+                    ws for ws in self._ws_nodes.values()
+                    if self._is_ws_alive(ws) and (
+                        (self.arbiter._get_room(getattr(ws, "node_id", None) or getattr(ws, "client_node_id", None)) in target_rooms)
+                        or ws in valid_targets
+                    )
+                })
+
             busy_msg = json.dumps({"type": "speaker_busy", "busy": True})
-            all_nodes = list({ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)})
-            if all_nodes:
-                await asyncio.gather(*[ws.send(busy_msg) for ws in all_nodes], return_exceptions=True)
+            if notify_nodes:
+                await asyncio.gather(*[ws.send(busy_msg) for ws in notify_nodes], return_exceptions=True)
 
-            start_msg = json.dumps({
-                "type": "audio_start",
-                "format": "pcm",
-                "sample_rate": config.AUDIO_SAMPLE_RATE,
-                "channels": config.AUDIO_CHANNELS,
-                "sample_width": config.AUDIO_SAMPLE_WIDTH,
-                "size": total_len,
-            })
-            results = await asyncio.gather(*[ws.send(start_msg) for ws in valid_targets], return_exceptions=True)
-            dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
-            if dead:
-                for d in dead:
-                    self._active_speakers.discard(d)
-                valid_targets = [ws for ws in valid_targets if ws not in dead]
-                if not valid_targets:
-                    return
-
-            await asyncio.sleep(0.030)
-
-            chunks_sent = 0
-            bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH
-            for i in range(0, total_len, chunk_size):
-                chunk = pcm_bytes[i:i + chunk_size]
-                results = await asyncio.gather(*[ws.send(chunk) for ws in valid_targets], return_exceptions=True)
+            try:
+                start_msg = json.dumps({
+                    "type": "audio_start",
+                    "format": "pcm",
+                    "sample_rate": config.AUDIO_SAMPLE_RATE,
+                    "channels": config.AUDIO_CHANNELS,
+                    "sample_width": config.AUDIO_SAMPLE_WIDTH,
+                    "size": total_len,
+                })
+                results = await asyncio.gather(*[ws.send(start_msg) for ws in valid_targets], return_exceptions=True)
                 dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
                 if dead:
                     for d in dead:
                         self._active_speakers.discard(d)
                     valid_targets = [ws for ws in valid_targets if ws not in dead]
                     if not valid_targets:
-                        logger.warning("All target speaker websockets disconnected during streaming")
-                        break
+                        return
 
-                chunks_sent += 1
+                await asyncio.sleep(0.030)
 
-                if chunks_sent <= 16:
-                    await asyncio.sleep(0.002)
-                else:
-                    chunk_duration = len(chunk) / bytes_per_sec
-                    await asyncio.sleep(chunk_duration * 0.80)
+                chunks_sent = 0
+                bytes_per_sec = config.AUDIO_SAMPLE_RATE * config.AUDIO_SAMPLE_WIDTH
+                for i in range(0, total_len, chunk_size):
+                    chunk = pcm_bytes[i:i + chunk_size]
+                    results = await asyncio.gather(*[ws.send(chunk) for ws in valid_targets], return_exceptions=True)
+                    dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
+                    if dead:
+                        for d in dead:
+                            self._active_speakers.discard(d)
+                        valid_targets = [ws for ws in valid_targets if ws not in dead]
+                        if not valid_targets:
+                            logger.warning("All target speaker websockets disconnected during streaming")
+                            break
 
-            tasks = []
-            for ws in valid_targets:
-                ws_follow_up = follow_up if (ws == initiator_ws or initiator_ws is None) else False
-                end_payload = {
-                    "type": "audio_end", "follow_up": ws_follow_up,
-                    "timeout_ms": 6000 if ws_follow_up else 0
-                }
-                parent = getattr(ws, "node_id", "")
-                mqtt = getattr(self.gateway, "mqtt", None)
-                identity = getattr(mqtt, "node_identities", {}).get(follow_up_node_id)
-                if (ws_follow_up and identity and getattr(mqtt, "session_id", 0)
-                        and self._relay_source_epoch(parent, follow_up_node_id) is not None):
-                    command = {"protocol_version": 3, "node_id": follow_up_node_id,
-                               "hardware_uid": identity["hardware_uid"],
-                               "config_version": identity["config_version"],
-                               "request_id": secrets.randbelow(0x7ffffffe) + 1,
-                               "session_id": mqtt.session_id, "cmd": "LISTEN_FOLLOWUP"}
-                    end_payload["follow_up_command"] = json.dumps(command, separators=(",", ":"))
-                    self._followup_pending = {node: deadline for node, deadline in self._followup_pending.items()
-                                              if deadline > time.monotonic()}
-                    self._followup_pending[follow_up_node_id] = time.monotonic() + 30
-                    dialog = getattr(self.gateway, "dialog", None)
-                    if dialog and follow_up_node_id in dialog._sessions:
-                        dialog._sessions[follow_up_node_id].created_at = time.time()
-                end_msg = json.dumps(end_payload)
-                tasks.append(ws.send(end_msg))
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                    chunks_sent += 1
 
-            logger.info(
-                f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to {len(valid_targets)} ESP32(s)"
-            )
-            if self.gateway and hasattr(self.gateway, "broadcast_event"):
-                self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
+                    if chunks_sent <= 16:
+                        await asyncio.sleep(0.002)
+                    else:
+                        chunk_duration = len(chunk) / bytes_per_sec
+                        await asyncio.sleep(chunk_duration * 0.80)
 
-            free_msg = json.dumps({"type": "speaker_busy", "busy": False})
-            all_nodes = list({ws for ws in self._ws_nodes.values() if self._is_ws_alive(ws)})
-            if all_nodes:
-                await asyncio.gather(*[ws.send(free_msg) for ws in all_nodes], return_exceptions=True)
+                tasks = []
+                for ws in valid_targets:
+                    ws_follow_up = follow_up if (ws == initiator_ws or initiator_ws is None) else False
+                    end_payload = {
+                        "type": "audio_end", "follow_up": ws_follow_up,
+                        "timeout_ms": 6000 if ws_follow_up else 0
+                    }
+                    parent = getattr(ws, "node_id", "")
+                    mqtt = getattr(self.gateway, "mqtt", None)
+                    identity = getattr(mqtt, "node_identities", {}).get(follow_up_node_id)
+                    if (ws_follow_up and identity and getattr(mqtt, "session_id", 0)
+                            and self._relay_source_epoch(parent, follow_up_node_id) is not None):
+                        command = {"protocol_version": 3, "node_id": follow_up_node_id,
+                                   "hardware_uid": identity["hardware_uid"],
+                                   "config_version": identity["config_version"],
+                                   "request_id": secrets.randbelow(0x7ffffffe) + 1,
+                                   "session_id": mqtt.session_id, "cmd": "LISTEN_FOLLOWUP"}
+                        end_payload["follow_up_command"] = json.dumps(command, separators=(",", ":"))
+                        self._followup_pending = {node: deadline for node, deadline in self._followup_pending.items()
+                                                  if deadline > time.monotonic()}
+                        self._followup_pending[follow_up_node_id] = time.monotonic() + 30
+                        dialog = getattr(self.gateway, "dialog", None)
+                        if dialog and follow_up_node_id in dialog._sessions:
+                            dialog._sessions[follow_up_node_id].created_at = time.time()
+                    end_msg = json.dumps(end_payload)
+                    tasks.append(ws.send(end_msg))
+                if tasks:
+                    end_results = await asyncio.gather(*tasks, return_exceptions=True)
+                    valid_targets = [ws for ws, res in zip(valid_targets, end_results) if not isinstance(res, Exception)]
+
+                logger.info(
+                    f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to {len(valid_targets)} ESP32(s)"
+                )
+            finally:
+                if self.gateway and hasattr(self.gateway, "broadcast_event"):
+                    self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
+
+                free_msg = json.dumps({"type": "speaker_busy", "busy": False})
+                if notify_nodes:
+                    await asyncio.gather(*[ws.send(free_msg) for ws in notify_nodes], return_exceptions=True)
+            if kws_result is not None and valid_targets:
+                done = {"type": "kws_playback_done", **{key:kws_result[key] for key in ("session_id", "request_id", "origin_node")}}
+                await valid_targets[0].send(json.dumps(done))
+                return True
+            return bool(valid_targets)
 
     async def _send_audio_stream_mp3(self, websocket, audio_bytes: bytes, follow_up: bool = False):
         """

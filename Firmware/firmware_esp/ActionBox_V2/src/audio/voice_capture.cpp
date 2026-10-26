@@ -35,6 +35,7 @@ static const char *TAG = "VOICE_CAP";
 #define VAD_NO_SPEECH_CHUNKS       400
 #define VAD_COOLDOWN_CHUNKS        266
 #define CAPTURE_VAD_SILENCE_ENERGY 500000LL
+#define WAKE_TAIL_SKIP_CHUNKS       40
 
 #define WAKE_TRIGGER_HIESP         0
 #define WAKE_TRIGGER_FOLLOWUP      2
@@ -57,6 +58,7 @@ static uint32_t s_stream_frames = 0;
 static uint32_t s_silence_frames = 0;
 static uint32_t s_speech_frames = 0;
 static uint32_t s_cooldown_frames = 0;
+static uint32_t s_wake_tail_frames = 0;
 
 static float s_latest_rms = 0.0f;
 static bool  s_latest_speech = false;
@@ -155,6 +157,8 @@ void voice_capture_start_streaming(uint8_t trigger_source) {
     s_stream_frames = 0;
     s_silence_frames = 0;
     s_speech_frames = 0;
+    // Pilot PCM contains ~200 ms of Hi ESP after detection; exclude it from commands/VAD.
+    s_wake_tail_frames = trigger_source == WAKE_TRIGGER_HIESP ? WAKE_TAIL_SKIP_CHUNKS : 0;
     s_is_streaming = true;
 
     led_set_pattern(2, LED_PATTERN_ON);
@@ -344,7 +348,7 @@ static void voice_capture_task(void *pvParameters) {
             clean_buf[i] = (int16_t)filtered;
         }
 
-        // Command recognition runs on Pi; synchronous KWS here overruns the 90 ms DMA buffer.
+        // Command recognition runs on SubBox; synchronous KWS here overruns the DMA buffer.
 
         for (int i = 0; i < mono_samples; i++) {
             chunk_buf[chunk_idx++] = clean_buf[i];
@@ -368,6 +372,12 @@ static void voice_capture_task(void *pvParameters) {
                 if (!s_is_streaming) {
                     if (s_cooldown_frames > 0) s_cooldown_frames--;
                 } else {
+
+                    if (s_wake_tail_frames > 0) {
+                        --s_wake_tail_frames;
+                        chunk_idx = 0;
+                        continue;
+                    }
 
                     ActionBoxAudioChunkPacket chunk_pkt = {};
                     chunk_pkt.msg_type = MSG_TYPE_AUDIO_CHUNK;

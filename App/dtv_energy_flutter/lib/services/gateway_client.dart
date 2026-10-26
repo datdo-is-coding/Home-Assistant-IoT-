@@ -257,6 +257,7 @@ class GatewayClient extends ChangeNotifier {
       gatewayUrl: () => serverUrl,
       tokenProvider: () => _token,
       httpClientFactory: () => _client,
+      closeClientOnDisconnect: false, // REST owns this shared client.
       onEvent: (event) {
         _handleSseEvent(event);
         if (!_eventStreamCtrl.isClosed) {
@@ -304,7 +305,7 @@ class GatewayClient extends ChangeNotifier {
         break;
       case 'node_telemetry':
         if (nodeId != null && nodes.containsKey(nodeId)) {
-          nodes[nodeId]['pzem'] = event.data;
+          if (event.data['channels'] is! Map) nodes[nodeId]['pzem'] = event.data;
         }
         break;
       case 'device_deleted':
@@ -340,11 +341,12 @@ class GatewayClient extends ChangeNotifier {
 
   Future<Map<String, dynamic>> _send(String url, String path, String token,
       {Map<String, dynamic>? body,
+      String? method,
       Duration timeout = const Duration(seconds: 10),
       List<int>? bytes,
       String? filename}) async {
     try {
-      final req = http.Request(body == null && bytes == null ? 'GET' : 'POST',
+      final req = http.Request(method ?? (body == null && bytes == null ? 'GET' : 'POST'),
           Uri.parse('$url$path'))
         ..followRedirects = false
         ..headers['Accept'] = 'application/json';
@@ -469,14 +471,14 @@ class GatewayClient extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> request(String path,
-      {Map<String, dynamic>? body, Duration? timeout}) async {
+      {Map<String, dynamic>? body, String? method, Duration? timeout}) async {
     if (!authenticated) {
       throw const GatewayException('Vui lòng đăng nhập.', 401);
     }
     final currentGen = _generation;
     try {
       final res = await _send(serverUrl, path, _token,
-          body: body, timeout: timeout ?? const Duration(seconds: 10));
+          body: body, method: method, timeout: timeout ?? const Duration(seconds: 10));
       if (currentGen != _generation) {
         throw const GatewayException('Phiên làm việc đã thay đổi');
       }

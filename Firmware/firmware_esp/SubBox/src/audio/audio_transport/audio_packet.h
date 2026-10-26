@@ -23,17 +23,6 @@ typedef enum {
     AUDIO_MSG_TYPE_DOWNLINK_TTS         = 0x23
 } AudioMsgType;
 
-#define MSG_TYPE_KEYWORD_EVENT 0x25
-
-typedef struct __attribute__((packed)) {
-    uint8_t  msg_type;
-    uint8_t  seq;
-    uint8_t  keyword_id;
-    uint8_t  confidence_pct;
-    uint32_t session_id;
-    uint32_t rel_time_ms;
-} ActionBoxKeywordEventPacket;
-
 #pragma pack(push, 1)
 
 typedef struct {

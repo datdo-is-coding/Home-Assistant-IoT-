@@ -34,6 +34,19 @@ def get_html_page() -> str:
 
 HTML_PAGE = get_html_page()
 
+async def _run_nmcli(*args):
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "nmcli", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        return proc
+    except Exception as e:
+        logger.debug(f"nmcli {' '.join(args)} error: {e}")
+        return None
+
 class WebServer:
     """Async HTTP + SSE dashboard & Aetheria OS manager."""
 
@@ -271,6 +284,14 @@ class WebServer:
                     allowed = target in auth.get_user_devices(current_user["id"])
                 if not allowed:
                     await self._respond(writer, 403, {"error": "Insufficient permissions"}); return
+
+            if path == "/api/kws/config" and method in ("GET", "PUT"):
+                try:
+                    data = self.gateway.kws.get_config() if method == "GET" else await self.gateway.kws.set_config(json.loads(raw_body))
+                    await self._respond(writer, 200, data)
+                except (ValueError, TypeError) as exc:
+                    await self._respond(writer, 409 if str(exc) == "revision_conflict" else 400, {"error": str(exc)})
+                return
 
             # Route guard for device lifecycle & commissioning: admin only
             is_lifecycle_endpoint = (
@@ -708,9 +729,20 @@ class WebServer:
                     parts = [p for p in path.split("/") if p]
                     if len(parts) >= 3:
                         dev_id = parts[2]
-                limit = int(query.get("limit", [50])[0])
-                records = self.gateway.registry.get_telemetry_history(dev_id, limit=limit) if dev_id else []
-                resp_data = {"device_id": dev_id, "telemetry": records}
+                try:
+                    limit = max(1, min(int(query.get("limit", [50])[0]), 1000))
+                except (TypeError, ValueError):
+                    limit = 50
+                channel = (query.get("channel", [None])[0] or "").strip() or None
+                if channel:
+                    records = self.gateway.registry.get_channel_telemetry_history(
+                        dev_id, channel=channel, limit=limit) if dev_id else []
+                    resp_data = {"device_id": dev_id, "channel": channel, "telemetry": records}
+                else:
+                    records = self.gateway.registry.get_telemetry_history(dev_id, limit=limit) if dev_id else []
+                    channel_records = self.gateway.registry.get_channel_telemetry_history(
+                        dev_id, limit=limit) if dev_id else []
+                    resp_data = {"device_id": dev_id, "telemetry": records, "channels": channel_records}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
                 writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/json\r\n"
                               f"Content-Length: {len(body)}\r\n"
@@ -1115,7 +1147,8 @@ class WebServer:
                         )
                         out, err = await proc.communicate()
                         if proc.returncode == 0:
-                            asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
+                            for hs in ("Aetheria-Hotspot", "GW-Setup-Hotspot"):
+                                asyncio.create_task(_run_nmcli("con", "down", hs))
                             resp_data = {"success": True, "message": f"Connected to {ssid}"}
                         else:
 
@@ -1125,15 +1158,13 @@ class WebServer:
                             )
                             up_out, up_err = await up_proc.communicate()
                             if up_proc.returncode == 0:
-                                asyncio.create_task(asyncio.create_subprocess_exec("nmcli", "con", "down", "Aetheria-Hotspot"))
+                                for hs in ("Aetheria-Hotspot", "GW-Setup-Hotspot"):
+                                    asyncio.create_task(_run_nmcli("con", "down", hs))
                                 resp_data = {"success": True, "message": f"Connected to {ssid}"}
                             else:
 
-                                down_proc = await asyncio.create_subprocess_exec(
-                                    "nmcli", "con", "down", "Aetheria-Hotspot",
-                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                                )
-                                await down_proc.communicate()
+                                for hs in ("Aetheria-Hotspot", "GW-Setup-Hotspot"):
+                                    await _run_nmcli("con", "down", hs)
                                 await asyncio.sleep(2)
                                 retry_proc = await asyncio.create_subprocess_exec(
                                     *cmd,
@@ -1143,6 +1174,8 @@ class WebServer:
                                 if retry_proc.returncode == 0:
                                     resp_data = {"success": True, "message": f"Connected to {ssid}"}
                                 else:
+                                    for hs in ("Aetheria-Hotspot", "GW-Setup-Hotspot"):
+                                        asyncio.create_task(_run_nmcli("con", "up", hs))
                                     err_msg = retry_err.decode().strip() or retry_out.decode().strip() or err.decode().strip() or out.decode().strip()
                                     resp_data = {"success": False, "error": err_msg}
                 except Exception as e:

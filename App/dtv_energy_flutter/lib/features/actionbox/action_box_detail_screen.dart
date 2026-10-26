@@ -12,6 +12,7 @@ import '../../models/device.dart';
 import '../../models/device_lifecycle.dart';
 import '../../providers/smart_home_providers.dart';
 import '../../services/gateway_client.dart';
+import '../voice/kws_config_screen.dart';
 
 class FeatureActionBoxDetailScreen extends ConsumerStatefulWidget {
   final String actionBoxId;
@@ -316,7 +317,9 @@ class _FeatureActionBoxDetailScreenState
           children: [
             Text('Thiết bị: ${ab.name} (${ab.boardModel.toUpperCase()})'),
             const SizedBox(height: 10),
-            Text('Số kênh bị ảnh hưởng: ${ab.channels.length} kênh (${channelNames.join(', ')}).'),
+            Text(ab.isSubBox
+                ? 'SubBox sẽ mất kết nối Wi-Fi. Các ActionBox qua SubBox này tạm thời không điều khiển được từ app.'
+                : 'Số kênh bị ảnh hưởng: ${ab.channels.length} kênh (${channelNames.join(', ')}).'),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(10),
@@ -324,9 +327,11 @@ class _FeatureActionBoxDetailScreenState
                 color: Colors.green.shade50,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
-                '✓ DỮ LIỆU ĐƯỢC BẢO LƯU: Tên phòng, tên 3 kênh rơ-le, phân loại phụ tải, bí danh giọng nói và dữ liệu đo công suất (calibration) được giữ nguyên.',
-                style: TextStyle(fontSize: 12, color: Colors.black87),
+              child: Text(
+                ab.isSubBox
+                    ? 'Tên phòng và danh sách ActionBox đã ghép nối được giữ nguyên.'
+                    : '✓ DỮ LIỆU ĐƯỢC BẢO LƯU: Tên phòng, tên 3 kênh rơ-le, phân loại phụ tải, bí danh giọng nói và dữ liệu đo công suất (calibration) được giữ nguyên.',
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
               ),
             ),
             const SizedBox(height: 8),
@@ -336,9 +341,11 @@ class _FeatureActionBoxDetailScreenState
                 color: Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
-                '! DỮ LIỆU BỊ ĐẶT LẠI: Khóa ghép nối tuyến SubBox hiện tại sẽ bị xóa để quét tuyến mới.',
-                style: TextStyle(fontSize: 12, color: Colors.black87),
+              child: Text(
+                ab.isSubBox
+                    ? 'Xóa Wi-Fi đã lưu. Bạn cần ở gần SubBox để thiết lập lại mạng.'
+                    : '! DỮ LIỆU BỊ ĐẶT LẠI: Khóa ghép nối tuyến SubBox hiện tại sẽ bị xóa để quét tuyến mới.',
+                style: const TextStyle(fontSize: 12, color: Colors.black87),
               ),
             ),
           ],
@@ -392,7 +399,9 @@ class _FeatureActionBoxDetailScreenState
             Text('Thiết bị: ${ab.name} (${ab.boardModel.toUpperCase()})'),
             const SizedBox(height: 8),
             Text(
-              'Thao tác này sẽ xóa toàn bộ flash NVS người dùng. Toàn bộ ${ab.channels.length} kênh rơ-le (${channelNames.join(', ')}) sẽ bị ngắt điện về trạng thái an toàn (OFF).',
+              ab.isSubBox
+                  ? 'Xóa Wi-Fi, cấu hình SubBox và danh sách ghép nối. Các ActionBox qua SubBox này sẽ mất kết nối và cần được ghép lại.'
+                  : 'Thao tác này sẽ xóa toàn bộ flash NVS người dùng. Toàn bộ ${ab.channels.length} kênh rơ-le (${channelNames.join(', ')}) sẽ bị ngắt điện về trạng thái an toàn (OFF).',
               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
             ),
             const SizedBox(height: 10),
@@ -646,7 +655,24 @@ class _FeatureActionBoxDetailScreenState
                         ),
                       ),
 
+                    if (gateway.isAdmin) ...[
+                      ListTile(
+                        key: const Key('kws_config_tile'),
+                        leading: const Icon(Icons.record_voice_over_outlined),
+                        title: const Text('Khẩu lệnh tại SubBox'),
+                        subtitle: const Text('Gán phòng, đèn/quạt và kênh điều khiển'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const KwsConfigScreen(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+
                     // Hardware Channels Section
+                    if (!ab.isSubBox) ...[
                     Text(
                       '${ab.channels.length} Kênh phụ tải phần cứng',
                       style: const TextStyle(
@@ -675,6 +701,7 @@ class _FeatureActionBoxDetailScreenState
                       );
                     }),
 
+                    ],
                     const SizedBox(height: 24),
                     const Divider(),
                     const SizedBox(height: 16),
@@ -717,7 +744,9 @@ class _FeatureActionBoxDetailScreenState
                       icon: Icons.wifi_protected_setup_rounded,
                       iconColor: Colors.orange.shade700,
                       title: 'Đặt lại mạng & Khôi phục tuyến',
-                      subtitle: 'Xóa liên kết SubBox cũ và quét lại mạng ESP-NOW mới. Cấu hình phụ tải được bảo toàn.',
+                      subtitle: ab.isSubBox
+                          ? 'Xóa Wi-Fi đã lưu và mở thiết lập mạng. Giữ danh sách ActionBox đã ghép nối.'
+                          : 'Xóa liên kết SubBox cũ và quét lại mạng ESP-NOW mới. Cấu hình phụ tải được bảo toàn.',
                       onTap: () => _confirmNetworkResetDialog(ab),
                     ),
                     const SizedBox(height: 12),

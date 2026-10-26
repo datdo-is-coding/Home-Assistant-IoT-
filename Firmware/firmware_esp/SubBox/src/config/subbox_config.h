@@ -46,7 +46,8 @@
 #define TASK_PRIO_CONSOLE               2
 
 #define TASK_STACK_AUDIO_RX             (6 * 1024)
-#define TASK_STACK_AUDIO_MANAGER        (6 * 1024)
+// Local KWS inference (MFCC + quantized CNN) runs in this task.
+#define TASK_STACK_AUDIO_MANAGER        (24 * 1024)
 #define TASK_STACK_VAD                  (4 * 1024)
 #define TASK_STACK_ASR                  (16 * 1024)
 #define TASK_STACK_NLU                  (8 * 1024)

@@ -26,7 +26,6 @@ esp_err_t NVSManager::loadConfig(SubBoxPersistentConfig& c) {c={};return ESP_OK;
 extern "C" void subbox_led_peer_seen() {}
 extern "C" bool subbox_led_wifi_connected() {return true;}
 extern "C" bool subbox_led_mqtt_connected() {return true;}
-extern "C" void subbox_espnow_handle_keyword_event(const uint8_t*,int) {}
 int esp_now_send(const uint8_t* mac,const uint8_t* data,size_t len) {
     if(data[0]!=CLAIM_FRAME) return ESP_OK;
     assert(len==sizeof(ClaimFrame) && len<=250);++sends;

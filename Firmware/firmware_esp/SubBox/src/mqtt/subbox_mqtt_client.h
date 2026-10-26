@@ -15,13 +15,17 @@ public:
     bool init();
     void stop();
     bool isConnected() const { return m_connected; }
+    const std::string& nodeId() const { return m_subbox_id; }
+    bool flush(uint32_t timeout_ms);
 
     bool publishCore(const uint8_t* data, size_t length);
     bool publishState(const std::string& json_payload);
     bool publishEvent(const std::string& event_type, const std::string& json_payload);
     bool publishVoiceRequest(const std::string& origin_node_id, const std::string& transcript);
+    bool publishRaw(const std::string& topic, const std::string& json_payload);
 
     void registerCommandCallback(std::function<void(const std::string& topic, const std::string& payload)> cb);
+    void registerKwsCallback(std::function<void(const std::string& topic, const std::string& payload)> cb);
     void registerVoiceResponseCallback(std::function<void(const std::string& target_node_id, const std::string& text, const uint8_t* audio, size_t audio_len)> cb);
 
 private:
@@ -39,8 +43,14 @@ private:
     std::string m_topic_command;
     std::string m_topic_voice_req;
     std::string m_topic_voice_resp;
+    std::string m_topic_kws_command;
+    std::string m_topic_kws_ack;
 
     std::function<void(const std::string&, const std::string&)> m_cmd_callback;
+    std::function<void(const std::string&, const std::string&)> m_kws_callback;
     std::function<void(const std::string&, const std::string&, const uint8_t*, size_t)> m_voice_resp_callback;
+    std::string m_rx_topic;
+    std::string m_rx_payload;
+    size_t m_rx_total = 0;
     mutable std::mutex m_mutex;
 };

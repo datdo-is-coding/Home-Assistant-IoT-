@@ -95,6 +95,23 @@ class Device {
     }
   }
 
+  double? get currentAmps {
+    final current = metadata['current'];
+    return online && current is num && current.isFinite && current >= 0 ? current.toDouble() : null;
+  }
+
+  String get currentText => !online ? 'Dòng điện: mất kết nối'
+      : currentAmps == null ? 'Dòng điện: chưa có mẫu'
+      : 'Dòng điện: ${currentAmps!.toStringAsFixed(3)} A';
+
+  String get measurementText {
+    final voltage = metadata['voltage'];
+    return [currentText,
+      if (online && voltage is num && voltage.isFinite) '${voltage.toStringAsFixed(0)} V',
+      if (online && powerWatts != null && powerWatts!.isFinite) '${powerWatts!.toStringAsFixed(1)} W',
+    ].join(' · ');
+  }
+
   String get stateText {
     if (!online) return 'Ngoại tuyến';
     if (!isOn) return 'Đã tắt';

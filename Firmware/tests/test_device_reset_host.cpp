@@ -27,6 +27,7 @@ struct NvsEntry {
 static std::map<std::string, std::map<std::string, NvsEntry>> s_nvs_storage;
 static std::map<nvs_handle_t, std::string> s_nvs_handles;
 static nvs_handle_t s_next_handle = 1;
+static bool s_fail_commit = false;
 
 void mock_nvs_clear_all() {
     s_nvs_storage.clear();
@@ -158,7 +159,7 @@ esp_err_t nvs_erase_all(nvs_handle_t handle) {
     return ESP_OK;
 }
 
-esp_err_t nvs_commit(nvs_handle_t) { return ESP_OK; }
+esp_err_t nvs_commit(nvs_handle_t) { return s_fail_commit ? ESP_FAIL : ESP_OK; }
 void nvs_close(nvs_handle_t) {}
 
 // GPIO mock
@@ -296,7 +297,9 @@ void test_channel3_off_before_reset() {
     // Prepare and execute reset
     uint32_t epoch = nvs_storage_get_owner_epoch();
     assert(prepare_reset(ResetKind::FACTORY_RESET, "op_reset_ch3_test", epoch) == ESP_OK);
-    assert(execute_confirmed_reset(ResetKind::FACTORY_RESET, "op_reset_ch3_test") == ESP_OK);
+    const int restarts = s_mock_restart_count;
+    assert(complete_confirmed_reset(ResetKind::FACTORY_RESET, "op_reset_ch3_test") == ESP_OK);
+    assert(s_mock_restart_count == restarts);
 
     // Verify ALL relays, specifically Channel 3, are in RELAY_STATE_OFF
     assert(relay_get_state(1) == RELAY_STATE_OFF);
@@ -550,6 +553,11 @@ void test_subbox_factory_reset_preserves_uid() {
     assert(nvs_set_str(h, "pass", "SecretPassword") == ESP_OK);
     nvs_close(h);
 
+    assert(NVSManager::networkReset() == ESP_OK);
+    SubBoxPersistentConfig config{};
+    assert(NVSManager::loadConfig(config) == ESP_OK);
+    assert(config.wifi_ssid[0] == 0 && config.wifi_pass[0] == 0);
+
     // Perform SubBox Factory Reset
     assert(NVSManager::factoryReset() == ESP_OK);
 
@@ -567,6 +575,8 @@ void test_subbox_factory_reset_preserves_uid() {
     assert(nvs_get_str(h, "ssid", dummy, &len) == ESP_ERR_NOT_FOUND);
     nvs_close(h);
 
+    assert(NVSManager::loadConfig(config) == ESP_OK);
+    assert(config.wifi_ssid[0] == 0 && config.wifi_pass[0] == 0);
     printf("[TEST 7] PASS: SubBox factory reset preserved UID and erased user credentials.\n");
 }
 
@@ -593,11 +603,35 @@ void test_registration_persistence_and_encrypted_peer_isolation() {
     assert(!SecurityConfig::loadRegistration(0,restored));
 }
 
+void test_subbox_recovers_trusted_broker_after_discovery_downgrade() {
+    nvs_handle_t h;
+    assert(nvs_open("subbox_sec", NVS_READWRITE, &h) == ESP_OK);
+    nvs_set_str(h, "mqtt_uri", "mqtts://trusted-gateway:8883");
+    nvs_close(h);
+    assert(nvs_open("subbox_cfg", NVS_READWRITE, &h) == ESP_OK);
+    nvs_set_str(h, "broker", "mqtt://discovered-gateway:1883");
+    nvs_close(h);
+    SubBoxPersistentConfig config{};
+    assert(NVSManager::loadConfig(config) == ESP_OK);
+    assert(strcmp(config.mqtt_broker_uri, "mqtts://trusted-gateway:8883") == 0);
+    assert(nvs_open("subbox_cfg", NVS_READWRITE, &h) == ESP_OK);
+    nvs_set_str(h, "broker", "mqtts://new-enrolled-gateway:8883");
+    nvs_close(h);
+    assert(NVSManager::loadConfig(config) == ESP_OK);
+    assert(strcmp(config.mqtt_broker_uri, "mqtts://new-enrolled-gateway:8883") == 0);
+}
+
 int main() {
+    test_subbox_recovers_trusted_broker_after_discovery_downgrade();
     printf("============================================================\n");
     printf("   RUNNING ALL SAFE DEVICE RESET & NVS MIGRATION HOST TESTS  \n");
     printf("============================================================\n");
 
+    s_fail_commit = true;
+    assert(NVSManager::networkReset() != ESP_OK);
+    assert(NVSManager::factoryReset() != ESP_OK);
+    assert(SecurityConfig::factoryReset() != ESP_OK);
+    s_fail_commit = false;
     test_registration_persistence_and_encrypted_peer_isolation();
     test_calibration_survives_factory_reset();
     test_channel3_off_before_reset();

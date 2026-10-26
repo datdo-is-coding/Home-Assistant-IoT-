@@ -77,6 +77,14 @@ esp_err_t prepare_reset(ResetKind kind, const char* operation_id, uint32_t owner
 }
 
 esp_err_t execute_confirmed_reset(ResetKind kind, const char* operation_id) {
+    esp_err_t err = complete_confirmed_reset(kind, operation_id);
+    if (err != ESP_OK) return err;
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_restart();
+    return ESP_OK;
+}
+
+esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id) {
     if (kind == ResetKind::NONE) return ESP_ERR_INVALID_ARG;
 
     uint32_t epoch = nvs_storage_get_owner_epoch();
@@ -140,21 +148,15 @@ esp_err_t execute_confirmed_reset(ResetKind kind, const char* operation_id) {
     if (kind == ResetKind::REBOOT) {
         nvs_storage_generate_new_boot_id();
     } else if (kind == ResetKind::NETWORK_RESET) {
-        espnow_transport_clear_peers();
-        nvs_storage_reset_network();
+        err = espnow_transport_clear_peers();
+        if (err == ESP_OK) err = nvs_storage_reset_network();
     } else if (kind == ResetKind::FACTORY_RESET) {
-        espnow_transport_clear_peers();
-        nvs_storage_factory_reset(NULL);
+        err = espnow_transport_clear_peers();
+        if (err == ESP_OK) err = nvs_storage_factory_reset(NULL);
     }
 
     // 6. Clear reset_intent from NVS, commit
-    nvs_storage_clear_reset_intent();
-
-    // 7. Delay 100ms then call esp_restart()
-    vTaskDelay(pdMS_TO_TICKS(100));
-    esp_restart();
-
-    return ESP_OK;
+    return err == ESP_OK ? nvs_storage_clear_reset_intent() : err;
 }
 
 bool resume_interrupted_reset(void) {

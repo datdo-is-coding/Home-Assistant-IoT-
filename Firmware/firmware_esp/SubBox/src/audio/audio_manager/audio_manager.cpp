@@ -66,10 +66,11 @@ std::map<std::string, ActionBoxAudioChannel> AudioManager::getChannelSnapshots()
 void AudioManager::updateChannelMetrics(ActionBoxAudioChannel& ch, const AudioPacket& packet) {
     ch.last_timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
-    if (ch.packets_received > 0) {
-        uint16_t expected_seq = (ch.last_seq + 1) & 0xFFFF;
-        if (packet.sequence_num > expected_seq) {
-            uint16_t lost = packet.sequence_num - expected_seq;
+    {
+        uint16_t expected_seq = (ch.last_seq + 1) & 0xFF;
+        if (packet.sequence_num != expected_seq) {
+            m_session_failed = true;
+            uint16_t lost = (packet.sequence_num - expected_seq) & 0xFF;
             ch.packets_lost += lost;
             ESP_LOGW(TAG, "Node %s packet loss: %u packet(s) dropped (Expected %u, Got %u)",
                      ch.node_id.c_str(), lost, expected_seq, packet.sequence_num);
@@ -106,6 +107,9 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
 
     if (packet.msg_type == AUDIO_MSG_TYPE_STREAM_END) {
         if (m_session_active && m_active_source_node_id == node_id) {
+            const auto channel = m_channels.find(node_id);
+            if (channel == m_channels.end() || packet.sequence_num != channel->second.last_seq)
+                m_session_failed = true;
             m_stream_end_received = true;
             ESP_LOGI(TAG, "🛑 [STREAM_END] ActionBox %s signalled speech end", node_id.c_str());
         }
@@ -143,6 +147,9 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         m_session_active = true;
         m_stream_end_received = false;
         it->second.stream_buffer->clear();
+        it->second.last_seq = packet.sequence_num;
+        it->second.packets_received = 0;
+        it->second.packets_lost = 0;
         it->second.last_timestamp_ms = (uint32_t)(esp_timer_get_time() / 1000);
         ++m_session_generation;
         m_asr_start_pending = true;
@@ -153,16 +160,20 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         return;
     }
 
-    if (!packet.payload_len) return;
+    if (packet.msg_type != AUDIO_MSG_TYPE_STREAM_CHUNK || !packet.payload_len) return;
     // Only the selected microphone belongs to this wake-word/follow-up session.
-    if (!m_session_active || m_active_source_node_id != node_id) return;
+    if (!m_session_active || m_active_source_node_id != node_id || m_stream_end_received) return;
+    if (packet.payload_len > sizeof(packet.payload) || packet.payload_len % sizeof(int16_t)) {
+        m_session_failed = true;
+        return;
+    }
 
     ActionBoxAudioChannel& ch = it->second;
     updateChannelMetrics(ch, packet);
 
     size_t samples = packet.payload_len / sizeof(int16_t);
     const auto* pcm = reinterpret_cast<const int16_t*>(packet.payload);
-    ch.stream_buffer->write(pcm, samples);
+    if (ch.stream_buffer->write(pcm, samples) != samples) m_session_failed = true;
 }
 
 void AudioManager::evaluateSourceSelection() {
@@ -201,8 +212,6 @@ void AudioManager::evaluateSourceSelection() {
 
 void AudioManager::process() {
     std::unique_lock<std::mutex> lock(m_mutex);
-
-    evaluateSourceSelection();
 
     if (!m_session_active || m_active_source_node_id.empty()) {
         return;
@@ -264,16 +273,17 @@ void AudioManager::process() {
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     bool packet_silence = (uint32_t)(now_ms - it->second.last_timestamp_ms) > 1200;
 
-    if (m_stream_end_received) {
-        speech_finished = true;
-    } else if (m_vad && m_vad->speechEnded()) {
+    if (m_stream_end_received || m_session_failed) {
         speech_finished = true;
     } else if (packet_silence) {
         ESP_LOGI(TAG, "⏱️ Packet silence timeout (1.2s without audio chunks) from %s", m_active_source_node_id.c_str());
         speech_finished = true;
+        m_session_failed = true;
     }
 
     if (speech_finished) {
+        std::string final_text;
+        const std::string finished_source = m_active_source_node_id;
 
         while (active_buffer->getAvailableSamples() > 0) {
             size_t rem = active_buffer->getAvailableSamples();
@@ -293,20 +303,29 @@ void AudioManager::process() {
         }
 
         if (m_asr) {
+            const bool failed = m_session_failed;
             lock.unlock();
-            if (m_session_failed) m_asr->cancel();
+            if (failed) m_asr->cancel();
             else m_asr->stop();
+            const char* result = m_asr->getFinalResult();
+            if (result && result[0]) final_text = result;
             lock.lock();
             if (generation != m_session_generation) return;
         }
 
-        ESP_LOGI(TAG, "PCM relay %s for %s; command processing belongs to Pi4",
-                 m_session_failed ? "cancelled" : "complete", m_active_source_node_id.c_str());
+        ESP_LOGI(TAG, "PCM relay %s for %s; final text: \"%s\"",
+                 m_session_failed ? "cancelled" : "complete", finished_source.c_str(),
+                 final_text.c_str());
 
         m_session_active = false;
         m_stream_end_received = false;
         m_active_source_node_id.clear();
         active_buffer->clear();
         it->second.is_speaking = false;
+
+        auto callback = m_utterance_callback;
+        lock.unlock();
+        if (callback && !final_text.empty()) callback(finished_source, final_text);
+        return;
     }
 }

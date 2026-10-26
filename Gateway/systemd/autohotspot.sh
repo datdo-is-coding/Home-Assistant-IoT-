@@ -2,8 +2,15 @@
 set -eu
 export LC_ALL=C
 
-HOTSPOT='Aetheria-Hotspot'
-log() { logger -t AETHERIA-AUTOHOTSPOT -- "$*"; }
+HOTSPOT_FOUND=""
+CONNS=$(nmcli -g connection.id connection show 2>/dev/null || true)
+if echo "$CONNS" | grep -qx 'GW-Setup-Hotspot'; then
+    HOTSPOT_FOUND="GW-Setup-Hotspot"
+elif echo "$CONNS" | grep -qx 'Aetheria-Hotspot'; then
+    HOTSPOT_FOUND="Aetheria-Hotspot"
+fi
+HOTSPOT="${HOTSPOT_FOUND:-${HOTSPOT:-Aetheria-Hotspot}}"
+log() { logger -t GW- -- "$*"; }
 
 if nmcli -t -f DEVICE,STATE device status | grep -Eq '^(eth0|wlan0):connected$'; then
     log 'Network already connected; leaving connections unchanged.'
@@ -13,7 +20,7 @@ fi
 while IFS=: read -r uuid type; do
     [ "$type" = '802-11-wireless' ] || continue
     name=$(nmcli -g connection.id connection show uuid "$uuid")
-    [ "$name" != "$HOTSPOT" ] || continue
+    [ "$name" != "$HOTSPOT" ] && [ "$name" != "GW-Setup-Hotspot" ] && [ "$name" != "Aetheria-Hotspot" ] || continue
     if nmcli --wait 10 connection up uuid "$uuid"; then
         log 'Reconnected to a saved Wi-Fi profile.'
         exit 0

@@ -28,6 +28,8 @@ static void add_identity(cJSON* root) {
     cJSON_AddStringToObject(root, "hardware_uid", s_hardware_uid);
     cJSON_AddNumberToObject(root, "config_version", nvs_storage_get_cached_config()->config_version);
     cJSON_AddNumberToObject(root, "boot_id", s_boot_id);
+    cJSON_AddNumberToObject(root, "owner_epoch", nvs_storage_get_owner_epoch());
+    cJSON_AddBoolToObject(root, "claimed", nvs_storage_is_claimed());
 }
 
 typedef struct {
@@ -64,6 +66,10 @@ static ActionBoxCommandType parse_cmd_type(const char *cmd_str) {
     if (strcmp(cmd_str, "CLEAR_FAULT") == 0) return CMD_TYPE_CLEAR_FAULT;
     if (strcmp(cmd_str, "PING") == 0)        return CMD_TYPE_PING;
     if (strcmp(cmd_str, "LISTEN_FOLLOWUP") == 0) return CMD_TYPE_LISTEN_FOLLOWUP;
+    if (strcmp(cmd_str, "IDENTIFY") == 0) return CMD_TYPE_IDENTIFY;
+    if (strcmp(cmd_str, "REBOOT") == 0) return CMD_TYPE_REBOOT;
+    if (strcmp(cmd_str, "NETWORK_RESET") == 0) return CMD_TYPE_NETWORK_RESET;
+    if (strcmp(cmd_str, "FACTORY_RESET") == 0) return CMD_TYPE_FACTORY_RESET;
     if (strcmp(cmd_str, "SET_CONFIG") == 0)  return CMD_TYPE_SET_CONFIG;
     return CMD_TYPE_UNKNOWN;
 }
@@ -145,6 +151,17 @@ esp_err_t protocol_parse_command(const char *json_str, ActionBoxCommand *out_cmd
     out_cmd->settle_ms = settle ? (uint32_t)settle->valuedouble : 500;
     out_cmd->channel = item_ch ? (uint8_t)item_ch->valueint : 0;
     out_cmd->timestamp = item_ts ? (uint32_t)item_ts->valueint : 0;
+    if (out_cmd->cmd >= CMD_TYPE_IDENTIFY && out_cmd->cmd <= CMD_TYPE_FACTORY_RESET) {
+        const auto* op = cJSON_GetObjectItem(root, "operation_id");
+        const auto* epoch = cJSON_GetObjectItem(root, "owner_epoch");
+        if (!cJSON_IsString(op) || !op->valuestring[0] || strlen(op->valuestring) >= sizeof(out_cmd->operation_id) ||
+            !is_uint32(epoch) || epoch->valuedouble != nvs_storage_get_owner_epoch() ||
+            (out_cmd->cmd != CMD_TYPE_IDENTIFY && !cJSON_IsTrue(cJSON_GetObjectItem(root, "confirmed")))) {
+            cJSON_Delete(root); return ESP_ERR_INVALID_ARG;
+        }
+        strcpy(out_cmd->operation_id, op->valuestring);
+        out_cmd->owner_epoch = static_cast<uint32_t>(epoch->valuedouble);
+    }
 
     if (out_cmd->cmd == CMD_TYPE_SET_CONFIG) {
         cJSON *item_new_nid = cJSON_GetObjectItem(root, "new_node_id");
@@ -285,12 +302,16 @@ esp_err_t protocol_serialize_telemetry(char *out_json, size_t max_len) {
         cJSON_AddNumberToObject(ch_obj, "fault", (int)flt);
 
         CurrentMeasurement meas = {};
-        bl0942_get_latest_measurement(i, &meas);
+        esp_err_t sample_err = bl0942_get_latest_measurement(i, &meas);
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        const bool sample_valid = sample_err == ESP_OK && meas.validity == SENSOR_STATUS_VALID
+            && meas.sample_count > 0 && (uint32_t)(now_ms - meas.timestamp_ms) <= 5000;
         cJSON_AddNumberToObject(ch_obj, "current_ma", meas.current_rms_ma);
-        cJSON_AddNumberToObject(ch_obj, "voltage_v", meas.voltage_rms_v);
-        cJSON_AddNumberToObject(ch_obj, "power_w", meas.active_power_w);
-        cJSON_AddNumberToObject(ch_obj, "energy_wh", meas.energy_wh);
-        cJSON_AddBoolToObject(ch_obj, "valid", (meas.validity == SENSOR_STATUS_VALID));
+        // V2 schematic leaves BL0942 VP unconnected: only current is measured.
+        cJSON_AddNullToObject(ch_obj, "voltage_v");
+        cJSON_AddNullToObject(ch_obj, "power_w");
+        cJSON_AddNullToObject(ch_obj, "energy_wh");
+        cJSON_AddBoolToObject(ch_obj, "valid", sample_valid);
         cJSON_AddNumberToObject(ch_obj, "sample_uptime_ms", meas.timestamp_ms);
 
         cJSON_AddItemToArray(channels_arr, ch_obj);

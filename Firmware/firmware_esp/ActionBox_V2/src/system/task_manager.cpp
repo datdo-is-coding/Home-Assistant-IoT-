@@ -11,6 +11,8 @@
 #include "hc_runtime.h"
 #include "registration.h"
 #include "nvs_storage.h"
+#include "device_reset.h"
+#include "esp_system.h"
 
 #include <string.h>
 #include <atomic>
@@ -24,6 +26,7 @@
 
 static const char *TAG = "TASK_MGR";
 static std::atomic<int> s_upstream_error(3);
+static std::atomic<int64_t> s_identify_until(0);
 
 typedef struct {
     uint8_t            channel;
@@ -204,11 +207,38 @@ static void network_task(void *pvParameters) {
 
                     ActionBoxResponse resp;
                     uint32_t cmd_time = (uint32_t)(esp_timer_get_time() / 1000);
-                    device_manager_execute_command(&cmd, &resp);
+                    const bool maintenance = cmd.cmd >= CMD_TYPE_IDENTIFY && cmd.cmd <= CMD_TYPE_FACTORY_RESET;
+                    bool restart = false;
+                    if (maintenance) {
+                        resp = {};
+                        resp.version = cmd.version;
+                        strcpy(resp.node_id, cmd.node_id);
+                        resp.request_id = cmd.request_id;
+                        resp.session_id = cmd.session_id;
+                        esp_err_t result = ESP_OK;
+                        if (cmd.cmd == CMD_TYPE_IDENTIFY) {
+                            s_identify_until.store(esp_timer_get_time() + 15000000);
+                        } else {
+                            ResetKind kind = cmd.cmd == CMD_TYPE_REBOOT ? ResetKind::REBOOT :
+                                cmd.cmd == CMD_TYPE_NETWORK_RESET ? ResetKind::NETWORK_RESET : ResetKind::FACTORY_RESET;
+                            result = prepare_reset(kind, cmd.operation_id, cmd.owner_epoch);
+                            if (result == ESP_OK) result = complete_confirmed_reset(kind, cmd.operation_id);
+                            restart = result == ESP_OK;
+                        }
+                        resp.success = result == ESP_OK;
+                        strcpy(resp.status, resp.success ? "OK" : "ERROR");
+                        strcpy(resp.state, resp.success ? "COMPLETED" : "RESET_FAILED");
+                    } else {
+                        device_manager_execute_command(&cmd, &resp);
+                    }
 
                     char resp_json[512];
                     if (protocol_serialize_response(&resp, resp_json, sizeof(resp_json)) == ESP_OK) {
                         espnow_transport_send_to(rx_pkt.mac, (const uint8_t*)resp_json, strlen(resp_json));
+                    }
+                    if (restart) {
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                        esp_restart();
                     }
 
                     if (resp.success && (cmd.cmd == CMD_TYPE_TURN_ON || cmd.cmd == CMD_TYPE_TURN_OFF)) {
@@ -256,6 +286,8 @@ static void telemetry_task(void *pvParameters) {
             p1 = ::LedPattern::AWAITING_FACTORY_RESET;
         } else if (armed == ArmedKind::NETWORK_RESET) {
             p1 = ::LedPattern::AWAITING_NETWORK_RESET;
+        } else if (s_identify_until.load() > esp_timer_get_time()) {
+            p1 = ::LedPattern::IDENTIFY;
         } else if (espnow_transport_is_pairing_mode()) {
             p1 = ::LedPattern::CLAIMING;
         } else if (!is_claimed) {
@@ -302,7 +334,7 @@ static void telemetry_task(void *pvParameters) {
 }
 
 static void on_espnow_packet_received(const uint8_t *mac_addr, const uint8_t *data, int len) {
-    if (!data || len <= 0 || len > 250) return;
+    if (!data || len <= 0 || len >= 512) return;
     task_manager_post_network_rx(mac_addr, data, (size_t)len);
 }
 

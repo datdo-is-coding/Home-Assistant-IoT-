@@ -17,6 +17,7 @@
 #include "rules/rule_engine.h"
 #include "room/room_manager.h"
 #include "mqtt/subbox_mqtt_client.h"
+#include "audio/kws/kws_control.h"
 
 struct UtteranceQueueItem {
     char origin_node_id[32];
@@ -57,7 +58,8 @@ public:
         std::shared_ptr<CommandRouter> router,
         std::shared_ptr<RuleEngine> rules,
         std::shared_ptr<RoomManager> room_mgr,
-        std::shared_ptr<MqttClient> mqtt
+        std::shared_ptr<MqttClient> mqtt,
+        std::shared_ptr<KwsControl> kws = {}
     );
     ~TaskManager();
 
@@ -67,6 +69,9 @@ public:
     bool queueCommand(const CommandResolution& res);
     bool queueGatewayCommand(const std::string& command);
     bool queueResponse(const std::string& target_node_id, const std::string& text);
+    bool queueKwsUtterance(const std::string& origin_node_id, const std::string& text);
+    bool queueKwsHandle(const std::string& topic, const std::string& payload);
+    bool queueKwsPlaybackDone(const std::string& payload);
 
 private:
     static void audioManagerTask(void* pvParameters);
@@ -76,6 +81,10 @@ private:
     static void deviceManagerTask(void* pvParameters);
     static void telemetryTask(void* pvParameters);
     static void systemTask(void* pvParameters);
+    static void kwsTask(void* pvParameters);
+    bool postKws(uint8_t kind, const std::string& topic, const std::string& payload);
+
+    struct KwsJob { uint8_t kind=0; std::string topic, payload; };
 
     std::shared_ptr<AudioManager>      m_audio_mgr;
     std::shared_ptr<AudioTransport>    m_transport;
@@ -87,10 +96,12 @@ private:
     std::shared_ptr<RuleEngine>        m_rules;
     std::shared_ptr<RoomManager>       m_room_mgr;
     std::shared_ptr<MqttClient>        m_mqtt;
+    std::shared_ptr<KwsControl>        m_kws;
 
     QueueHandle_t m_utterance_queue;
     QueueHandle_t m_command_queue;
     QueueHandle_t m_response_queue;
+    QueueHandle_t m_kws_queue;
 
     TaskHandle_t m_h_audio_mgr;
     TaskHandle_t m_h_nlu;
@@ -99,4 +110,5 @@ private:
     TaskHandle_t m_h_dev_mgr;
     TaskHandle_t m_h_telemetry;
     TaskHandle_t m_h_system;
+    TaskHandle_t m_h_kws;
 };

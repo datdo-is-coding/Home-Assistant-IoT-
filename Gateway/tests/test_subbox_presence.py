@@ -33,6 +33,9 @@ class SubBoxPresence(unittest.IsolatedAsyncioTestCase):
         }
         gateway.registry.save(changed_node=self.node_id)
         gateway.asr = SimpleNamespace(initialize=Mock())
+        gateway.kws = SimpleNamespace(
+            on_result=Mock(), on_config_ack=Mock(), sync_config=AsyncMock()
+        )
         gateway.audio_server = SimpleNamespace(start=AsyncMock())
         gateway.web_server = WebServer(gateway)
         gateway.web_server.start = AsyncMock()

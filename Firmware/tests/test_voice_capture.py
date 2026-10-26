@@ -7,7 +7,7 @@ import unittest
 SRC = Path(__file__).resolve().parents[1] / 'firmware_esp/ActionBox_V2/src'
 
 class VoiceCaptureTest(unittest.TestCase):
-    def test_wake_gate_and_capture_without_background_inference(self):
+    def test_wake_gate_and_capture_without_kws_inference(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             stub = r'''
@@ -48,7 +48,7 @@ inline int i2s_new_channel(const i2s_chan_config_t*,void*,void**p){*p=(void*)1;r
 inline int i2s_channel_init_std_mode(void*,const i2s_std_config_t*){return 0;}
 inline int i2s_channel_enable(void*){return 0;}
 struct Done{};
-inline int reads=0, read_limit=210, detects=0, wake_at=0, kws_calls=0, starts=0,chunks=0,ends=0;
+inline int reads=0, read_limit=210, detects=0, wake_at=0, starts=0,chunks=0,ends=0;
 inline int i2s_channel_read(void*,void*p,size_t n,size_t*out,int){if(reads++>=read_limit)throw Done{};memset(p,0,n);*out=n;return 0;}
 struct model_iface_data_t{};
 struct srmodel_list_t{};
@@ -71,22 +71,25 @@ inline int espnow_transport_send(const uint8_t*p,size_t){if(*p==0x20)++starts;el
             (root/'check.cpp').write_text(r'''
 #include "host.h"
 #include "voice_capture.h"
-#include "kws/kws_engine.h"
-extern "C" esp_err_t kws_engine_init(){return 0;}
-extern "C" void kws_engine_feed_samples(const int16_t*,size_t){}
-extern "C" bool kws_engine_step(int*,float*){++kws_calls;return false;}
 int main(){
  assert(voice_capture_init()==ESP_OK);
  assert(!voice_capture_request_followup()); // cannot start an unsolicited session
  try{capture_task(nullptr);}catch(Done&){}
  assert(detects>90 && "WakeNet must receive continuous 16 kHz audio");
- assert(kws_calls==0 && "Observation inference must not block microphone capture");
  assert(!voice_capture_is_streaming() && starts==0 && chunks==0);
- reads=0;detects=0;wake_at=1;read_limit=250;
+ reads=0;detects=0;wake_at=1;read_limit=20;
+ try{capture_task(nullptr);}catch(Done&){}
+ assert(starts==2 && chunks==0 && ends==0 && voice_capture_is_streaming());
+ // The tail of Hi ESP must not enter command PCM or trigger silence-end.
+ reads=0;detects=0;wake_at=0;read_limit=250;
  try{capture_task(nullptr);}catch(Done&){}
  assert(starts==2 && chunks>0 && ends==3);
  assert(!voice_capture_is_streaming());
  assert(voice_capture_request_followup());
+ const int previous_chunks=chunks;
+ reads=0;detects=0;wake_at=0;read_limit=10;
+ try{capture_task(nullptr);}catch(Done&){}
+ assert(chunks>previous_chunks && voice_capture_is_streaming()); // follow-up has no wake tail
  reads=0;detects=0;wake_at=0;read_limit=450;
  try{capture_task(nullptr);}catch(Done&){}
  assert(starts==4 && ends==6 && !voice_capture_is_streaming());

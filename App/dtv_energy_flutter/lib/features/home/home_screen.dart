@@ -236,7 +236,7 @@ class FeatureHomeScreen extends ConsumerWidget {
                       crossAxisCount: crossAxisCount,
                       mainAxisSpacing: 12,
                       crossAxisSpacing: 12,
-                      mainAxisExtent: 156,
+                      mainAxisExtent: 176,
                     ),
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
@@ -298,7 +298,7 @@ class FeatureHomeScreen extends ConsumerWidget {
               padding: EdgeInsets.fromLTRB(20, 20, 20, 12),
               sliver: SliverToBoxAdapter(
                 child: Text(
-                  'Bộ điều khiển ActionBox',
+                  'Bộ điều khiển và SubBox',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,

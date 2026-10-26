@@ -1,9 +1,4 @@
-"""
-Unit and integration tests for KWS DSP/MFCC & Quantized Inference ported to ActionBox V2.
-Verifies MFCC parameters, class index mapping against labels.json, INT8 inference
-accuracy on X_test.npy, and that observation mode strictly blocks relay actuation.
-"""
-from pathlib import Path
+"""Parity checks for the shared Vietnamese KWS assets used by SubBox."""
 import ctypes
 import json
 import re
@@ -11,19 +6,81 @@ import subprocess
 import tempfile
 import unittest
 import wave
+from pathlib import Path
+
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
 PROJECT_ROOT = HERE.parent.parent
 ACTIONBOX_V2_SRC = HERE.parent / "firmware_esp/ActionBox_V2/src"
 SUBBOX_SRC = HERE.parent / "firmware_esp/SubBox/src"
+COMMON_KWS = HERE.parent / "firmware_esp/common/kws"
 KWS_DATA = HERE.parent / "firmware_kws/data"
 KWS_DATASET = HERE.parent / "firmware_kws/dataset"
+
+SAMPLE_RATE = 16000
+FRAME_LEN = 320
+FRAME_STEP = 160
+NUM_FRAMES = 99
+NUM_FFT = 512
+NUM_FILTERS = 32
+NUM_CEPSTRAL = 13
+NORM_MEAN = -9.295776
+NORM_STD = 35.392517
+
+
+def hz_to_mel(hz):
+    return 2595.0 * np.log10(1.0 + hz / 700.0)
+
+
+def mel_to_hz(mel):
+    return 700.0 * (10 ** (mel / 2595.0) - 1.0)
+
+
+def reference_mfcc(signal):
+    """Mirror the training extractor and the shared C++ implementation."""
+    signal = np.asarray(signal, dtype=np.float32)
+    if signal.size < SAMPLE_RATE:
+        signal = np.pad(signal, (0, SAMPLE_RATE - signal.size))
+    signal = signal[:SAMPLE_RATE]
+
+    emphasized = np.append(signal[0], signal[1:] - 0.97 * signal[:-1])
+    window = np.hamming(FRAME_LEN).astype(np.float32)
+    frames = np.stack([
+        emphasized[i * FRAME_STEP:i * FRAME_STEP + FRAME_LEN]
+        for i in range(NUM_FRAMES)
+    ])
+
+    low_mel, high_mel = hz_to_mel(300.0), hz_to_mel(8000.0)
+    mel_points = np.linspace(low_mel, high_mel, NUM_FILTERS + 2)
+    bins = np.floor((NUM_FFT + 1) * mel_to_hz(mel_points) / SAMPLE_RATE).astype(int)
+    filters = np.zeros((NUM_FILTERS, NUM_FFT // 2 + 1), dtype=np.float32)
+    for m in range(1, NUM_FILTERS + 1):
+        left, centre, right = bins[m - 1], bins[m], bins[m + 1]
+        for k in range(left, centre):
+            filters[m - 1, k] = (k - left) / (centre - left)
+        for k in range(centre, right):
+            filters[m - 1, k] = (right - k) / (right - centre)
+
+    spectrum = np.abs(np.fft.rfft(frames * window, NUM_FFT, axis=1)) ** 2 / NUM_FFT
+    energies = np.maximum(spectrum @ filters.T, 1e-10)
+    log_mel = np.log(energies)
+
+    dct = np.zeros((NUM_CEPSTRAL, NUM_FILTERS), dtype=np.float32)
+    for i in range(NUM_CEPSTRAL):
+        factor = np.sqrt(1.0 / NUM_FILTERS) if i == 0 else np.sqrt(2.0 / NUM_FILTERS)
+        for j in range(NUM_FILTERS):
+            dct[i, j] = factor * np.cos(np.pi * i * (j + 0.5) / NUM_FILTERS)
+    coeffs = log_mel @ dct.T
+
+    lifter = 1.0 + (22.0 / 2.0) * np.sin(np.pi * np.arange(NUM_CEPSTRAL) / 22.0)
+    coeffs = coeffs * lifter
+    return ((coeffs - NORM_MEAN) / NORM_STD).astype(np.float32)
+
 
 class TestKwsParity(unittest.TestCase):
 
     def test_labels_and_mfcc_config_parity(self):
-        """Verify labels.json exactly matches kws_config.h and protocol definitions."""
         labels_json_path = KWS_DATA / "labels.json"
         self.assertTrue(labels_json_path.is_file(), f"Missing {labels_json_path}")
         with open(labels_json_path, "r", encoding="utf-8") as f:
@@ -38,53 +95,111 @@ class TestKwsParity(unittest.TestCase):
             self.assertEqual(meta["label_to_idx"][name], idx)
             self.assertEqual(meta["idx_to_label"][str(idx)], name)
 
-        config_h_path = ACTIONBOX_V2_SRC / "audio/kws/kws_config.h"
+        config_h_path = COMMON_KWS / "kws_config.h"
         self.assertTrue(config_h_path.is_file(), f"Missing {config_h_path}")
         config_text = config_h_path.read_text(encoding="utf-8")
 
-        self.assertIn("#define SAMPLE_RATE 16000", config_text)
-        self.assertIn("#define AUDIO_WINDOW_MS 1000", config_text)
-        self.assertIn("#define AUDIO_STEP_MS 250", config_text)
-        self.assertIn("#define TOTAL_SAMPLES (SAMPLE_RATE * AUDIO_WINDOW_MS / 1000)", config_text)
-        self.assertIn("#define STEP_SAMPLES (SAMPLE_RATE * AUDIO_STEP_MS / 1000)", config_text)
-        self.assertIn("#define FRAME_LEN_SAMPLES 320", config_text)
-        self.assertIn("#define FRAME_STEP_SAMPLES 160", config_text)
-        self.assertIn("#define FFT_SIZE 512", config_text)
-        self.assertIn("#define NUM_MEL_FILTERS 32", config_text)
-        self.assertIn("#define NUM_MFCC_COEFFS 13", config_text)
-        self.assertIn("#define NUM_FRAMES 99", config_text)
-        self.assertIn("#define NORM_MEAN (-9.295776f)", config_text)
-        self.assertIn("#define NORM_STD (35.392517f)", config_text)
-        self.assertIn("#define NUM_CLASSES 10", config_text)
-        self.assertIn("#define CONFIDENCE_THRESHOLD 0.40f", config_text)
-        self.assertIn("#define COOLDOWN_MS 500", config_text)
+        for definition in (
+            "#define SAMPLE_RATE 16000",
+            "#define AUDIO_WINDOW_MS 1000",
+            "#define AUDIO_STEP_MS 250",
+            "#define TOTAL_SAMPLES (SAMPLE_RATE * AUDIO_WINDOW_MS / 1000)",
+            "#define STEP_SAMPLES (SAMPLE_RATE * AUDIO_STEP_MS / 1000)",
+            "#define FRAME_LEN_SAMPLES 320",
+            "#define FRAME_STEP_SAMPLES 160",
+            "#define FFT_SIZE 512",
+            "#define NUM_MEL_FILTERS 32",
+            "#define NUM_MFCC_COEFFS 13",
+            "#define NUM_FRAMES 99",
+            "#define NORM_MEAN (-9.295776f)",
+            "#define NORM_STD (35.392517f)",
+            "#define NUM_CLASSES 10",
+            "#define CONFIDENCE_THRESHOLD 0.40f",
+            "#define COOLDOWN_MS 500",
+        ):
+            self.assertIn(definition, config_text)
 
         enum_matches = re.findall(r"CLASS_(\w+)\s*=\s*(\d+)", config_text)
         enum_dict = {name: int(idx) for name, idx in enum_matches}
-        self.assertEqual(enum_dict.get("BAT"), 0)
-        self.assertEqual(enum_dict.get("BEP"), 1)
-        self.assertEqual(enum_dict.get("KHACH"), 2)
-        self.assertEqual(enum_dict.get("NGU"), 3)
-        self.assertEqual(enum_dict.get("NOISE"), 4)
-        self.assertEqual(enum_dict.get("PHONG"), 5)
-        self.assertEqual(enum_dict.get("QUAT"), 6)
-        self.assertEqual(enum_dict.get("TAT"), 7)
-        self.assertEqual(enum_dict.get("UNKNOWN"), 8)
-        self.assertEqual(enum_dict.get("DEN"), 9)
+        self.assertEqual(enum_dict, {
+            "BAT": 0, "BEP": 1, "KHACH": 2, "NGU": 3, "NOISE": 4,
+            "PHONG": 5, "QUAT": 6, "TAT": 7, "UNKNOWN": 8, "DEN": 9,
+        })
 
-        protocol_h_path = ACTIONBOX_V2_SRC / "protocol/actionbox_protocol.h"
-        proto_text = protocol_h_path.read_text(encoding="utf-8")
-        self.assertRegex(proto_text, r"#define\s+MSG_TYPE_KEYWORD_EVENT\s+0x25")
-        self.assertIn("ActionBoxKeywordEventPacket", proto_text)
-        self.assertIn("uint8_t  msg_type;", proto_text)
-        self.assertIn("uint8_t  seq;", proto_text)
-        self.assertIn("uint8_t  keyword_id;", proto_text)
-        self.assertIn("uint8_t  confidence_pct;", proto_text)
-        self.assertIn("uint32_t session_id;", proto_text)
-        self.assertIn("uint32_t rel_time_ms;", proto_text)
+    def test_active_build_has_no_actionbox_kws_engine(self):
+        self.assertFalse((ACTIONBOX_V2_SRC / "audio/kws").exists(),
+                         "ActionBox must not build the migrated KWS engine")
+        for path in ACTIONBOX_V2_SRC.rglob("*"):
+            if path.suffix not in (".c", ".cpp", ".h") or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            self.assertNotIn("kws_engine", text, f"stale KWS reference in {path}")
+            self.assertNotIn("kws_run_inference_quantized", text,
+                             f"stale model reference in {path}")
+
+        subbox_cmake = (SUBBOX_SRC / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("common/kws/kws_mfcc.cpp", subbox_cmake)
+        self.assertIn("common/kws", subbox_cmake)
+        self.assertTrue((COMMON_KWS / "kws_mfcc.cpp").is_file())
+        self.assertTrue((COMMON_KWS / "kws_model_quantized.h").is_file())
+
+    def test_mfcc_matches_training_preprocessing(self):
+        wav_path = KWS_DATASET / "bật/100.wav"
+        if not wav_path.is_file():
+            self.skipTest("KWS audio samples unavailable")
+        with wave.open(str(wav_path), "rb") as wav:
+            self.assertEqual(wav.getnchannels(), 1)
+            self.assertEqual(wav.getsampwidth(), 2)
+            self.assertEqual(wav.getframerate(), SAMPLE_RATE)
+            pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16)
+
+        reference = reference_mfcc(pcm.astype(np.float32) / 32768.0)
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            raw_path = root / "sample.raw"
+            out_path = root / "mfcc.bin"
+            pcm.tofile(str(raw_path))
+            runner = r'''
+#include "kws_mfcc.h"
+#include <cstdio>
+#include <vector>
+int main(int argc, char** argv) {
+    if (argc != 3) return 2;
+    FILE* input = fopen(argv[1], "rb");
+    if (!input) return 3;
+    std::vector<int16_t> pcm(TOTAL_SAMPLES);
+    if (fread(pcm.data(), sizeof(int16_t), pcm.size(), input) != pcm.size()) return 4;
+    fclose(input);
+    std::vector<float> audio(TOTAL_SAMPLES);
+    for (int i = 0; i < TOTAL_SAMPLES; ++i) audio[i] = pcm[i] / 32768.0f;
+    MFCCExtractor extractor;
+    if (!extractor.init()) return 5;
+    std::vector<float> mfcc(NUM_FRAMES * NUM_MFCC_COEFFS);
+    extractor.extract(audio.data(), mfcc.data());
+    FILE* output = fopen(argv[2], "wb");
+    if (!output) return 6;
+    fwrite(mfcc.data(), sizeof(float), mfcc.size(), output);
+    fclose(output);
+    return 0;
+}
+'''
+            cpp = root / "runner.cpp"
+            cpp.write_text(runner)
+            binary = root / "runner"
+            build = subprocess.run([
+                "g++", "-std=c++17", "-O2", "-Wall", "-Wextra",
+                f"-I{COMMON_KWS}", str(cpp),
+                str(COMMON_KWS / "kws_mfcc.cpp"), "-o", str(binary),
+            ], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            run = subprocess.run([str(binary), str(raw_path), str(out_path)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            actual = np.fromfile(str(out_path), dtype=np.float32).reshape(NUM_FRAMES, NUM_CEPSTRAL)
+
+        self.assertLess(float(np.max(np.abs(actual - reference))), 2e-3)
 
     def test_quantized_inference_accuracy_on_test_vectors(self):
-        """Compile and evaluate kws_model_quantized.h against X_test.npy and y_test.npy."""
         x_test_path = KWS_DATA / "X_test.npy"
         y_test_path = KWS_DATA / "y_test.npy"
         self.assertTrue(x_test_path.is_file(), f"Missing {x_test_path}")
@@ -96,8 +211,8 @@ class TestKwsParity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             build_dir = Path(td)
             wrapper_cpp = """
-#include "audio/kws/kws_config.h"
-#include "audio/kws/kws_model_quantized.h"
+#include "kws_config.h"
+#include "kws_model_quantized.h"
 
 extern "C" void run_inference(const float* mfcc_in, float* out_probs) {
     kws_run_inference_quantized(mfcc_in, out_probs);
@@ -105,29 +220,23 @@ extern "C" void run_inference(const float* mfcc_in, float* out_probs) {
 """
             (build_dir / "wrapper.cpp").write_text(wrapper_cpp)
             so_path = build_dir / "libkws_model.so"
-            cmd = [
-                "g++", "-O3", "-fPIC", "-shared",
-                f"-I{ACTIONBOX_V2_SRC}",
-                str(build_dir / "wrapper.cpp"),
-                "-o", str(so_path)
-            ]
-            build = subprocess.run(cmd, capture_output=True, text=True)
+            build = subprocess.run([
+                "g++", "-O3", "-fPIC", "-shared", f"-I{COMMON_KWS}",
+                str(build_dir / "wrapper.cpp"), "-o", str(so_path),
+            ], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, f"Compilation failed: {build.stderr}")
 
             lib = ctypes.CDLL(str(so_path))
             lib.run_inference.argtypes = [ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float)]
 
-            mean = -9.295776
-            std = 35.392517
-            X_test_norm = (X_test - mean) / std
-
+            X_test_norm = ((X_test - NORM_MEAN) / NORM_STD).astype(np.float32)
             correct = 0
-            total = len(X_test)
+            total = len(X_test_norm)
             per_class_total = [0] * 10
             per_class_correct = [0] * 10
 
             for i in range(total):
-                mfcc_flat = X_test_norm[i].flatten().astype(np.float32)
+                mfcc_flat = X_test_norm[i].flatten()
                 probs = (ctypes.c_float * 10)()
                 lib.run_inference(mfcc_flat.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), probs)
                 pred = int(np.argmax(list(probs)))
@@ -138,219 +247,13 @@ extern "C" void run_inference(const float* mfcc_in, float* out_probs) {
                     per_class_correct[target] += 1
 
             accuracy = (correct / total) * 100.0
-
             self.assertGreater(accuracy, 75.0, f"Accuracy {accuracy:.2f}% below 75% threshold")
-
             for c in range(10):
                 if per_class_total[c] > 0:
-                    c_acc = (per_class_correct[c] / per_class_total[c]) * 100.0
-                    self.assertGreater(c_acc, 45.0, f"Class {c} accuracy {c_acc:.1f}% unexpectedly low")
+                    class_accuracy = (per_class_correct[c] / per_class_total[c]) * 100.0
+                    self.assertGreater(class_accuracy, 45.0,
+                                       f"Class {c} accuracy {class_accuracy:.1f}% unexpectedly low")
 
-    def test_observation_mode_blocks_relay_actuation(self):
-        """Test KWS engine in observation mode: detects keywords, sends packets, strictly blocks relay actuation."""
-        wav_path = KWS_DATASET / "bật/100.wav"
-        self.assertTrue(wav_path.is_file(), f"Missing sample wav {wav_path}")
-
-        with wave.open(str(wav_path), "rb") as wf:
-            n_frames = wf.getnframes()
-            pcm_keyword = np.frombuffer(wf.readframes(n_frames), dtype=np.int16)
-        if len(pcm_keyword) < 16000:
-            pcm_keyword = np.pad(pcm_keyword, (0, 16000 - len(pcm_keyword)), mode="constant")
-        else:
-            pcm_keyword = pcm_keyword[:16000]
-
-        pcm_silence = np.zeros(16000, dtype=np.int16)
-
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            for header in ("esp_err.h", "esp_log.h", "esp_timer.h", "esp_attr.h",
-                           "sdkconfig.h", "freertos/FreeRTOS.h", "freertos/task.h",
-                           "freertos/semphr.h", "driver/gpio.h", "driver/uart.h",
-                           "nvs.h", "nvs_flash.h", "esp_mac.h", "esp_random.h", "esp_task_wdt.h"):
-                p = root / header
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text('#include "host_idf.h"\n')
-
-            (root / "driver/gpio.h").write_text("#pragma once\n#include \"host_idf.h\"\n" +
-                "\n".join(f"constexpr int GPIO_NUM_{i} = {i};" for i in range(49)))
-
-            pcm_kw_path = root / "keyword.raw"
-            pcm_silence_path = root / "silence.raw"
-            pcm_keyword.tofile(str(pcm_kw_path))
-            pcm_silence.tofile(str(pcm_silence_path))
-
-            runner_cpp = f"""
-#include "host_idf.h"
-#include "audio/kws/kws_engine.h"
-#include "audio/kws/kws_config.h"
-#include "protocol/actionbox_protocol.h"
-#include "drivers/relay/relay_driver.h"
-#include <cstdio>
-#include <cassert>
-#include <vector>
-
-static std::vector<ActionBoxKeywordEventPacket> g_sent_packets;
-
-extern "C" bool safety_sensor_ready(uint8_t) {{ return true; }}
-esp_err_t gpio_config(const gpio_config_t*) {{ return ESP_OK; }}
-esp_err_t gpio_set_level(int, uint32_t) {{ return ESP_OK; }}
-
-extern "C" esp_err_t espnow_transport_send(const uint8_t *payload, size_t len) {{
-    if (len == sizeof(ActionBoxKeywordEventPacket)) {{
-        ActionBoxKeywordEventPacket pkt;
-        memcpy(&pkt, payload, len);
-        g_sent_packets.push_back(pkt);
-    }}
-    return ESP_OK;
-}}
-
-int main() {{
-    // 1. Initial State: Relay driver initialized, relays OFF
-    assert(relay_driver_init() == ESP_OK);
-    assert(relay_get_state(1) == RELAY_STATE_OFF);
-    assert(relay_get_state(2) == RELAY_STATE_OFF);
-
-    // 2. KWS Engine Initialization: observation mode default TRUE
-    assert(kws_engine_init() == ESP_OK);
-    assert(kws_engine_is_observation_mode() == true);
-
-    // 3. Feed keyword audio (bật)
-    FILE* fp = fopen("{pcm_kw_path}", "rb");
-    assert(fp != nullptr);
-    int16_t pcm[16000];
-    assert(fread(pcm, sizeof(int16_t), 16000, fp) == 16000);
-    fclose(fp);
-
-    kws_engine_feed_samples(pcm, 16000);
-
-    int cls = -1;
-    float conf = 0.0f;
-    bool detected = kws_engine_step(&cls, &conf);
-
-    printf("Step 1 (Keyword): detected=%d, cls=%d (%s), conf=%.3f, packets=%zu\\n",
-           detected, cls, (cls >= 0 && cls < 10) ? KWS_LABELS[cls] : "none", conf, g_sent_packets.size());
-
-    // Must detect keyword 'bật' (id=0) with confidence >= 0.40
-    assert(detected == true);
-    assert(cls == 0);
-    assert(conf >= 0.40f);
-    assert(g_sent_packets.size() == 1);
-    assert(g_sent_packets[0].msg_type == MSG_TYPE_KEYWORD_EVENT);
-    assert(g_sent_packets[0].keyword_id == 0);
-    assert(g_sent_packets[0].confidence_pct >= 40);
-
-    // CRITICAL: Relays MUST remain strictly OFF in Observation Mode!
-    assert(relay_get_state(1) == RELAY_STATE_OFF);
-    assert(relay_get_state(2) == RELAY_STATE_OFF);
-
-    // 4. Test Cooldown: immediate second step must be suppressed by 500ms cooldown
-    kws_engine_feed_samples(pcm, 4000);
-    bool step2 = kws_engine_step(&cls, &conf);
-    printf("Step 2 (Cooldown test): detected=%d, packets=%zu\\n", step2, g_sent_packets.size());
-    assert(step2 == false);
-    assert(g_sent_packets.size() == 1); // No duplicate packet
-
-    // Relays still strictly OFF
-    assert(relay_get_state(1) == RELAY_STATE_OFF);
-    assert(relay_get_state(2) == RELAY_STATE_OFF);
-
-    // 5. Feed silence/noise
-    FILE* f_silence = fopen("{pcm_silence_path}", "rb");
-    assert(f_silence != nullptr);
-    assert(fread(pcm, sizeof(int16_t), 16000, f_silence) == 16000);
-    fclose(f_silence);
-
-    vTaskDelay(600); // Wait past cooldown
-    kws_engine_feed_samples(pcm, 16000);
-    bool step_silence = kws_engine_step(&cls, &conf);
-    printf("Step 3 (Silence/Noise): detected=%d, cls=%d (%s), conf=%.3f, packets=%zu\\n",
-           step_silence, cls, (cls >= 0 && cls < 10) ? KWS_LABELS[cls] : "none", conf, g_sent_packets.size());
-    // Silence/noise must NOT trigger packet or relay
-    assert(step_silence == false);
-    assert(cls == 4 || cls == 8); // Noise or Unknown
-    assert(g_sent_packets.size() == 1); // No new packet sent
-
-    assert(relay_get_state(1) == RELAY_STATE_OFF);
-    assert(relay_get_state(2) == RELAY_STATE_OFF);
-
-    printf("ALL OBSERVATION MODE CHECKS PASSED: NO RELAY ACTUATION OCCURRED!\\n");
-    return 0;
-}}
-"""
-            (root / "runner.cpp").write_text(runner_cpp)
-            includes = [ACTIONBOX_V2_SRC, *[p for p in ACTIONBOX_V2_SRC.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
-            sources = [
-                ACTIONBOX_V2_SRC / "audio/kws/kws_mfcc.cpp",
-                ACTIONBOX_V2_SRC / "audio/kws/kws_engine.cpp",
-                ACTIONBOX_V2_SRC / "drivers/relay/relay_driver.cpp",
-                ACTIONBOX_V2_SRC / "drivers/led/led_driver.cpp",
-            ]
-            command = ["g++", "-std=c++17", "-pthread", "-g", "-o", str(root / "runner")]
-            command += [f"-I{p}" for p in includes]
-            command += [str(s) for s in sources]
-            command += [str(root / "runner.cpp")]
-
-            build = subprocess.run(command, capture_output=True, text=True)
-            self.assertEqual(build.returncode, 0, f"Host runner build failed: {build.stderr}")
-
-            run = subprocess.run([str(root / "runner")], capture_output=True, text=True, timeout=15)
-            self.assertEqual(run.returncode, 0, f"Host runner execution failed: {run.stderr}\n{run.stdout}")
-            self.assertIn("ALL OBSERVATION MODE CHECKS PASSED", run.stdout)
-
-    def test_subbox_keyword_event_handling(self):
-        """Verify SubBox ESP-NOW receiver processes and parses ActionBox keyword events."""
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            for header in ("esp_err.h", "esp_log.h", "esp_timer.h", "esp_attr.h",
-                           "sdkconfig.h", "freertos/FreeRTOS.h", "freertos/task.h",
-                           "freertos/semphr.h", "nvs.h", "nvs_flash.h", "esp_mac.h", "esp_random.h"):
-                p = root / header
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text('#include "host_idf.h"\n')
-
-            subbox_test_cpp = """
-#include "host_idf.h"
-#include "audio/audio_transport/audio_packet.h"
-#include "network/espnow_receiver.h"
-#include <cstdio>
-#include <cassert>
-
-int main() {
-    // Construct keyword event packet for 'quạt' (id=6), confidence 88%
-    ActionBoxKeywordEventPacket pkt{};
-    pkt.msg_type = MSG_TYPE_KEYWORD_EVENT; // 0x25
-    pkt.seq = 12;
-    pkt.keyword_id = 6;
-    pkt.confidence_pct = 88;
-    pkt.session_id = 12345;
-    pkt.rel_time_ms = 5000;
-
-    assert(pkt.msg_type == 0x25);
-    assert(sizeof(ActionBoxKeywordEventPacket) == 12);
-
-    // Call SubBox reception handler
-    subbox_espnow_handle_keyword_event(reinterpret_cast<const uint8_t*>(&pkt), sizeof(pkt));
-
-    printf("SubBox KWS reception test passed successfully.\\n");
-    return 0;
-}
-"""
-            (root / "subbox_test.cpp").write_text(subbox_test_cpp)
-            includes = [SUBBOX_SRC, *[p for p in SUBBOX_SRC.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
-            sources = [
-                SUBBOX_SRC / "network/espnow_receiver.cpp",
-            ]
-            command = ["g++", "-std=c++17", "-pthread", "-g", "-o", str(root / "subbox_runner")]
-            command += [f"-I{p}" for p in includes]
-            command += [str(s) for s in sources]
-            command += [str(root / "subbox_test.cpp")]
-
-            build = subprocess.run(command, capture_output=True, text=True)
-            self.assertEqual(build.returncode, 0, f"SubBox runner build failed: {build.stderr}")
-
-            run = subprocess.run([str(root / "subbox_runner")], capture_output=True, text=True, timeout=10)
-            self.assertEqual(run.returncode, 0, f"SubBox runner failed: {run.stderr}\n{run.stdout}")
-            self.assertIn("SubBox KWS reception test passed", run.stdout)
 
 if __name__ == "__main__":
     unittest.main()

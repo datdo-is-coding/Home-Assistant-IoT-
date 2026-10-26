@@ -15,6 +15,7 @@ MqttClient::MqttClient(const std::string& broker_uri, const std::string& subbox_
       m_client(nullptr),
       m_connected(false),
       m_cmd_callback(nullptr),
+      m_kws_callback(nullptr),
       m_voice_resp_callback(nullptr) {
 
     m_topic_state      = "home/subbox/" + m_subbox_id + "/state";
@@ -22,6 +23,8 @@ MqttClient::MqttClient(const std::string& broker_uri, const std::string& subbox_
     m_topic_command    = "home/subbox/" + m_subbox_id + "/command";
     m_topic_voice_req  = "home/subbox/" + m_subbox_id + "/voice/request";
     m_topic_voice_resp = "home/subbox/" + m_subbox_id + "/voice/response";
+    m_topic_kws_command = "home/kws/+/" + m_subbox_id + "/command";
+    m_topic_kws_ack     = "home/kws/+/" + m_subbox_id + "/ack";
 }
 
 MqttClient::~MqttClient() {
@@ -47,7 +50,7 @@ bool MqttClient::init() {
     mqtt_cfg.credentials.client_id = m_subbox_id.c_str();
     mqtt_cfg.credentials.username = m_user.c_str();
     mqtt_cfg.credentials.authentication.password = m_password.c_str();
-    mqtt_cfg.buffer.size = 2048;
+    mqtt_cfg.buffer.size = 8192;
     mqtt_cfg.broker.address.uri = m_broker_uri.c_str();
     mqtt_cfg.network.reconnect_timeout_ms = 5000;
 
@@ -81,6 +84,11 @@ void MqttClient::registerCommandCallback(std::function<void(const std::string&, 
     m_cmd_callback = cb;
 }
 
+void MqttClient::registerKwsCallback(std::function<void(const std::string&, const std::string&)> cb) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_kws_callback = cb;
+}
+
 void MqttClient::registerVoiceResponseCallback(
     std::function<void(const std::string&, const std::string&, const uint8_t*, size_t)> cb
 ) {
@@ -105,6 +113,21 @@ bool MqttClient::publishEvent(const std::string& event_type, const std::string& 
     std::string topic = m_topic_event + "/" + event_type;
     int msg_id = esp_mqtt_client_enqueue(m_client, topic.c_str(), json_payload.c_str(), json_payload.length(), 1, 0, true);
     return (msg_id >= 0);
+}
+
+bool MqttClient::publishRaw(const std::string& topic, const std::string& json_payload) {
+    if (!m_client || !m_connected || topic.empty() || json_payload.empty()) return false;
+    int msg_id = esp_mqtt_client_enqueue(m_client, topic.c_str(), json_payload.c_str(), json_payload.length(), 1, 0, true);
+    return (msg_id >= 0);
+}
+
+bool MqttClient::flush(uint32_t timeout_ms) {
+    const TickType_t started = xTaskGetTickCount();
+    while (m_client && m_connected && (xTaskGetTickCount() - started) < pdMS_TO_TICKS(timeout_ms)) {
+        if (esp_mqtt_client_get_outbox_size(m_client) == 0) return true;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    return false;
 }
 
 bool MqttClient::publishVoiceRequest(const std::string& origin_node_id, const std::string& transcript) {
@@ -139,6 +162,8 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
             subbox_led_set_mqtt_connected(true);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_command.c_str(), 1);
             esp_mqtt_client_subscribe(self->m_client, self->m_topic_voice_resp.c_str(), 1);
+            esp_mqtt_client_subscribe(self->m_client, self->m_topic_kws_command.c_str(), 1);
+            esp_mqtt_client_subscribe(self->m_client, self->m_topic_kws_ack.c_str(), 1);
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -148,12 +173,37 @@ void MqttClient::mqttEventHandler(void* handler_args, esp_event_base_t base, int
             break;
 
         case MQTT_EVENT_DATA:
+            if (event->data_len <= 0 || event->total_data_len <= 0 || event->current_data_offset < 0 ||
+                event->topic_len < 0 || !event->data || (event->topic_len > 0 && !event->topic)) {
+                self->m_rx_topic.clear(); self->m_rx_payload.clear(); self->m_rx_total = 0;
+                break;
+            }
             if (event->current_data_offset==0 && event->data_len==event->total_data_len && event->data_len>=2 && event->data[0]=='H' && event->data[1]=='C') {
                 hc_runtime_receive_mqtt(reinterpret_cast<const uint8_t*>(event->data),event->data_len); break;
             }
 
-            if (event->current_data_offset == 0 && event->data_len == event->total_data_len)
-                self->onMqttData(event->topic, event->topic_len, event->data, event->data_len);
+            if (event->current_data_offset == 0) {
+                self->m_rx_topic.assign(event->topic ? event->topic : "", static_cast<size_t>(event->topic_len));
+                self->m_rx_payload.clear();
+                self->m_rx_total = static_cast<size_t>(event->total_data_len);
+            }
+            if (self->m_rx_topic.empty() || self->m_rx_total == 0 || self->m_rx_total > 16384 ||
+                event->total_data_len != static_cast<int>(self->m_rx_total) ||
+                (event->topic_len > 0 && self->m_rx_topic != std::string(event->topic, static_cast<size_t>(event->topic_len))) ||
+                event->current_data_offset != static_cast<int>(self->m_rx_payload.size()) ||
+                static_cast<size_t>(event->data_len) > self->m_rx_total - self->m_rx_payload.size()) {
+                self->m_rx_topic.clear();
+                self->m_rx_payload.clear();
+                self->m_rx_total = 0;
+                break;
+            }
+            self->m_rx_payload.append(event->data, static_cast<size_t>(event->data_len));
+            if (self->m_rx_payload.size() < self->m_rx_total) break;
+            self->onMqttData(self->m_rx_topic.c_str(), static_cast<int>(self->m_rx_topic.size()),
+                             self->m_rx_payload.data(), static_cast<int>(self->m_rx_payload.size()));
+            self->m_rx_topic.clear();
+            self->m_rx_payload.clear();
+            self->m_rx_total = 0;
             break;
 
         case MQTT_EVENT_ERROR:
@@ -174,14 +224,31 @@ void MqttClient::onMqttData(const char* topic, int topic_len, const char* data, 
     ESP_LOGD(TAG, "MQTT Inbound: [%s] -> %s", s_topic.c_str(), s_data.c_str());
 
     std::function<void(const std::string&, const std::string&)> cmd_cb;
+    std::function<void(const std::string&, const std::string&)> kws_cb;
     std::function<void(const std::string&, const std::string&, const uint8_t*, size_t)> voice_cb;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         cmd_cb = m_cmd_callback;
+        kws_cb = m_kws_callback;
         voice_cb = m_voice_resp_callback;
     }
 
-    if (s_topic == m_topic_command && cmd_cb) {
+    bool kws_config = false;
+    if (s_topic == m_topic_command && s_data.size() <= 16384) {
+        cJSON* root = cJSON_ParseWithLength(s_data.data(), s_data.size());
+        const cJSON* command = cJSON_GetObjectItemCaseSensitive(root, "cmd");
+        kws_config = cJSON_IsString(command) && strcmp(command->valuestring, "KWS_CONFIG") == 0;
+        cJSON_Delete(root);
+    }
+
+    const auto kws_topic = [&](const std::string& subscription) {
+        const std::string suffix = subscription.substr(10); // after home/kws/+
+        return s_topic.rfind("home/kws/", 0) == 0 && s_topic.size() == 9 + 14 + suffix.size() &&
+            s_topic.compare(9 + 14, suffix.size(), suffix) == 0;
+    };
+    if (kws_topic(m_topic_kws_command) || kws_topic(m_topic_kws_ack) || (s_topic == m_topic_command && kws_config)) {
+        if (kws_cb) kws_cb(s_topic, s_data);
+    } else if (s_topic == m_topic_command && cmd_cb) {
         cmd_cb(s_topic, s_data);
     } else if (s_topic == m_topic_voice_resp && voice_cb) {
         voice_cb("", s_data, nullptr, 0);

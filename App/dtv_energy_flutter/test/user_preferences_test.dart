@@ -444,7 +444,7 @@ void main() {
   });
 
   group('DeviceDetailScreen Truthful UX, 200% Text Scale & Accessibility', () {
-    testWidgets('DeviceDetailScreen displays "Chưa có dữ liệu đo" and NO slider for pure relay', (tester) async {
+    testWidgets('DeviceDetailScreen displays "Dòng điện: chưa có mẫu" and NO slider for pure relay', (tester) async {
       const pureRelay = Device(
         id: 'box01::ch1',
         name: 'Đèn Ban Công',
@@ -476,7 +476,7 @@ void main() {
       expect(find.byType(Slider), findsNothing);
 
       // Power measurement is missing/0 -> shows truthful string
-      expect(find.text('Chưa có dữ liệu đo'), findsOneWidget);
+      expect(find.text('Dòng điện: chưa có mẫu'), findsOneWidget);
 
       // Verified 48dp minimum touch target on power button
       final powerButtonSize = tester.getSize(find.widgetWithText(FilledButton, 'Tắt nguồn'));

@@ -42,6 +42,10 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         m_followup_cb = cb;
     }
+    void registerPlaybackDoneCallback(std::function<void(const std::string&)> cb) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_playback_done_cb = cb;
+    }
 
 private:
     static void wsEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
@@ -62,6 +66,7 @@ private:
     std::mutex m_send_mutex;
     CommandResultCallback m_cmd_result_cb;
     std::function<void(const std::string&)> m_followup_cb;
+    std::function<void(const std::string&)> m_playback_done_cb;
     std::string m_partial_result;
     std::string m_final_result;
     float m_confidence;

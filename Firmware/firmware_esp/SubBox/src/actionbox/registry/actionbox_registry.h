@@ -11,6 +11,8 @@ struct ActionBoxNode {
     std::string hardware_uid;
     std::string label;
     uint32_t config_version = 0;
+    uint32_t owner_epoch = 0;
+    bool claimed = false;
     RoomType    room;
     DeviceType  device;
     uint8_t     channel;
@@ -55,8 +57,6 @@ public:
     std::vector<ActionBoxNode> getAllNodes() const;
 
     void checkTimeouts(uint32_t timeout_ms = 30000);
-
-    void loadDefaultRoomNodes(RoomType local_room);
 
 private:
     std::map<std::string, ActionBoxNode> m_nodes;

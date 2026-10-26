@@ -17,10 +17,11 @@ printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
   '-t -f DEVICE,STATE device status') printf '%s\\n' "$NETWORK_STATE" ;;
   '-t -f UUID,TYPE connection show') printf 'wifi-id:802-11-wireless\\nhotspot-id:802-11-wireless\\n' ;;
+  '-g connection.id connection show') printf 'Home WiFi\\nAetheria-Hotspot\\n' ;;
   '-g connection.id connection show uuid wifi-id') printf 'Home WiFi\\n' ;;
   '-g connection.id connection show uuid hotspot-id') printf 'Aetheria-Hotspot\\n' ;;
   '--wait 10 connection up uuid wifi-id') [ "$SAVED_CONNECTS" = 1 ] ;;
-  '--wait 15 connection up id Aetheria-Hotspot') exit 0 ;;
+  '--wait 15 connection up id Aetheria-Hotspot'|'--wait 15 connection up id GW-Setup-Hotspot') exit 0 ;;
   *) exit 99 ;;
 esac
 ''')
@@ -29,7 +30,8 @@ esac
             logger.write_text('#!/bin/sh\nexit 0\n')
             logger.chmod(0o755)
             env = dict(os.environ, PATH=f'{root}:/usr/bin:/bin', NETWORK_STATE=state,
-                       SAVED_CONNECTS=saved_connects, CALL_LOG=str(root / 'calls'))
+                       SAVED_CONNECTS=saved_connects, CALL_LOG=str(root / 'calls'),
+                       HOTSPOT=os.environ.get('HOTSPOT', 'Aetheria-Hotspot'))
             subprocess.run(['bash', str(script)], env=env, check=True, capture_output=True, timeout=5)
             return (root / 'calls').read_text()
 

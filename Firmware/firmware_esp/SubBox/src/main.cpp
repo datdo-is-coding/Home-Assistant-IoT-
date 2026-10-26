@@ -13,6 +13,9 @@
 #include "esp_sntp.h"
 #include "esp_netif.h"
 #include "esp_heap_caps.h"
+#include "esp_random.h"
+#include "esp_timer.h"
+#include <ctime>
 
 #include "config/subbox_config.h"
 #include "config/board_pins.h"
@@ -23,6 +26,8 @@
 #include "audio/audio_buffer/audio_ring_buffer.h"
 #include "audio/vad/energy_vad.h"
 #include "audio/asr/ws_asr.h"
+#include "audio/kws/local_kws.h"
+#include "audio/kws/kws_control.h"
 #include "audio/audio_manager/audio_manager.h"
 #include "audio/audio_output/audio_output_router.h"
 #include "audio/audio_output/sound_player.h"
@@ -42,10 +47,14 @@ static bool hc_uplink(const uint8_t* data,size_t length) { return hc_mqtt && hc_
 
 static const char *TAG = "SUBBOX_MAIN";
 
+#include "freertos/event_groups.h"
 #include "system/wifi_provisioning.h"
 #include "system/subbox_led.h"
+#include "system/gateway_discovery.h"
 
 static int s_wifi_retry_count = 0;
+static EventGroupHandle_t s_wifi_event_group = nullptr;
+static const int WIFI_CONNECTED_BIT = BIT0;
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data) {
@@ -55,14 +64,28 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         subbox_led_set_wifi_connected(false);
         subbox_led_set_mqtt_connected(false);
+        if (s_wifi_event_group) {
+            xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        }
         s_wifi_retry_count++;
         ESP_LOGW(TAG, "Wi-Fi disconnected (attempt %d/5)...", s_wifi_retry_count);
-        if (!hc_provisioning_active() && ((const char*)arg)[0]) esp_wifi_connect();
+        if (s_wifi_retry_count == 5 && !hc_provisioning_active()) {
+            ESP_LOGW(TAG, "Wi-Fi connection failed 5 times; automatically starting SoftAP provisioning...");
+            esp_err_t setup_err = hc_provisioning_start(true);
+            if (setup_err != ESP_OK) {
+                ESP_LOGW(TAG, "Setup unavailable (%s); continuing Wi-Fi recovery", esp_err_to_name(setup_err));
+            }
+        }
+        // AP setup, including a failed/expired window, must not stop STA recovery.
+        if (((const char*)arg)[0]) esp_wifi_connect();
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         s_wifi_retry_count = 0;
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
-        ESP_LOGI(TAG, "✅ SubBox Wi-Fi Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "SubBox Wi-Fi Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
         subbox_led_set_wifi_connected(true);
+        if (s_wifi_event_group) {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        }
         if (!esp_sntp_enabled()) {
             esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
             esp_sntp_setservername(0, "pool.ntp.org");
@@ -81,9 +104,9 @@ static void print_banner(const SubBoxPersistentConfig& cfg) {
     size_t free_sram  = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024;
 
-    ESP_LOGI(TAG, "===============================================================");
-    ESP_LOGI(TAG, "  AETHERIA OS — SUBBOX / SUBGATEWAY LOCAL BRAIN (ESP32-S3)");
-    ESP_LOGI(TAG, "===============================================================");
+    ESP_LOGI(TAG, "===================");
+    ESP_LOGI(TAG, "  SICHOME — SUBBOX");
+    ESP_LOGI(TAG, "===================");
     ESP_LOGI(TAG, "  Firmware Name    : %s", SUBBOX_FW_NAME);
     ESP_LOGI(TAG, "  Firmware Version : %s", SUBBOX_FW_VERSION_STR);
     ESP_LOGI(TAG, "  Silicon Model    : ESP32-S3 (Rev %d, %d Cores)", chip_info.revision, chip_info.cores);
@@ -92,13 +115,16 @@ static void print_banner(const SubBoxPersistentConfig& cfg) {
     ESP_LOGI(TAG, "  Internal SRAM    : %u KB", (unsigned)free_sram);
     ESP_LOGI(TAG, "  SubBox ID        : %s", cfg.subbox_id);
     ESP_LOGI(TAG, "  Assigned Room    : %s (%s)", cfg.room_name, roomToString(cfg.room_type));
-    ESP_LOGI(TAG, "  Real ASR Engine  : Pi 4 Sherpa-ONNX Zipformer (ws://192.168.11.29:8765)");
+    ESP_LOGI(TAG, "  Real ASR Engine  : Local Vietnamese KWS (SubBox)");
     ESP_LOGI(TAG, "  Audio Capacity   : Up to %d ActionBoxes per Room",
              SUBBOX_MAX_ACTIONBOXES_PER_ROOM);
     ESP_LOGI(TAG, "===============================================================");
 }
 
 static void wifi_init_sta(const char* ssid, const char* pass) {
+    if (!s_wifi_event_group) {
+        s_wifi_event_group = xEventGroupCreate();
+    }
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -148,10 +174,14 @@ extern "C" void app_main(void) {
     hc_provisioned_config enrollment{};
     esp_err_t enrollment_result=hc_provisioning_load(&enrollment);
     if(enrollment_result==ESP_OK && enrollment.subbox){
-        snprintf(cfg.subbox_id,sizeof(cfg.subbox_id),"%lu",(unsigned long)enrollment.node_id);
-        snprintf(cfg.wifi_ssid,sizeof(cfg.wifi_ssid),"%s",enrollment.wifi_ssid);
-        snprintf(cfg.wifi_pass,sizeof(cfg.wifi_pass),"%s",enrollment.wifi_password);
-        snprintf(cfg.mqtt_broker_uri,sizeof(cfg.mqtt_broker_uri),"%s",enrollment.mqtt_uri);
+        // Keep the MAC-derived SB identity used by the Gateway, audio server and
+        // KWS topics. The numeric hc_core node id is used only on hc/v1 topics.
+        bool first_boot = (cfg.wifi_ssid[0] == 0);
+        if (first_boot) {
+            snprintf(cfg.wifi_ssid,sizeof(cfg.wifi_ssid),"%s",enrollment.wifi_ssid);
+            snprintf(cfg.wifi_pass,sizeof(cfg.wifi_pass),"%s",enrollment.wifi_password);
+            snprintf(cfg.mqtt_broker_uri,sizeof(cfg.mqtt_broker_uri),"%s",enrollment.mqtt_uri);
+        }
         if (enrollment.room_id[0]) {
             snprintf(cfg.room_name, sizeof(cfg.room_name), "%s", enrollment.room_id);
         }
@@ -169,7 +199,9 @@ extern "C" void app_main(void) {
                 snprintf(cfg.ws_gateway_uri, sizeof(cfg.ws_gateway_uri), "ws://%s:8765/ws/audio", host);
             }
         }
-        NVSManager::saveConfig(cfg);
+        if (first_boot) {
+            NVSManager::saveConfig(cfg);
+        }
     }else if(cfg.wifi_ssid[0]==0){
         cfg.wifi_ssid[0]=cfg.wifi_pass[0]=cfg.mqtt_broker_uri[0]=0;
         ESP_LOGW(TAG,"Blank NVS / First setup detected: opening secure 180s provisioning window");
@@ -185,6 +217,56 @@ extern "C" void app_main(void) {
         SoundPlayer::instance().play(SoundType::BOOTUP);
     }
 
+    if (cfg.wifi_ssid[0] != '\0') {
+        ESP_LOGI(TAG, "Waiting for Wi-Fi connection to discover Gateway...");
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, pdMS_TO_TICKS(8000));
+        if (bits & WIFI_CONNECTED_BIT) {
+            ESP_LOGI(TAG, "Wi-Fi connected. Performing Gateway Discovery...");
+            char discovered_ip[64] = {0};
+            uint16_t ws_port = 8765;
+            uint16_t mqtt_port = 8883;
+            if (gateway_discover(discovered_ip, sizeof(discovered_ip), &ws_port, &mqtt_port, 3000)) {
+                ESP_LOGI(TAG, "Gateway Discovered: IP %s (WS: %u, MQTT: %u)", discovered_ip, ws_port, mqtt_port);
+
+                char new_ws_uri[128];
+                char new_mqtt_uri[128];
+                snprintf(new_ws_uri, sizeof(new_ws_uri), "ws://%s:%u/ws/audio",
+                         discovered_ip, ws_port ? ws_port : 8765);
+                if (mqtt_port == 8883) {
+                    snprintf(new_mqtt_uri, sizeof(new_mqtt_uri), "mqtts://%s:%u",
+                             discovered_ip, mqtt_port);
+                } else {
+                    // A local broker may use plain MQTT; devices still require TLS.
+                    snprintf(new_mqtt_uri, sizeof(new_mqtt_uri), "%s", cfg.mqtt_broker_uri);
+                    ESP_LOGW(TAG, "Discovery did not advertise MQTT TLS; retaining provisioned broker");
+                }
+
+                bool uri_changed = false;
+                if (strcmp(cfg.ws_gateway_uri, new_ws_uri) != 0) {
+                    strncpy(cfg.ws_gateway_uri, new_ws_uri, sizeof(cfg.ws_gateway_uri) - 1);
+                    cfg.ws_gateway_uri[sizeof(cfg.ws_gateway_uri) - 1] = '\0';
+                    uri_changed = true;
+                }
+                if (strcmp(cfg.mqtt_broker_uri, new_mqtt_uri) != 0) {
+                    strncpy(cfg.mqtt_broker_uri, new_mqtt_uri, sizeof(cfg.mqtt_broker_uri) - 1);
+                    cfg.mqtt_broker_uri[sizeof(cfg.mqtt_broker_uri) - 1] = '\0';
+                    uri_changed = true;
+                }
+                if (uri_changed) {
+                    NVSManager::saveConfig(cfg);
+                    ESP_LOGI(TAG, "Gateway URIs updated & saved to NVS -> WS: %s, MQTT: %s",
+                             cfg.ws_gateway_uri, cfg.mqtt_broker_uri);
+                } else {
+                    ESP_LOGI(TAG, "Configured URIs already matched discovered Gateway IP: %s", discovered_ip);
+                }
+            } else {
+                ESP_LOGW(TAG, "Gateway discovery timed out; continuing with existing URIs.");
+            }
+        } else {
+            ESP_LOGW(TAG, "Wi-Fi connection timed out waiting for gateway discovery; continuing.");
+        }
+    }
+
     auto room_mgr = std::make_shared<RoomManager>(cfg.subbox_id, cfg.room_type);
     room_mgr->setRoomName(cfg.room_name);
 
@@ -195,10 +277,15 @@ extern "C" void app_main(void) {
         SUBBOX_VAD_MAX_SPEECH_DURATION_MS
     );
 
-    auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id);
-    if (!asr->init()) ESP_LOGE(TAG, "Pi4 audio relay unavailable; voice control disabled until configured/restarted");
+    auto local_kws = std::make_shared<LocalKws>();
+    if (!local_kws->init()) subbox_led_set_error(true);
 
-    auto audio_mgr = std::make_shared<AudioManager>(vad, asr);
+    // The WebSocket client is kept only for downstream TTS playback. Microphone
+    // PCM never reaches it; recognition runs on local_kws above.
+    auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id);
+    if (!asr->init()) ESP_LOGE(TAG, "Pi4 playback unavailable; local KWS control continues without spoken replies");
+
+    auto audio_mgr = std::make_shared<AudioManager>(vad, local_kws);
     audio_mgr->init();
 
     auto transport = std::make_shared<EspNowAudioTransport>();
@@ -209,7 +296,6 @@ extern "C" void app_main(void) {
     tts_mgr->init();
 
     auto registry = std::make_shared<ActionBoxRegistry>();
-    registry->loadDefaultRoomNodes(cfg.room_type);
 
     auto context_mgr = std::make_shared<ContextManager>(cfg.room_type);
 
@@ -221,6 +307,73 @@ extern "C" void app_main(void) {
     auto mqtt = std::make_shared<MqttClient>(cfg.mqtt_broker_uri, cfg.subbox_id);
     command_router->setMqttClient(mqtt);
 
+    const auto publish_kws = [mqtt](const std::string& kind, const std::string& data) {
+        if (kind == "kws_result") return mqtt->publishEvent("kws_result", data);
+        if (kind == "kws_config") return mqtt->publishEvent("kws_config", data);
+        const std::string command_prefix = "kws_command/";
+        const std::string ack_prefix = "kws_ack/";
+        if (kind.rfind(command_prefix, 0) == 0) {
+            return mqtt->publishRaw("home/kws/" + mqtt->nodeId() + "/" + kind.substr(command_prefix.size()) + "/command", data);
+        }
+        if (kind.rfind(ack_prefix, 0) == 0) {
+            return mqtt->publishRaw("home/kws/" + mqtt->nodeId() + "/" + kind.substr(ack_prefix.size()) + "/ack", data);
+        }
+        return false;
+    };
+    const auto trusted_peer = [registry](const KwsPeer& peer) {
+        for (const auto& node : registry->getAllNodes()) {
+            const bool same_node = node.node_id == peer.node_id ||
+                node.node_id.rfind(peer.node_id + "_CH", 0) == 0;
+            if (!same_node || node.hardware_uid != peer.hardware_uid ||
+                node.config_version != peer.config_version) continue;
+            if (node.owner_epoch != 0 && peer.owner_epoch != 0 && node.owner_epoch != peer.owner_epoch) {
+                return false;
+            }
+            return true;
+        }
+        return false;
+    };
+    const auto send_command = [transport](const KwsPeer& peer, const std::string& command, std::string& ack) {
+        return transport->sendCommand(peer.node_id.c_str(), command, &ack);
+    };
+    const auto save_kws = [](const std::string& snapshot) {
+        return NVSManager::saveKwsSnapshot(snapshot) == ESP_OK;
+    };
+    const auto listen_followup = [transport](const KwsPeer& peer, uint32_t session, uint32_t request) {
+        cJSON* root = cJSON_CreateObject();
+        if (!root) return false;
+        cJSON_AddStringToObject(root, "node_id", peer.node_id.c_str());
+        cJSON_AddStringToObject(root, "subbox_id", peer.subbox_id.c_str());
+        cJSON_AddStringToObject(root, "hardware_uid", peer.hardware_uid.c_str());
+        cJSON_AddNumberToObject(root, "config_version", peer.config_version);
+        cJSON_AddNumberToObject(root, "owner_epoch", peer.owner_epoch);
+        cJSON_AddNumberToObject(root, "protocol_version", 3);
+        cJSON_AddNumberToObject(root, "session_id", session);
+        cJSON_AddNumberToObject(root, "request_id", request);
+        cJSON_AddStringToObject(root, "cmd", "LISTEN_FOLLOWUP");
+        const std::string command = kwsEncode(root);
+        cJSON_Delete(root);
+        std::string ack;
+        return transport->sendCommand(peer.node_id.c_str(), command, &ack);
+    };
+    const auto feedback = [](const char* status, const char*) {
+        if (strcmp(status, "success") == 0) SoundPlayer::instance().play(SoundType::SUCCESS);
+        else if (strcmp(status, "error") == 0) SoundPlayer::instance().play(SoundType::ERROR);
+    };
+
+    const uint32_t kws_session = esp_random() | 1;
+    auto kws = std::make_shared<KwsControl>(
+        std::string(cfg.subbox_id), kws_session, publish_kws, trusted_peer, send_command,
+        save_kws, [] { return static_cast<uint64_t>(esp_timer_get_time()) / 1000; },
+        listen_followup, feedback,
+        [] { return static_cast<uint64_t>(std::time(nullptr)); }
+    );
+    std::string kws_snapshot;
+    if (NVSManager::loadKwsSnapshot(kws_snapshot) == ESP_OK) {
+        if (!kws->restore(kws_snapshot)) ESP_LOGW(TAG, "Stored local KWS snapshot rejected");
+        else ESP_LOGI(TAG, "Local KWS snapshot restored before network startup");
+    }
+
     transport->registerRxCallback([audio_mgr](const AudioPacket& pkt) {
         audio_mgr->ingestAudioPacket(pkt);
     });
@@ -230,11 +383,11 @@ extern "C" void app_main(void) {
     auto task_mgr = std::make_shared<TaskManager>(
         audio_mgr, transport, audio_router, tts_mgr,
         context_mgr, registry, command_router, rule_engine,
-        room_mgr, mqtt
+        room_mgr, mqtt, kws
     );
     if (!task_mgr->init()) subbox_led_set_error(true);
-    asr->registerFollowupCallback([task_mgr](const std::string& command) {
-        if (!task_mgr->queueGatewayCommand(command)) ESP_LOGW(TAG, "Follow-up listen queue full");
+    asr->registerPlaybackDoneCallback([task_mgr](const std::string& payload) {
+        if (!task_mgr->queueKwsPlaybackDone(payload)) ESP_LOGW(TAG, "KWS playback-done queue full");
     });
 
     hc_mqtt=mqtt.get();
@@ -243,11 +396,11 @@ extern "C" void app_main(void) {
     hc_ota_health_ready();
 
     auto console = std::make_shared<DevConsole>(
-        asr, audio_mgr, context_mgr, registry, command_router, room_mgr
+        local_kws, audio_mgr, context_mgr, registry, command_router, room_mgr
     );
     console->init();
 
-    ESP_LOGI(TAG, "SubBox Local Brain fully operational. Listening for ActionBox streams and console commands.");
+    ESP_LOGI(TAG, "SubBox fully operational. Local KWS controls ActionBox; Pi4 provides structured replies.");
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

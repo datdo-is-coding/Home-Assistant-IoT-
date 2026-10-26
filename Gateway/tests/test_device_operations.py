@@ -303,10 +303,12 @@ class TestDeviceOperations(unittest.TestCase):
         self.assertEqual(op_confirmed.state, OperationState.RUNNING)
 
         # Check owner_epoch incremented
+        self.assertEqual(self.registry.data["nodes"]["DEV_ACTIONBOX_01"]["owner_epoch"], 1)
+        self.lifecycle.on_operation_ack("DEV_ACTIONBOX_01", op_confirmed.operation_id, now_sec=now + 3)
         node = self.registry.data["nodes"]["DEV_ACTIONBOX_01"]
         self.assertEqual(node["owner_epoch"], 2)
         self.assertEqual(node["status"], "unclaimed")
-        self.assertEqual(node["security"]["lifecycle_state"], "resetting")
+        self.assertEqual(node["security"]["lifecycle_state"], "unclaimed")
 
         # Check auth DB grants thoroughly revoked (G4 fix)
         user_devs_after = self.auth.get_user_devices(self.member_id)
@@ -363,13 +365,15 @@ class TestDeviceOperations(unittest.TestCase):
     def test_subbox_reset_preserves_children_and_marks_needs_route_recovery(self):
         """Resetting SubBox must NOT wipe or delete child ActionBoxes; sets them to offline/reconnecting."""
         now = 6000.0
-        self.lifecycle.start_operation(
+        op = self.lifecycle.start_operation(
             user=self.admin_user,
             device_uid="SUBBOX_01",
             kind="factory_reset",
             confirmation=True,
             now_sec=now,
         )
+        self.assertEqual(self.registry.data["nodes"]["CHILD_ACTIONBOX_01"]["status"], "online")
+        self.lifecycle.on_operation_ack("SUBBOX_01", op.operation_id, now_sec=now + 1)
 
         # Children still exist in registry!
         self.assertIn("CHILD_ACTIONBOX_01", self.registry.data["nodes"])

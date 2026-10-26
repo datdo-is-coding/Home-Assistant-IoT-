@@ -361,15 +361,16 @@ static void expiry_task(void *arg) {
 }
 esp_err_t hc_provisioning_start(bool subbox) {
     if(server)return ESP_ERR_INVALID_STATE;
-    nvs_handle_t h;esp_err_t err=nvs_open("hc_factory",NVS_READONLY,&h);if(err!=ESP_OK)return err;
+    nvs_handle_t h;esp_err_t err=nvs_open("hc_factory",NVS_READONLY,&h);
+    if(err!=ESP_OK)return err;
     char password[65]={0};size_t keylen=32,poplen=sizeof(setup),passlen=sizeof(password);uint8_t kind=0;
     err=nvs_get_blob(h,"secret",factory_secret,&keylen);
     if(err==ESP_OK)err=nvs_get_str(h,"setup",setup,&poplen);
     if(err==ESP_OK)err=nvs_get_str(h,"ap_pass",password,&passlen);
     if(err==ESP_OK)err=nvs_get_u8(h,"kind",&kind);
     nvs_close(h);
-    if(err==ESP_OK&&(keylen!=32||poplen<9||passlen<13||kind!=(subbox?1:2)))err=ESP_ERR_INVALID_ARG;
-    if(err!=ESP_OK){memset(factory_secret,0,32);memset(setup,0,sizeof(setup));memset(password,0,sizeof(password));return err;}
+    if(err!=ESP_OK)return err;
+    if(keylen!=32||poplen<9||passlen<13||kind!=(subbox?1:2))return ESP_ERR_INVALID_ARG;
     uint8_t base[6];err=esp_efuse_mac_get_default(base);if(err!=ESP_OK)return err;
     wifi_config_t ap={0};snprintf((char *)ap.ap.ssid,sizeof(ap.ap.ssid),"siciot_%s_%02X%02X%02X",subbox?"sub":"act",base[3],base[4],base[5]);
     ap.ap.ssid_len=(uint8_t)strlen((char *)ap.ap.ssid);memcpy(ap.ap.password,password,strlen(password));memset(password,0,sizeof(password));

@@ -7,6 +7,10 @@
 #include "cJSON.h"
 #include "subbox_led.h"
 #include "audio_output/sound_player.h"
+#include "nvs_manager.h"
+#include "security_config.h"
+#include "esp_system.h"
+#include <new>
 
 static const char* TAG = "TASK_MGR";
 
@@ -27,7 +31,8 @@ TaskManager::TaskManager(
     std::shared_ptr<CommandRouter> router,
     std::shared_ptr<RuleEngine> rules,
     std::shared_ptr<RoomManager> room_mgr,
-    std::shared_ptr<MqttClient> mqtt
+    std::shared_ptr<MqttClient> mqtt,
+    std::shared_ptr<KwsControl> kws
 ) : m_audio_mgr(audio_mgr),
     m_transport(transport),
     m_audio_router(audio_router),
@@ -38,22 +43,26 @@ TaskManager::TaskManager(
     m_rules(rules),
     m_room_mgr(room_mgr),
     m_mqtt(mqtt),
+    m_kws(kws),
     m_utterance_queue(nullptr),
     m_command_queue(nullptr),
     m_response_queue(nullptr),
+    m_kws_queue(nullptr),
     m_h_audio_mgr(nullptr),
     m_h_nlu(nullptr),
     m_h_cmd(nullptr),
     m_h_tx(nullptr),
     m_h_dev_mgr(nullptr),
     m_h_telemetry(nullptr),
-    m_h_system(nullptr) {
+    m_h_system(nullptr),
+    m_h_kws(nullptr) {
 }
 
 TaskManager::~TaskManager() {
     if (m_utterance_queue) vQueueDelete(m_utterance_queue);
     if (m_command_queue) vQueueDelete(m_command_queue);
     if (m_response_queue) vQueueDelete(m_response_queue);
+    if (m_kws_queue) vQueueDelete(m_kws_queue);
 }
 
 bool TaskManager::init() {
@@ -62,10 +71,23 @@ bool TaskManager::init() {
     m_utterance_queue = xQueueCreate(QUEUE_CAP_ASR_REQUESTS, sizeof(UtteranceQueueItem));
     m_command_queue   = xQueueCreate(QUEUE_CAP_COMMAND_REQUESTS, sizeof(CommandQueueItem));
     m_response_queue  = xQueueCreate(QUEUE_CAP_RESPONSE_AUDIO, sizeof(ResponseQueueItem));
+    if (m_kws) m_kws_queue = xQueueCreate(16, sizeof(KwsJob*));
 
-    if (!m_utterance_queue || !m_command_queue || !m_response_queue) {
+    if (!m_utterance_queue || !m_command_queue || !m_response_queue || (m_kws && !m_kws_queue)) {
         ESP_LOGE(TAG, "Failed to allocate FreeRTOS inter-task communication queues!");
         return false;
+    }
+
+    if (m_audio_mgr) {
+        m_audio_mgr->registerUtteranceCallback([this](const std::string& origin, const std::string& text) {
+            if (!queueKwsUtterance(origin, text)) ESP_LOGW(TAG, "Local KWS result queue full; utterance dropped");
+        });
+    }
+
+    if (m_kws && m_mqtt) {
+        m_mqtt->registerKwsCallback([this](const std::string& topic, const std::string& payload) {
+            if (!queueKwsHandle(topic, payload)) ESP_LOGW(TAG, "Local KWS MQTT queue full; message dropped");
+        });
     }
 
     if (m_mqtt) {
@@ -98,8 +120,12 @@ bool TaskManager::init() {
         const cJSON* channels = cJSON_GetObjectItem(root, "channels");
         const cJSON* uid = cJSON_GetObjectItem(root, "hardware_uid");
         const cJSON* revision = cJSON_GetObjectItem(root, "config_version");
+        const cJSON* epoch = cJSON_GetObjectItem(root, "owner_epoch");
+        const cJSON* claimed = cJSON_GetObjectItem(root, "claimed");
         if (cJSON_IsString(id) && cJSON_IsString(uid) && cJSON_IsNumber(revision) && cJSON_IsArray(channels)) {
             subbox_led_peer_seen();
+            const uint32_t owner_epoch = cJSON_IsNumber(epoch) && epoch->valuedouble >= 1 &&
+                epoch->valuedouble <= UINT32_MAX ? static_cast<uint32_t>(epoch->valuedouble) : 0;
             const cJSON* ch;
             cJSON_ArrayForEach(ch, channels) {
                 const cJSON* number = cJSON_GetObjectItem(ch, "channel");
@@ -113,12 +139,13 @@ bool TaskManager::init() {
                     node.node_id = key;
                     node.room = m_context_mgr->getSubboxRoom();
                     node.channel = number->valueint;
-                    node.device = node.channel == 1 ? DeviceType::LIGHT :
-                                  node.channel == 2 ? DeviceType::FAN : DeviceType::OTHER;
+                    node.device = DeviceType::OTHER;
                     node.has_relay = node.has_current_sensor = node.has_microphone = true;
                 }
                 node.hardware_uid = uid->valuestring;
                 node.config_version = static_cast<uint32_t>(revision->valuedouble);
+                node.owner_epoch = owner_epoch;
+                node.claimed = cJSON_IsTrue(claimed);
                 const cJSON* label = cJSON_GetObjectItem(ch, "label");
                 node.label = cJSON_IsString(label) ? label->valuestring : key;
                 m_registry->registerNode(node);
@@ -138,6 +165,9 @@ bool TaskManager::init() {
     xTaskCreatePinnedToCore(audioTxTask,      "audio_tx_task",  TASK_STACK_AUDIO_TX,      this, TASK_PRIO_AUDIO_TX,      &m_h_tx,        1);
 
     xTaskCreatePinnedToCore(commandTask,      "cmd_task",       TASK_STACK_COMMAND,       this, TASK_PRIO_COMMAND,       &m_h_cmd,       0);
+    if (m_kws) {
+        xTaskCreatePinnedToCore(kwsTask,      "kws_task",       TASK_STACK_COMMAND,       this, TASK_PRIO_COMMAND,       &m_h_kws,       0);
+    }
     xTaskCreatePinnedToCore(deviceManagerTask,"dev_mgr_task",   TASK_STACK_DEVICE_MGR,   this, TASK_PRIO_DEVICE_MGR,   &m_h_dev_mgr,   0);
     xTaskCreatePinnedToCore(telemetryTask,    "telemetry_task", TASK_STACK_TELEMETRY,    this, TASK_PRIO_TELEMETRY,    &m_h_telemetry, 0);
     xTaskCreatePinnedToCore(systemTask,       "system_task",    TASK_STACK_CONSOLE,      this, 1,                       &m_h_system,    0);
@@ -182,6 +212,30 @@ bool TaskManager::queueResponse(const std::string& target_node_id, const std::st
     return (xQueueSend(m_response_queue, &item, pdMS_TO_TICKS(50)) == pdTRUE);
 }
 
+bool TaskManager::postKws(uint8_t kind, const std::string& topic, const std::string& payload) {
+    if (!m_kws || !m_kws_queue || payload.empty() || payload.size() > 16384 ||
+        uxQueueSpacesAvailable(m_kws_queue) == 0) return false;
+    auto* job = new (std::nothrow) KwsJob{kind, topic, payload};
+    if (!job) return false;
+    if (xQueueSend(m_kws_queue, &job, 0) != pdTRUE) {
+        delete job;
+        return false;
+    }
+    return true;
+}
+
+bool TaskManager::queueKwsUtterance(const std::string& origin_node_id, const std::string& text) {
+    return postKws(0, origin_node_id, text);
+}
+
+bool TaskManager::queueKwsHandle(const std::string& topic, const std::string& payload) {
+    return postKws(1, topic, payload);
+}
+
+bool TaskManager::queueKwsPlaybackDone(const std::string& payload) {
+    return postKws(2, "", payload);
+}
+
 void TaskManager::audioManagerTask(void* pvParameters) {
     auto* self = static_cast<TaskManager*>(pvParameters);
     ESP_LOGI(TAG, "audio_manager_task started on Core 1.");
@@ -189,6 +243,26 @@ void TaskManager::audioManagerTask(void* pvParameters) {
     while (1) {
         self->m_audio_mgr->process();
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+void TaskManager::kwsTask(void* pvParameters) {
+    auto* self = static_cast<TaskManager*>(pvParameters);
+    ESP_LOGI(TAG, "local KWS task started on Core 0.");
+    KwsJob* job = nullptr;
+    while (1) {
+        if (xQueueReceive(self->m_kws_queue, &job, pdMS_TO_TICKS(250)) == pdTRUE && job) {
+            if (job->kind == 0) {
+                self->m_kws->utterance(job->topic, job->payload);
+            } else if (job->kind == 1) {
+                self->m_kws->handle(job->topic, job->payload);
+            } else if (job->kind == 2) {
+                self->m_kws->handle("", job->payload);
+            }
+            delete job;
+            job = nullptr;
+        }
+        self->m_kws->tick();
     }
 }
 
@@ -222,6 +296,7 @@ void TaskManager::commandTask(void* pvParameters) {
     auto* self = static_cast<TaskManager*>(pvParameters);
     ESP_LOGI(TAG, "command_task started on Core 0.");
     CommandQueueItem item;
+    std::map<std::string, std::string> operation_results;
 
     while (1) {
         if (xQueueReceive(self->m_command_queue, &item, portMAX_DELAY) == pdTRUE) {
@@ -252,6 +327,60 @@ void TaskManager::commandTask(void* pvParameters) {
                         cJSON_Delete(root); continue;
                     }
                     const cJSON* id = cJSON_GetObjectItem(root, "node_id");
+                    const auto* operation = cJSON_GetObjectItem(root, "operation_id");
+                    if (cJSON_IsString(operation) && cJSON_IsString(id) && cJSON_IsString(command) && self->m_mqtt) {
+                        const auto* version = cJSON_GetObjectItem(root, "protocol_version");
+                        const auto* request = cJSON_GetObjectItem(root, "request_id");
+                        const auto* session = cJSON_GetObjectItem(root, "session_id");
+                        const auto* epoch = cJSON_GetObjectItem(root, "owner_epoch");
+                        const auto* uid = cJSON_GetObjectItem(root, "hardware_uid");
+                        const std::string kind = command->valuestring;
+                        const bool known = kind == "IDENTIFY" || kind == "REBOOT" || kind == "NETWORK_RESET" || kind == "FACTORY_RESET";
+                        if (!known || !operation->valuestring[0] || strlen(operation->valuestring) >= 64 ||
+                            !cJSON_IsNumber(version) || version->valueint != 3 ||
+                            !cJSON_IsNumber(request) || request->valuedouble < 1 || request->valuedouble > UINT32_MAX ||
+                            !cJSON_IsNumber(session) || session->valuedouble < 1 || session->valuedouble > UINT32_MAX ||
+                            !cJSON_IsNumber(epoch) || epoch->valuedouble < 1 || epoch->valuedouble > UINT32_MAX ||
+                            !cJSON_IsString(uid) || strlen(uid->valuestring) != 12 ||
+                            (kind != "IDENTIFY" && !cJSON_IsTrue(cJSON_GetObjectItem(root, "confirmed")))) {
+                            cJSON_Delete(root); continue;
+                        }
+                        auto cached = operation_results.find(operation->valuestring);
+                        if (cached != operation_results.end()) {
+                            self->m_mqtt->publishEvent("operation", cached->second);
+                            cJSON_Delete(root); continue;
+                        }
+                        bool ok = false, restart = false;
+                        if (self->m_mqtt->nodeId() == id->valuestring) {
+                            if (self->m_mqtt->nodeId() == "SB" + std::string(uid->valuestring) && epoch->valuedouble == SecurityConfig::getOwnerEpoch()) {
+                                if (kind == "IDENTIFY") { subbox_led_identify(); ok = true; }
+                                else if (kind == "REBOOT") { ok = true; restart = true; }
+                                else {
+                                    SoundPlayer::instance().finishPcmStream();
+                                    ok = (kind == "NETWORK_RESET" ? NVSManager::networkReset() : NVSManager::factoryReset()) == ESP_OK;
+                                    restart = ok;
+                                }
+                            }
+                        } else {
+                            std::string response;
+                            ok = self->m_transport->sendCommand(id->valuestring, item.gateway_command, &response);
+                        }
+                        cJSON_AddStringToObject(root, "status", ok ? "OK" : "ERROR");
+                        if (!ok) {
+                            cJSON_AddStringToObject(root, "error_code", "DEVICE_REJECTED_OR_UNREACHABLE");
+                            cJSON_AddStringToObject(root, "error_message", "Thiết bị không xác nhận thao tác. Kiểm tra nguồn và đăng ký thiết bị.");
+                        }
+                        char* encoded = cJSON_PrintUnformatted(root);
+                        if (encoded) {
+                            if (operation_results.size() >= 8) operation_results.erase(operation_results.begin());
+                            operation_results[operation->valuestring] = encoded;
+                            self->m_mqtt->publishEvent("operation", encoded);
+                            cJSON_free(encoded);
+                        }
+                        cJSON_Delete(root);
+                        if (restart) { self->m_mqtt->flush(3000); esp_restart(); }
+                        continue;
+                    }
                     ActionBoxNode node{};
                     if (cJSON_IsString(id) && self->m_registry->findNodeById(id->valuestring, node))
                         self->m_transport->sendCommand(id->valuestring, item.gateway_command);

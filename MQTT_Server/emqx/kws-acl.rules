@@ -1,0 +1,11 @@
+%% Prepend to the existing EMQX ACL; preserve unrelated rules below this block.
+%% Gateway owns config and consumes results. Device usernames are enrolled IDs.
+{allow, {username, "smarthome_gateway"}, all, ["home/subbox/#", "home/kws/#"]}.
+{allow, {username, {re, "^SB[0-9A-F]{12}$"}}, publish,
+ ["home/subbox/${username}/event/kws_result", "home/subbox/${username}/event/kws_config"]}.
+{allow, {username, {re, "^SB[0-9A-F]{12}$"}}, subscribe,
+ ["home/subbox/${username}/command", "home/kws/+/${username}/command", "home/kws/+/${username}/ack"]}.
+%% Add exact publisher/destination pair grants here only after configuring bindings.
+%% No pair is enabled in the one-SubBox pilot.
+{deny, all, all, ["home/kws/#", "home/subbox/+/event/kws_result", "home/subbox/+/event/kws_config"]}.
+{deny, all, publish, ["home/subbox/+/command"]}.

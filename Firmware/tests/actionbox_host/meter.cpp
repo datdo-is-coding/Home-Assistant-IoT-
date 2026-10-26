@@ -31,6 +31,9 @@ int uart_write_bytes(int port, const void* bytes, size_t len) {
 esp_err_t uart_wait_tx_done(int port, TickType_t) { assert(port == 1); return ESP_OK; }
 int uart_read_bytes(int port, void* bytes, uint32_t len, TickType_t) {
     assert(port == 1 && len >= 23);
+    CurrentMeasurement cached{};
+    // Telemetry must remain readable while a UART transaction owns the bus.
+    assert(bl0942_get_latest_measurement(1, &cached) == ESP_OK);
     if (timeout_rx) return 0;
     auto* frame = static_cast<uint8_t*>(bytes);
     memset(frame, 0, len);
@@ -52,7 +55,17 @@ int main() {
         assert(sample.validity == SENSOR_STATUS_VALID && sample.current_rms_ma == unsigned(ch + 9));
     }
     assert((queried == std::vector<int>{12, 10, 11, 12}));
+    SensorCalibration calibrated{2, 1, 1};
+    assert(bl0942_set_calibration(1, &calibrated) == ESP_OK);
     CurrentMeasurement sample{};
+    assert(bl0942_read_channel(1, &sample) == ESP_OK);
+    assert(sample.current_rms_ma == 20);
+    for (float bad : {0.0f, -1.0f, 256.0f, __builtin_inff(), __builtin_nanf("")}) {
+        SensorCalibration invalid{bad, 1, 1};
+        assert(bl0942_set_calibration(1, &invalid) == ESP_ERR_INVALID_ARG);
+    }
+    assert(bl0942_read_channel(1, &sample) == ESP_OK);
+    assert(sample.current_rms_ma == 20);
     timeout_rx = true;
     assert(bl0942_read_channel(3, &sample) == ESP_ERR_TIMEOUT);
     assert(sample.validity == SENSOR_STATUS_TIMEOUT);

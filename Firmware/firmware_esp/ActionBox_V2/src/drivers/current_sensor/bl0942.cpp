@@ -3,6 +3,8 @@
 #include "app_config.h"
 
 #include <string.h>
+#include <cmath>
+#include <initializer_list>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -21,6 +23,13 @@ static const char *TAG = "BL0942_DRIVER";
 static SensorCalibration s_calibrations[BOARD_RELAY_CHANNEL_COUNT];
 static CurrentMeasurement s_latest_measurements[BOARD_RELAY_CHANNEL_COUNT];
 static SemaphoreHandle_t s_sensor_mutex = NULL;
+// UART waits must not block telemetry snapshots on the other core.
+static portMUX_TYPE s_cache_lock = portMUX_INITIALIZER_UNLOCKED;
+static void cache_measurement(uint8_t idx, const CurrentMeasurement &measurement) {
+    portENTER_CRITICAL(&s_cache_lock);
+    s_latest_measurements[idx] = measurement;
+    portEXIT_CRITICAL(&s_cache_lock);
+}
 static bool s_driver_initialized = false;
 
 static esp_err_t init_channel_uart(uart_port_t port, gpio_num_t tx_pin, gpio_num_t rx_pin) {
@@ -115,13 +124,16 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
         return ESP_ERR_TIMEOUT;
     }
 
+    CurrentMeasurement measurement{};
+    bl0942_get_latest_measurement(channel, &measurement);
 #if defined(BOARD_BL0942_MULTIPLEX_RX)
 
     esp_err_t route_err = uart_set_pin(uart_port, UART_PIN_NO_CHANGE, rx_pins[idx],
                                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (route_err != ESP_OK) {
-        s_latest_measurements[idx].validity = SENSOR_STATUS_UNINITIALIZED;
-        *out_meas = s_latest_measurements[idx];
+        measurement.validity = SENSOR_STATUS_UNINITIALIZED;
+        *out_meas = measurement;
+        cache_measurement(idx, measurement);
         xSemaphoreGive(s_sensor_mutex);
         return route_err;
     }
@@ -134,10 +146,11 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     int sent = uart_write_bytes(BOARD_BL0942_UART_NUM_CH1, (const char*)query_cmd, 2);
     esp_err_t tx_err = uart_wait_tx_done(BOARD_BL0942_UART_NUM_CH1, pdMS_TO_TICKS(20));
     if (sent != 2 || tx_err != ESP_OK) {
-        s_latest_measurements[idx].validity = SENSOR_STATUS_TIMEOUT;
-        *out_meas = s_latest_measurements[idx];
+        measurement.validity = SENSOR_STATUS_TIMEOUT;
+        *out_meas = measurement;
 
         vTaskDelay(pdMS_TO_TICKS(60));
+        cache_measurement(idx, measurement);
         xSemaphoreGive(s_sensor_mutex);
         return tx_err != ESP_OK ? tx_err : ESP_FAIL;
     }
@@ -146,8 +159,9 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     int bytes_read = uart_read_bytes(uart_port, rx_raw, sizeof(rx_raw), pdMS_TO_TICKS(200));
 
     if (bytes_read < BL0942_PACKET_LEN) {
-        s_latest_measurements[idx].validity = SENSOR_STATUS_TIMEOUT;
-        *out_meas = s_latest_measurements[idx];
+        measurement.validity = SENSOR_STATUS_TIMEOUT;
+        *out_meas = measurement;
+        cache_measurement(idx, measurement);
         xSemaphoreGive(s_sensor_mutex);
         if (bytes_read > 0) {
             char hex[80] = {0};
@@ -179,8 +193,9 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     }
 
     if (frame_start < 0) {
-        s_latest_measurements[idx].validity = SENSOR_STATUS_CHECKSUM_ERR;
-        *out_meas = s_latest_measurements[idx];
+        measurement.validity = SENSOR_STATUS_CHECKSUM_ERR;
+        *out_meas = measurement;
+        cache_measurement(idx, measurement);
         xSemaphoreGive(s_sensor_mutex);
         char hex[160] = {0};
         for (int b = 0; b < bytes_read && b < 28; b++) {
@@ -206,29 +221,29 @@ esp_err_t bl0942_read_channel(uint8_t channel, CurrentMeasurement *out_meas) {
     uint32_t raw_cf = (uint32_t)rx_buf[13] | ((uint32_t)rx_buf[14] << 8) | ((uint32_t)rx_buf[15] << 16);
 
     SensorCalibration cal = s_calibrations[idx];
-    s_latest_measurements[idx].current_rms_ma = (uint32_t)((float)raw_i * cal.current_factor);
-    s_latest_measurements[idx].voltage_rms_v  = (uint32_t)((float)raw_v * cal.voltage_factor);
-    s_latest_measurements[idx].active_power_w = (int32_t)((float)raw_w * cal.power_factor);
-    s_latest_measurements[idx].energy_wh      = raw_cf;
-    s_latest_measurements[idx].validity       = SENSOR_STATUS_VALID;
-    s_latest_measurements[idx].sample_count++;
-    s_latest_measurements[idx].timestamp_ms   = (uint32_t)(esp_timer_get_time() / 1000);
+    measurement.current_rms_ma = (uint32_t)((float)raw_i * cal.current_factor);
+    measurement.voltage_rms_v  = (uint32_t)((float)raw_v * cal.voltage_factor);
+    measurement.active_power_w = (int32_t)((float)raw_w * cal.power_factor);
+    measurement.energy_wh      = raw_cf;
+    measurement.validity       = SENSOR_STATUS_VALID;
+    measurement.sample_count++;
+    measurement.timestamp_ms   = (uint32_t)(esp_timer_get_time() / 1000);
 
     static uint32_t s_last_log_ms[BOARD_RELAY_CHANNEL_COUNT] = {0};
-    if (s_latest_measurements[idx].timestamp_ms - s_last_log_ms[idx] >= 1000) {
-        s_last_log_ms[idx] = s_latest_measurements[idx].timestamp_ms;
-        ESP_LOGD(TAG, "Ch%u: I_RMS=%lu mA (raw_i=%lu, 0x%06lX), V_RMS=%lu V, P=%ld W",
+    if (measurement.timestamp_ms - s_last_log_ms[idx] >= 10000) {
+        s_last_log_ms[idx] = measurement.timestamp_ms;
+        ESP_LOGI(TAG, "Ch%u: I_RMS=%lu mA raw_i=%lu K_I=%.7f raw_v=%lu",
                  (unsigned)channel,
-                 (unsigned long)s_latest_measurements[idx].current_rms_ma,
-                 (unsigned long)raw_i, (unsigned long)raw_i,
-                 (unsigned long)s_latest_measurements[idx].voltage_rms_v,
-                 (long)s_latest_measurements[idx].active_power_w);
+                 (unsigned long)measurement.current_rms_ma,
+                 (unsigned long)raw_i, (double)cal.current_factor,
+                 (unsigned long)raw_v);
     }
 
-    s_latest_measurements[idx].overcurrent =
-        (s_latest_measurements[idx].current_rms_ma >= SAFETY_DEFAULT_MAX_CURRENT_MA);
+    measurement.overcurrent =
+        (measurement.current_rms_ma >= SAFETY_DEFAULT_MAX_CURRENT_MA);
 
-    *out_meas = s_latest_measurements[idx];
+    *out_meas = measurement;
+    cache_measurement(idx, measurement);
     xSemaphoreGive(s_sensor_mutex);
     return ESP_OK;
 }
@@ -237,18 +252,27 @@ esp_err_t bl0942_get_latest_measurement(uint8_t channel, CurrentMeasurement *out
     if (channel < 1 || channel > BOARD_RELAY_CHANNEL_COUNT || !out_meas) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (xSemaphoreTake(s_sensor_mutex, pdMS_TO_TICKS(300)) == pdTRUE) {
-        *out_meas = s_latest_measurements[channel - 1];
-        xSemaphoreGive(s_sensor_mutex);
-        return ESP_OK;
+    if (!s_driver_initialized) {
+        *out_meas = {};
+        out_meas->validity = SENSOR_STATUS_UNINITIALIZED;
+        return ESP_ERR_INVALID_STATE;
     }
-    return ESP_ERR_TIMEOUT;
+    portENTER_CRITICAL(&s_cache_lock);
+    *out_meas = s_latest_measurements[channel - 1];
+    portEXIT_CRITICAL(&s_cache_lock);
+    return ESP_OK;
 }
 
 esp_err_t bl0942_set_calibration(uint8_t channel, const SensorCalibration *cal) {
     if (channel < 1 || channel > BOARD_RELAY_CHANNEL_COUNT || !cal) {
         return ESP_ERR_INVALID_ARG;
     }
+
+    // Bound 24-bit raw conversions to their 32-bit measurement fields.
+    for (float factor : {cal->current_factor, cal->voltage_factor, cal->power_factor}) {
+        if (!std::isfinite(factor) || factor <= 0 || factor > 255.0f) return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_driver_initialized) return ESP_ERR_INVALID_STATE;
 
     if (xSemaphoreTake(s_sensor_mutex, portMAX_DELAY) == pdTRUE) {
         s_calibrations[channel - 1] = *cal;

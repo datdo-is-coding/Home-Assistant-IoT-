@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/smart_home_providers.dart';
 import '../core/theme/app_theme.dart';
 import '../models/device.dart';
 
-class QuickControlSheet extends StatefulWidget {
+class QuickControlSheet extends ConsumerStatefulWidget {
   final Device device;
   final ValueChanged<bool> onToggle;
   final ValueChanged<double> onValueChanged;
@@ -39,10 +41,10 @@ class QuickControlSheet extends StatefulWidget {
   }
 
   @override
-  State<QuickControlSheet> createState() => _QuickControlSheetState();
+  ConsumerState<QuickControlSheet> createState() => _QuickControlSheetState();
 }
 
-class _QuickControlSheetState extends State<QuickControlSheet> {
+class _QuickControlSheetState extends ConsumerState<QuickControlSheet> {
   late double _currentValue;
   late bool _isOn;
 
@@ -55,6 +57,7 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final liveDevice = ref.watch(deviceProvider(widget.device.id)) ?? widget.device;
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final colors = theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
@@ -274,9 +277,8 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
                       const SizedBox(height: 4),
                       Text(
                         () {
-                          final p = widget.device.powerWatts ??
-                              (widget.device.metadata['power'] as num?)?.toDouble();
-                          if (p != null && p > 0) return '${p.toStringAsFixed(1)} W';
+                          final p = liveDevice.online ? liveDevice.powerWatts : null;
+                          if (p != null) return '${p.toStringAsFixed(1)} W';
                           return 'Chưa có đo';
                         }(),
                         style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -287,6 +289,8 @@ class _QuickControlSheetState extends State<QuickControlSheet> {
               ),
             ),
           ],
+          const SizedBox(height: 12),
+          Text(liveDevice.currentText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 24),
 
           Row(

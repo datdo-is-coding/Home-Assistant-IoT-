@@ -1,5 +1,10 @@
 import 'device.dart';
 
+bool isSubBoxNode(String id, Map<String, dynamic> node) =>
+    id.toUpperCase().startsWith('SB') ||
+    ['board_model', 'model', 'hardware', 'device_type', 'type', 'node_type']
+        .any((key) => '${node[key] ?? ''}'.toLowerCase().contains('subbox'));
+
 class ActionBoxChannel {
   final int index;
   final String channelKey;
@@ -76,6 +81,7 @@ class ActionBox {
   });
 
   bool get isSubBox =>
+      id.toUpperCase().startsWith('SB') ||
       boardModel.toLowerCase().contains('subbox') ||
       metadata['type'] == 'subbox' ||
       metadata['node_type'] == 'subbox';

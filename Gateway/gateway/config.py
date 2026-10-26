@@ -24,6 +24,8 @@ for env_candidate in [
 
 MQTT_BROKER = os.environ.get("MQTT_BROKER", "127.0.0.1")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883" if not os.environ.get("MQTT_CA_FILE") else "8883"))
+DEVICE_MQTT_TLS_PORT = int(os.environ.get("DEVICE_MQTT_TLS_PORT", "8883"))
+MQTT_TLS_PORT = int(os.environ.get("MQTT_TLS_PORT", "8883"))
 MQTT_TLS_ENABLED = os.environ.get("MQTT_TLS_ENABLED", "true" if os.environ.get("MQTT_CA_FILE") or os.environ.get("MQTT_PORT") == "8883" else "false").lower() in ("true", "1", "yes")
 MQTT_CA_FILE = os.environ.get("MQTT_CA_FILE", "")
 MQTT_CERT_FILE = os.environ.get("MQTT_CERT_FILE", "")

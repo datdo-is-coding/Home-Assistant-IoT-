@@ -198,10 +198,10 @@ esp_err_t networkReset() {
 
 esp_err_t factoryReset() {
     s_pairing_window_expires_us.store(0);
-    clearCredentials();
-    clearPeers();
-    incrementOwnerEpoch();
-    return ESP_OK;
+    esp_err_t err = clearCredentials();
+    if (err == ESP_OK) err = clearPeers();
+    if (err == ESP_OK) err = incrementOwnerEpoch();
+    return err;
 }
 }
 

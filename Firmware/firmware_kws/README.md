@@ -32,3 +32,40 @@ Dự án phát triển mô hình TinyML Keyword Spotting (KWS) tiếng Việt of
 - ✅ **Giai đoạn 5 (Dự án Firmware PlatformIO cho ESP32-S3)**: **Đã khởi tạo và biên dịch thành công 100% [SUCCESS]**!
   - RAM sử dụng: **62.3%** Internal SRAM (không cần PSRAM).
   - Flash sử dụng: **9.0%** (301 KB).
+
+## Hiệu chỉnh model từ micro thật
+
+`python scripts/calibrate_model.py --manifest /absolute/path/manifest.json --output /absolute/path/new-candidate`
+chạy bằng môi trường có `torch`, `numpy` và `g++`. Script tái dùng `TinyKWS`, MFCC C++
+của firmware và checkpoint gốc; ghi ứng viên vào thư mục mới, không thay header
+đang dùng hoặc nạp thiết bị. Không chạy script exporter ONNX cũ để tạo scalar-header.
+
+Manifest là JSON array; mỗi file WAV PCM16/mono/16kHz chứa **một từ có thể lặp lại**,
+hoặc mẫu `noise`/`unknown` được xác nhận:
+
+```json
+[
+  {"path": "train/bat-01.wav", "label": "bật", "split": "train"},
+  {"path": "validation/bat-02.wav", "label": "bật", "split": "val"},
+  {"path": "test/bat-03.wav", "label": "bật", "split": "test"}
+]
+```
+
+Đường dẫn WAV tương đối với manifest. Chia theo toàn phiên trước khi trích cửa sổ;
+script từ chối file có cùng nội dung được dùng lại. Không gán nhãn theo dự đoán
+của model đang lỗi. Bản ghi thiếu/không rõ từ phải để ngoài tập học.
+
+Ứng viên gồm `candidate.pt`, `candidate.h`, `report.json`. Checkpoint được chọn bằng
+validation, không bằng test. Nếu chưa có mic validation/test, báo cáo chỉ chứng minh
+fit dữ liệu train và giữ test gốc; **không đủ điều kiện nạp ứng viên**. Metrics theo
+cửa sổ không thay thế tỷ lệ đúng cả câu và kiểm tra không ra lệnh trên âm nhiễu.
+Cần đánh giá thêm câu mới, sai hành động/phòng, negative sessions, parity C++ INT8
+và timing trên bo trước khi bật binding.
+
+Kiểm tra exporter và chống rò rỉ phiên:
+`python -m unittest Firmware.tests.test_kws_training` từ thư mục gốc repo,
+trong môi trường huấn luyện. Thiếu Torch thì test được skip, không phải pass parity.
+
+Tập học bổ sung các đoạn từ riêng, dịch vị trí và gain 0,5/1/2 từ cùng phiên train.
+Validation/test không lọc bỏ phiên nói nhỏ: mỗi phiên chấm một cửa sổ năng lượng lớn
+nhất; báo cáo này vẫn phải đi kèm replay cả phiên để phát hiện lệnh sai/bỏ sót từ.

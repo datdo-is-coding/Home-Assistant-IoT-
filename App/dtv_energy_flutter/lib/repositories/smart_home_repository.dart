@@ -121,6 +121,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
   static const String _kAutomationsPrefKey = 'aetheria_saved_automations';
 
   StreamSubscription<GatewayEvent>? _eventSub;
+  Timer? _meterExpiryTimer;
 
   GatewaySmartHomeRepository(
     this.gateway, {
@@ -271,6 +272,12 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
   ChangedResources applySnapshot(Map<String, dynamic> nodes, {int? revision}) {
     final candidateDevices = _buildCandidateDevices(nodes);
+    if (candidateDevices.any((d) => d.metadata['metered'] == true)) {
+      _meterExpiryTimer ??= Timer.periodic(const Duration(seconds: 5), (_) => applySnapshot(gateway.nodes));
+    } else {
+      _meterExpiryTimer?.cancel();
+      _meterExpiryTimer = null;
+    }
     final candidateActionBoxes = _buildCandidateActionBoxes(nodes);
 
     bool devicesChanged = false;
@@ -482,6 +489,19 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       case 'node_telemetry':
         if (nodeId != null) {
           final p = readNumber(data['power'] ?? data['power_w'] ?? data['telemetry']?['power'] ?? data['telemetry']?['power_w']);
+          if (data['channels'] is Map && asMap(data['channels']).values.any((c) => asMap(c).containsKey('valid'))) {
+            final node = gateway.nodes[nodeId];
+            if (node is Map) {
+              final channels = asMap(node['channels']);
+              for (final entry in asMap(data['channels']).entries) {
+                if (!channels.containsKey(entry.key)) continue;
+                final meter = asMap(entry.value);
+                channels[entry.key] = {...asMap(channels[entry.key]), 'telemetry': meter, 'power': meter['power_w']};
+              }
+              node['channels'] = channels;
+              return applySnapshot(gateway.nodes);
+            }
+          }
           if (data['channels'] is Map) {
             final chMap = asMap(data['channels']);
             for (final entry in chMap.entries) {
@@ -595,8 +615,9 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     for (final entry in nodes.entries) {
       final nodeId = entry.key;
       final node = asMap(entry.value);
+      if (isSubBoxNode(nodeId, node)) continue;
       final nodeOnline = gateway.connected &&
-          ((node['status'] == 'online') || (node['is_online'] == true));
+          (node['status'] != null ? node['status'] == 'online' : node['is_online'] == true);
       final rawRl = node['relay_state'];
       final List<dynamic> rlList = rawRl is List ? rawRl : const [0, 0];
       final nodeRoom = (node['room'] ?? '').toString();
@@ -629,15 +650,22 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
         final aliases = rawAliases is List ? rawAliases.map((a) => a.toString()).toList() : <String>[];
         final devId = '$nodeId::$chKey';
 
-        final chPowerRaw = readNumber(chInfo['power'] ?? chInfo['power_w'] ?? asMap(chInfo['telemetry'])['power_w'] ?? asMap(chInfo['telemetry'])['power']);
-        final double? channelPower;
-        if (chPowerRaw != null && chPowerRaw > 0) {
-          channelPower = chPowerRaw;
-        } else if (i == 0 && powerWatts > 0) {
-          channelPower = powerWatts;
-        } else {
-          channelPower = null;
-        }
+        final meter = asMap(chInfo['telemetry']);
+        final metered = meter.containsKey('valid');
+        final receivedAt = readNumber(meter['received_at']);
+        final age = receivedAt == null ? double.infinity : DateTime.now().millisecondsSinceEpoch / 1000 - receivedAt;
+        final meterValid = nodeOnline && meter['valid'] == true && age >= -5 && age <= 15;
+        final rawCurrent = readNumber(meter['current_ma']);
+        final current = metered
+            ? (meterValid && rawCurrent != null && rawCurrent.isFinite && rawCurrent >= 0 ? rawCurrent / 1000 : null)
+            : (nodeOnline && i == 0 ? readNumber(pzem['current']) : null);
+        final voltage = metered
+            ? (meterValid ? readNumber(meter['voltage_v']) : null)
+            : (nodeOnline && i == 0 ? readNumber(pzem['voltage']) : null);
+        final chPowerRaw = readNumber(chInfo['power'] ?? chInfo['power_w'] ?? meter['power_w'] ?? meter['power']);
+        final double? channelPower = metered
+            ? (meterValid ? readNumber(meter['power_w']) : null)
+            : chPowerRaw != null && chPowerRaw > 0 ? chPowerRaw : i == 0 && powerWatts > 0 ? powerWatts : null;
 
         list.add(Device(
           id: devId,
@@ -660,9 +688,10 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
             'can_dim': false,
             'can_speed': false,
             'has_thermostat': false,
-            'power': channelPower ?? 0.0,
-            'voltage': i == 0 ? readNumber(pzem['voltage']) : null,
-            'current': i == 0 ? readNumber(pzem['current']) : null,
+            'power': metered ? channelPower : channelPower ?? 0.0,
+            'metered': metered,
+            'voltage': voltage,
+            'current': current,
             'energy': i == 0 ? readNumber(pzem['energy']) : null,
             'board_power': powerWatts,
           },
@@ -693,8 +722,9 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
     for (final entry in nodes.entries) {
       final nodeId = entry.key;
       final node = asMap(entry.value);
+      final isSubbox = isSubBoxNode(nodeId, node);
       final nodeOnline = gateway.connected &&
-          ((node['status'] == 'online') || (node['is_online'] == true));
+          (node['status'] != null ? node['status'] == 'online' : node['is_online'] == true);
       final rawRl = node['relay_state'];
       final List<dynamic> rlList = rawRl is List ? rawRl : const [0, 0];
       final nodeRoom = (node['room'] ?? '').toString();
@@ -704,7 +734,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
       final has3Ch = channelsMap.containsKey('ch3') ||
           rlList.length >= 3 ||
           (node['capabilities'] is List && (node['capabilities'] as List).contains('relay_3ch'));
-      final channelKeys = has3Ch ? const ['ch1', 'ch2', 'ch3'] : const ['ch1', 'ch2'];
+      final channelKeys = isSubbox ? const <String>[] : has3Ch ? const ['ch1', 'ch2', 'ch3'] : const ['ch1', 'ch2'];
       for (int i = 0; i < channelKeys.length; i++) {
         final chKey = channelKeys[i];
         final chInfo = asMap(channelsMap[chKey]);
@@ -730,18 +760,18 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
       list.add(ActionBox(
         id: nodeId,
-        name: node['name'] ?? node['display_name'] ?? 'ActionBox $nodeId',
+        name: node['name'] ?? node['display_name'] ?? '${isSubbox ? 'SubBox' : 'ActionBox'} $nodeId',
         roomId: nodeRoom,
         online: nodeOnline,
         channels: channels,
         firmwareVersion: node['fw'] ?? node['firmware_version'] ?? 'v2.1.0-esp32s3',
         ipAddress: node['ip'] ?? (gateway.serverUrl.isNotEmpty ? Uri.tryParse(gateway.serverUrl)?.host ?? '192.168.11.181' : '192.168.11.181'),
         signalStrength: readNumber(node['rssi'])?.toInt() ?? -62,
-        boardModel: node['board_model'] ?? node['model'] ?? 'actionbox_v2',
+        boardModel: isSubbox ? 'subbox_v1' : node['board_model'] ?? node['model'] ?? 'actionbox_v2',
         boardRevision: node['board_revision'] ?? 'v2.1',
         subboxId: node['subbox_id'] ?? node['parent_subbox'],
         ownerEpoch: readNumber(node['owner_epoch'])?.toInt() ?? 1,
-        capabilities: (node['capabilities'] as List?)?.map((e) => e.toString()).toList() ?? const ['relay', 'energy_meter'],
+        capabilities: isSubbox ? const ['gateway', 'audio'] : (node['capabilities'] as List?)?.map((e) => e.toString()).toList() ?? const ['relay', 'energy_meter'],
         protocolVersion: readNumber(node['protocol_version'])?.toInt() ?? 2,
         metadata: Map<String, dynamic>.from(node),
       ));
@@ -1151,6 +1181,7 @@ class GatewaySmartHomeRepository implements SmartHomeRepository {
 
   @override
   void dispose() {
+    _meterExpiryTimer?.cancel();
     _eventSub?.cancel();
     gateway.removeListener(_syncFromGateway);
     _deviceStreamCtrl.close();

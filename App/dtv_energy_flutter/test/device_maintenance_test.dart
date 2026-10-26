@@ -305,6 +305,22 @@ void main() {
       expect(find.byKey(const Key('confirm_factory_reset_button')), findsOneWidget);
     });
 
+    testWidgets('SubBox network reset explains Wi-Fi recovery and retained peers', (tester) async {
+      tester.view.physicalSize = const Size(500, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final client = await createTestClient();
+      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleSubBox));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('network_reset_tile')));
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: find.byKey(const Key('network_reset_confirm_dialog')),
+          matching: find.textContaining('Xóa Wi-Fi đã lưu')), findsOneWidget);
+      expect(find.textContaining('danh sách ActionBox đã ghép nối được giữ nguyên'), findsOneWidget);
+      expect(find.textContaining('Số kênh bị ảnh hưởng'), findsNothing);
+    });
+
     testWidgets('Test SubBox Removal: Dialog shows child ActionBoxes protection notice', (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;

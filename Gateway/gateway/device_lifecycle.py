@@ -1471,13 +1471,13 @@ class DeviceLifecycleManager:
                     },
                 )
                 self.ledger.record_operation(op)
-                self._dispatch_op(op, OperationKind.REBOOT)
                 self.ledger.update_operation_state(
                     op.operation_id,
                     OperationState.AWAITING_RECONNECT,
                     now_sec=now,
                 )
                 op.state = OperationState.AWAITING_RECONNECT
+                self._dispatch_op(op, OperationKind.REBOOT)
 
             elif op_kind == OperationKind.NETWORK_RESET:
                 if not confirmation:
@@ -1500,7 +1500,7 @@ class DeviceLifecycleManager:
                         op.state = OperationState.RUNNING
                         op.updated_at = now
                         op.expires_at = now + 30.0
-                        self.ledger.update_operation_state(op.operation_id, OperationState.RUNNING, now_sec=now)
+                        self.ledger.record_operation(op)
                     else:
                         op = Operation(
                             kind=OperationKind.NETWORK_RESET,
@@ -1539,7 +1539,7 @@ class DeviceLifecycleManager:
                         op.state = OperationState.RUNNING
                         op.updated_at = now
                         op.expires_at = now + 60.0
-                        self.ledger.update_operation_state(op.operation_id, OperationState.RUNNING, now_sec=now)
+                        self.ledger.record_operation(op)
                     else:
                         op = Operation(
                             kind=OperationKind.FACTORY_RESET,
@@ -1560,20 +1560,7 @@ class DeviceLifecycleManager:
                     new_epoch = curr_epoch + 1
                     self._dispatch_op(op, OperationKind.FACTORY_RESET, extra={"owner_epoch": new_epoch})
 
-                    node["owner_epoch"] = new_epoch
-
-                    if self.auth and hasattr(self.auth, "revoke_device_grants"):
-                        self.auth.revoke_device_grants(device_uid)
-
-                    node["status"] = "unclaimed"
-                    node["state"] = "unclaimed"
-                    if "security" not in node:
-                        node["security"] = {}
-                    node["security"]["lifecycle_state"] = "resetting"
-                    node["security"]["state"] = "unclaimed"
-                    self.registry.save(changed_node=device_uid)
-
-                    self._handle_subbox_children(device_uid)
+                    # Ownership changes only after the device confirms durable reset.
 
             elif op_kind == OperationKind.REMOVE_FROM_HOME:
                 self._handle_subbox_children(device_uid)
@@ -1677,11 +1664,6 @@ class DeviceLifecycleManager:
                     error_message=f"Operation {op.kind.value} timed out",
                     now_sec=now,
                 )
-                if self.registry and "nodes" in getattr(self.registry, "data", {}):
-                    node = self.registry.data["nodes"].get(op.device_uid)
-                    if node and op.kind == OperationKind.FACTORY_RESET and node.get("status") != "unclaimed":
-                        node["status"] = "unclaimed"
-                        self.registry.save(changed_node=op.device_uid)
         return op
 
     def get_operation(self, operation_id: str, now_sec: float | None = None) -> Operation | None:
@@ -1693,7 +1675,7 @@ class DeviceLifecycleManager:
     def on_device_reconnected(self, device_uid: str, now_sec: float | None = None) -> Operation | None:
         now = now_sec if now_sec is not None else time.time()
         active_op = self.ledger.get_active_operation(device_uid, now_sec=now)
-        if active_op and active_op.kind == OperationKind.REBOOT:
+        if active_op and active_op.kind == OperationKind.REBOOT and not active_op.metadata.get("route"):
             if active_op.state in (OperationState.AWAITING_RECONNECT, OperationState.RUNNING):
                 op = self.ledger.update_operation_state(
                     active_op.operation_id,
@@ -1727,7 +1709,25 @@ class DeviceLifecycleManager:
         if not op:
             return None
 
+        if (op.device_uid != device_uid or op.state not in (OperationState.RUNNING, OperationState.AWAITING_RECONNECT)
+                or op.is_expired(now)):
+            return None
+
         st = OperationState.SUCCEEDED if status.lower() in ("succeeded", "ok", "success") else OperationState.FAILED
+        if st == OperationState.SUCCEEDED and op.kind in (OperationKind.FACTORY_RESET, OperationKind.NETWORK_RESET):
+            node = self.registry.data["nodes"].get(device_uid)
+            if node:
+                if op.kind == OperationKind.FACTORY_RESET:
+                    node["owner_epoch"] = int(node.get("owner_epoch", 1)) + 1
+                    node["status"] = node["state"] = "unclaimed"
+                    node.setdefault("security", {}).update(state="unclaimed", lifecycle_state="unclaimed")
+                    if self.auth:
+                        self.auth.revoke_device_grants(device_uid)
+                else:
+                    node["status"] = "offline"
+                    node["state"] = "reconnecting"
+                self.registry.save(changed_node=device_uid)
+                self._handle_subbox_children(device_uid)
         res = self.ledger.update_operation_state(
             op.operation_id,
             st,
@@ -1772,6 +1772,37 @@ class DeviceLifecycleManager:
 
     def _dispatch_op(self, op: Operation, kind: OperationKind, extra: dict | None = None) -> None:
         if not self.mqtt:
+            return
+        if op.device_uid.startswith(("AB", "SB")) and len(op.device_uid) == 14:
+            import secrets
+            node = self.registry.data["nodes"][op.device_uid]
+            is_subbox = op.device_uid.startswith("SB")
+            route = op.device_uid if is_subbox else self.mqtt.subbox_route(op.device_uid)
+            identity = {} if is_subbox else self.mqtt.node_identities.get(op.device_uid, {})
+            if not route or (not is_subbox and not identity):
+                self.ledger.update_operation_state(op.operation_id, OperationState.FAILED,
+                    error_code="DEVICE_OFFLINE", error_message="Thiết bị chưa có tuyến kết nối đang hoạt động.")
+                return
+            payload = {"protocol_version": 3, "hardware_uid": op.device_uid[2:],
+                "config_version": identity.get("config_version", node.get("cfg_version", 1)),
+                "node_id": op.device_uid, "cmd": kind.value.upper(),
+                "request_id": secrets.randbelow(0x7ffffffe) + 1, "session_id": self.mqtt.session_id,
+                "operation_id": op.operation_id, "owner_epoch": int(node.get("owner_epoch", 1)),
+                "confirmed": True}
+            op.metadata.update(request_id=payload["request_id"], session_id=payload["session_id"], route=route)
+            self.ledger.update_operation_state(op.operation_id, op.state, metadata=op.metadata)
+            async def send_wire():
+                try:
+                    ok = await self.mqtt.publish(f"home/subbox/{route}/command", payload, qos=1)
+                except Exception:
+                    ok = False
+                if not ok:
+                    self.ledger.update_operation_state(op.operation_id, OperationState.FAILED,
+                        error_code="TRANSPORT_UNAVAILABLE", error_message="Không gửi được lệnh đến thiết bị.")
+            try:
+                asyncio.get_running_loop().create_task(send_wire())
+            except RuntimeError:
+                asyncio.run(send_wire())
             return
         payload = {
             "cmd": kind.value if isinstance(kind, Enum) else str(kind),

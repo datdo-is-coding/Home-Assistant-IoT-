@@ -94,6 +94,7 @@ class WebServerSecurityTests(unittest.IsolatedAsyncioTestCase):
         data = json.loads(body)
         self.assertTrue(data.get("success"))
         self.assertIn("FreshSetupAP", data.get("message", ""))
+        await asyncio.sleep(0)
 
     async def test_wifi_connect_member_forbidden(self):
         """Non-admin (member) role is forbidden (403) from calling /api/wifi/connect."""
@@ -125,6 +126,7 @@ class WebServerSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         data = json.loads(body)
         self.assertTrue(data.get("success"))
+        await asyncio.sleep(0)
 
     async def test_login_cookie_omits_secure_on_plain_http(self):
         """Over direct plain HTTP LAN, Set-Cookie must not have Secure attribute so cookies work on HTTP."""

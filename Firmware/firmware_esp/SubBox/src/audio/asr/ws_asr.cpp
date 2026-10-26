@@ -391,10 +391,25 @@ void WsASR::handleTextMessage(const char* data, int len) {
                     if (callback) callback(command->valuestring);
                 }
             }
+        } else if (strcmp(type->valuestring, "kws_playback_done") == 0) {
+            std::function<void(const std::string&)> callback;
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                callback = m_playback_done_cb;
+            }
+            if (callback) callback(std::string(data, static_cast<size_t>(len)));
         } else if (strcmp(type->valuestring, "speaker_busy") == 0) {
             cJSON* busy = cJSON_GetObjectItem(root, "busy");
             bool is_busy = busy && cJSON_IsTrue(busy);
             ESP_LOGI(TAG, "📢 Speaker busy status: %d", is_busy);
+        } else if (strcmp(type->valuestring, "suppressed") == 0) {
+            cJSON* reason = cJSON_GetObjectItem(root, "reason");
+            const char* r_str = (reason && cJSON_IsString(reason)) ? reason->valuestring : "spatial_arbiter";
+            ESP_LOGI(TAG, "Audio stream suppressed by Gateway (%s)", r_str);
+            m_streaming = false;
+            if (m_result_sem) {
+                xSemaphoreGive(m_result_sem);
+            }
         } else if (strcmp(type->valuestring, "command_result") == 0) {
             cJSON* verify = cJSON_GetObjectItem(root, "verify");
             cJSON* reply = cJSON_GetObjectItem(root, "voice_reply");

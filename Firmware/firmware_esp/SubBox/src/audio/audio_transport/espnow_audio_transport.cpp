@@ -9,7 +9,6 @@
 #include <algorithm>
 #include "cJSON.h"
 #include "storage/nvs_manager.h"
-#include "network/espnow_receiver.h"
 
 static const char* TAG = "ESPNOW_TRANSPORT";
 
@@ -116,13 +115,8 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         return;
     }
     uint8_t msg_type = data[0];
-    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == 0x25) || (msg_type == '{');
+    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == '{');
     if (!is_known_type) return;
-
-    if (msg_type == MSG_TYPE_KEYWORD_EVENT) {
-        subbox_espnow_handle_keyword_event(data, len);
-        return;
-    }
 
     std::string source;
     if (msg_type >= 0x20 && msg_type <= 0x22 && hc_runtime_enabled()) {

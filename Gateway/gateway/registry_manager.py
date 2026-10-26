@@ -9,8 +9,10 @@ Device Registry Manager v2 — quản lý theo phòng + fullname + provision flo
 Tương thích ngược: tự migrate file cũ (area/channels) sang schema mới khi load.
 """
 import json
+import math
 import os
 import re
+import time
 import copy
 import sqlite3
 import logging
@@ -167,6 +169,19 @@ class RegistryManager:
                     wifi_rssi INTEGER,
                     recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS channel_telemetry_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_id VARCHAR(32) NOT NULL,
+                    channel VARCHAR(8) NOT NULL,
+                    current_ma REAL,
+                    voltage_v REAL,
+                    power_w REAL,
+                    valid BOOLEAN NOT NULL DEFAULT 0,
+                    quality VARCHAR(16) NOT NULL DEFAULT 'invalid',
+                    sample_uptime_ms INTEGER,
+                    received_at REAL,
+                    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE IF NOT EXISTS zones (
                     zone_id VARCHAR(32) PRIMARY KEY,
                     display_name VARCHAR(64) NOT NULL,
@@ -174,6 +189,8 @@ class RegistryManager:
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_telemetry_dev_time ON telemetry_records(device_id, recorded_at);
+                CREATE INDEX IF NOT EXISTS idx_channel_telemetry_dev_time
+                    ON channel_telemetry_records(device_id, channel, recorded_at);
                 """)
 
                 try:
@@ -1316,6 +1333,80 @@ class RegistryManager:
         """Asynchronously record telemetry without blocking the asyncio loop."""
         await asyncio.to_thread(self.record_telemetry, device_id, telemetry_dict)
 
+    def record_channel_telemetry(self, device_id: str, channels: Dict[str, dict]) -> int:
+        """Persist per-channel samples exactly as reported.
+
+        Null voltage/power/energy values stay NULL. Invalid or stale samples are
+        recorded with their quality so history can expose gaps instead of
+        inventing zero watts.
+        """
+        if not device_id or not isinstance(channels, dict):
+            return 0
+        rows = []
+        for ch_key, meter in channels.items():
+            if not isinstance(ch_key, str) or not re.fullmatch(r"ch[1-3]", ch_key):
+                continue
+            if not isinstance(meter, dict):
+                continue
+            values = []
+            for key in ("current_ma", "voltage_v", "power_w"):
+                value = meter.get(key)
+                values.append(float(value) if type(value) in (int, float) and math.isfinite(value) else None)
+            valid = meter.get("valid") is True
+            quality = meter.get("quality") if isinstance(meter.get("quality"), str) else ("good" if valid else "invalid")
+            sample = meter.get("sample_uptime_ms")
+            sample = sample if type(sample) is int and 0 <= sample <= 0xffffffff else None
+            received = meter.get("received_at")
+            received = float(received) if type(received) in (int, float) and math.isfinite(received) else time.time()
+            rows.append((device_id, ch_key, *values, int(valid), quality, sample, received))
+        if not rows:
+            return 0
+        try:
+            with self._get_db() as conn:
+                conn.executemany("""
+                    INSERT INTO channel_telemetry_records (
+                        device_id, channel, current_ma, voltage_v, power_w,
+                        valid, quality, sample_uptime_ms, received_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, rows)
+            return len(rows)
+        except Exception as e:
+            logger.error(f"record_channel_telemetry error for {device_id}: {e}")
+            return 0
+
+    def get_channel_telemetry_history(self, device_id: str, channel: Optional[str] = None,
+                                      limit: int = 50) -> List[dict]:
+        """Return newest channel samples in chronological order, nulls preserved."""
+        try:
+            limit = max(1, min(int(limit), 1000))
+        except (TypeError, ValueError):
+            limit = 50
+        if channel is not None and not re.fullmatch(r"ch[1-3]", str(channel)):
+            return []
+        try:
+            with self._get_db() as conn:
+                if channel:
+                    rows = conn.execute("""
+                        SELECT * FROM channel_telemetry_records
+                        WHERE device_id = ? AND channel = ?
+                        ORDER BY id DESC LIMIT ?
+                    """, (device_id, channel, limit)).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT * FROM channel_telemetry_records
+                        WHERE device_id = ?
+                        ORDER BY id DESC LIMIT ?
+                    """, (device_id, limit)).fetchall()
+                result = []
+                for row in reversed(rows):
+                    record = dict(row)
+                    record["valid"] = bool(record.get("valid"))
+                    result.append(record)
+                return result
+        except Exception as e:
+            logger.error(f"get_channel_telemetry_history error for {device_id}: {e}")
+            return []
+
     def prune_telemetry(self, max_records: int = 50000, retention_days: int = 7) -> int:
         """
         Dọn dẹp (pruning/retention) dữ liệu telemetry:
@@ -1333,6 +1424,13 @@ class RegistryManager:
                 if res1.rowcount and res1.rowcount > 0:
                     deleted += res1.rowcount
 
+                res1c = conn.execute(
+                    "DELETE FROM channel_telemetry_records WHERE recorded_at < datetime('now', ?)",
+                    (f"-{int(retention_days)} days",)
+                )
+                if res1c.rowcount and res1c.rowcount > 0:
+                    deleted += res1c.rowcount
+
                 # 2. Prune by max records cap
                 cnt_row = conn.execute("SELECT COUNT(*) FROM telemetry_records").fetchone()
                 total_cnt = cnt_row[0] if cnt_row else 0
@@ -1345,6 +1443,18 @@ class RegistryManager:
                     """, (overflow,))
                     if res2.rowcount and res2.rowcount > 0:
                         deleted += res2.rowcount
+
+                cnt_row = conn.execute("SELECT COUNT(*) FROM channel_telemetry_records").fetchone()
+                total_cnt = cnt_row[0] if cnt_row else 0
+                if total_cnt > max_records:
+                    overflow = total_cnt - max_records
+                    res2c = conn.execute("""
+                        DELETE FROM channel_telemetry_records WHERE id IN (
+                            SELECT id FROM channel_telemetry_records ORDER BY id ASC LIMIT ?
+                        )
+                    """, (overflow,))
+                    if res2c.rowcount and res2c.rowcount > 0:
+                        deleted += res2c.rowcount
 
             if deleted > 0:
                 logger.info(f"🧹 [Telemetry Prune] Cleaned {deleted} records (retention={retention_days}d, max={max_records})")
@@ -1661,7 +1771,8 @@ ws ::= [ \\t\\n]*
             if self.data['nodes'][node_id].get('status') == 'NEEDS_REPROVISION':
                 return
             self.data["nodes"][node_id]["last_seen"] = datetime.now(TZ_VN).isoformat()
-            self.data["nodes"][node_id]["status"] = "online"
+            node = self.data["nodes"][node_id]
+            node["status"] = "offline" if node.get("reported_claimed") is False else "online"
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(asyncio.to_thread(self.save, node_id))

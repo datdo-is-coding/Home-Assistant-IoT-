@@ -296,23 +296,31 @@ class TestControlPathHardening(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 403)
 
         # 3. Admin user -> Allowed
-        with patch("subprocess.run") as mock_sub:
-            mock_sub.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"", b"")
+        proc.wait.return_value = 0
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
             status, _, _ = await self._send_http("POST", "/api/wifi/connect",
                                                  headers={"Authorization": "Bearer admin-token"},
                                                  body=body)
             self.assertEqual(status, 200)
+            await asyncio.sleep(0)
 
     async def test_web_wifi_connect_allowed_during_active_commissioning_window(self):
         """During active commissioning window (is_commissioning=True), /api/wifi/connect is permitted."""
         self.gateway.is_commissioning = True
         body = json.dumps({"ssid": "SetupWiFi", "password": "pass"}).encode()
 
-        with patch("subprocess.run") as mock_sub:
-            mock_sub.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"", b"")
+        proc.wait.return_value = 0
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
             # Unauthenticated connection allowed in commissioning mode
             status, _, _ = await self._send_http("POST", "/api/wifi/connect", body=body)
             self.assertEqual(status, 200)
+            await asyncio.sleep(0)
 
     async def test_web_voice_vocabulary_filtered_by_user_devices(self):
         """Member only sees vocabulary for devices returned by auth.get_user_devices; Admin sees all."""

@@ -22,7 +22,11 @@ typedef enum {
     CMD_TYPE_CLEAR_FAULT = 7,
     CMD_TYPE_PING        = 8,
     CMD_TYPE_SET_CONFIG  = 9,
-    CMD_TYPE_LISTEN_FOLLOWUP = 10
+    CMD_TYPE_LISTEN_FOLLOWUP = 10,
+    CMD_TYPE_IDENTIFY = 11,
+    CMD_TYPE_REBOOT = 12,
+    CMD_TYPE_NETWORK_RESET = 13,
+    CMD_TYPE_FACTORY_RESET = 14
 } ActionBoxCommandType;
 
 typedef struct {
@@ -34,6 +38,8 @@ typedef struct {
     uint8_t              channel;
     uint32_t             timestamp;
     uint32_t             settle_ms;
+    char                 operation_id[64];
+    uint32_t             owner_epoch;
 
     char                 new_node_id[APP_MAX_NODE_ID_LEN];
     char                 new_room_id[APP_MAX_ROOM_ID_LEN];
@@ -73,7 +79,6 @@ esp_err_t protocol_serialize_fault_alert(uint8_t channel, RelayFault fault_type,
 #define MSG_TYPE_AUDIO_START             0x20
 #define MSG_TYPE_AUDIO_CHUNK             0x21
 #define MSG_TYPE_AUDIO_END               0x22
-#define MSG_TYPE_KEYWORD_EVENT           0x25
 
 #define CODEC_RAW_PCM                    0x00
 #define CODEC_IMA_ADPCM                  0x01
@@ -104,15 +109,6 @@ typedef struct __attribute__((packed)) {
     uint16_t total_chunks;
     uint32_t total_pcm_bytes;
 } ActionBoxAudioEndPacket;
-
-typedef struct __attribute__((packed)) {
-    uint8_t  msg_type;
-    uint8_t  seq;
-    uint8_t  keyword_id;
-    uint8_t  confidence_pct;
-    uint32_t session_id;
-    uint32_t rel_time_ms;
-} ActionBoxKeywordEventPacket;
 
 #ifdef __cplusplus
 }

@@ -10,6 +10,7 @@
 
 static std::atomic<bool> s_fault(false), s_wifi(false), s_mqtt(false), s_configured(false), s_unclaimed(false);
 static std::atomic<int64_t> s_peer_seen(0);
+static std::atomic<int64_t> s_identify_until(0);
 static esp_timer_handle_t s_timer = nullptr;
 static int64_t s_pattern_start_us = 0;
 static int64_t s_online_entered_us = 0;
@@ -47,7 +48,7 @@ static void tick(void*) {
         lifecycle,
         connectivity,
         fault,
-        false,
+        s_identify_until.load() > now_us,
         OperationKind::IDENTIFY,
         OperationState::RUNNING,
         elapsed_in_online_ms
@@ -89,5 +90,6 @@ void subbox_led_set_mqtt_configured(bool configured) { s_configured.store(config
 void subbox_led_peer_seen(void) { s_peer_seen.store(esp_timer_get_time()); }
 void subbox_led_set_error(bool error) { s_fault.store(error); }
 void subbox_led_set_unclaimed(bool unclaimed) { s_unclaimed.store(unclaimed); }
+void subbox_led_identify(void) { s_identify_until.store(esp_timer_get_time() + 15000000); }
 bool subbox_led_wifi_connected(void) { return s_wifi.load(); }
 bool subbox_led_mqtt_connected(void) { return s_mqtt.load(); }

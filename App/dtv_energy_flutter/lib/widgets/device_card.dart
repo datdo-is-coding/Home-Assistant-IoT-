@@ -167,6 +167,8 @@ class DeviceCard extends StatelessWidget {
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
+                      Text(device.currentText, maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
                     ],
                   ),
 

@@ -13,6 +13,7 @@ void subbox_led_set_error(bool has_error);
 bool subbox_led_wifi_connected(void);
 bool subbox_led_mqtt_connected(void);
 void subbox_led_set_unclaimed(bool unclaimed);
+void subbox_led_identify(void);
 #ifdef __cplusplus
 }
 #endif

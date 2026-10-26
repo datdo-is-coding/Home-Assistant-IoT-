@@ -140,12 +140,16 @@ class CommercialReadinessRegressions(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 403)
 
         # 3. Admin request -> Accepted (200)
-        with patch("subprocess.run") as mock_sub:
-            mock_sub.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        proc = AsyncMock()
+        proc.communicate.return_value = (b"", b"")
+        proc.wait.return_value = 0
+        proc.returncode = 0
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
             status, _, _ = await self._send_http("POST", "/api/wifi/connect",
                                                  headers={"Authorization": "Bearer admin-token"},
                                                  body=body)
             self.assertEqual(status, 200)
+            await asyncio.sleep(0)
 
     # =========================================================================
     # R2: WebSocket rejects unauthenticated or mismatched node_id Compact ACK

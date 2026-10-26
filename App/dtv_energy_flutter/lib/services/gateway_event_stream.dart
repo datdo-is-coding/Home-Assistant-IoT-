@@ -216,6 +216,7 @@ class GatewayEventStream {
   final void Function()? onDisconnected;
   final Duration telemetryThrottle;
   final http.Client Function()? httpClientFactory;
+  final bool closeClientOnDisconnect;
 
   int? _lastRevision;
   int _reconnectAttempts = 0;
@@ -243,6 +244,7 @@ class GatewayEventStream {
     this.onDisconnected,
     this.telemetryThrottle = const Duration(milliseconds: 250),
     this.httpClientFactory,
+    this.closeClientOnDisconnect = true,
   }) {
     _parser = SseParser(
       onEvent: _onRawEvent,
@@ -344,7 +346,7 @@ class GatewayEventStream {
 
       final response = await client.send(request);
       if (_isClosed || _isPaused) {
-        client.close();
+        if (closeClientOnDisconnect) client.close();
         return;
       }
       final contentType = response.headers['content-type'] ?? '';
@@ -392,7 +394,7 @@ class GatewayEventStream {
   void _disconnectStream() {
     _streamSub?.cancel();
     _streamSub = null;
-    _activeClient?.close();
+    if (closeClientOnDisconnect) _activeClient?.close();
     _activeClient = null;
   }
 

@@ -42,13 +42,22 @@ inline esp_mqtt_client_handle_t esp_mqtt_client_init(const esp_mqtt_client_confi
     configured_user = c->credentials.username; configured_password = c->credentials.authentication.password;
     return reinterpret_cast<void*>(1);
 }
-inline int esp_mqtt_client_register_event(void*, esp_mqtt_event_id_t, void(*)(void*,const char*,int32_t,void*),void*) { return 0; }
+inline void (*event_handler)(void*,const char*,int32_t,void*) = nullptr;
+inline void* event_context = nullptr;
+inline int esp_mqtt_client_register_event(void*, esp_mqtt_event_id_t, void(*handler)(void*,const char*,int32_t,void*),void* context) {
+    event_handler = handler; event_context = context; return 0;
+}
 inline int esp_mqtt_client_start(void*) { return 0; }
 inline int esp_mqtt_client_stop(void*) { return 0; }
 inline int esp_mqtt_client_destroy(void*) { return 0; }
 inline int esp_mqtt_client_subscribe(void*,const char*,int) { return 1; }
 inline int esp_mqtt_client_publish(void*,const char*,const char*,int,int,int) { return 1; }
 inline int esp_mqtt_client_enqueue(void*,const char*,const char*,int,int,int,bool) { return 1; }
+using TickType_t = uint32_t;
+inline uint32_t xTaskGetTickCount() { static uint32_t ticks=0; return ticks++; }
+inline void vTaskDelay(uint32_t) {}
+#define pdMS_TO_TICKS(ms) (ms)
+inline int esp_mqtt_client_get_outbox_size(void*) { return 0; }
 inline bool hc_runtime_enabled() { return true; }
 inline uint32_t hc_runtime_node_id() { return 1; }
 inline bool hc_runtime_receive_mqtt(const uint8_t*,size_t) { return true; }
@@ -83,6 +92,35 @@ int main() {
         assert(configured_ca == "trusted-ca");
         assert(configured_user == "per-node-user");
         assert(configured_password == "per-node-password");
+        int callbacks = 0;
+        std::string received;
+        client.registerKwsCallback([&](const auto&, const auto& data) { ++callbacks; received=data; });
+        std::string topic="home/subbox/1/command";
+        std::string payload=R"({"cmd":"KWS_CONFIG","revision":1})";
+        auto deliver = [&](int offset, int length, bool with_topic, int total) {
+            esp_mqtt_event_t event{offset,length,total,with_topic?int(topic.size()):0,
+                with_topic?topic.data():nullptr,payload.data()+offset};
+            event_handler(event_context,nullptr,MQTT_EVENT_DATA,&event);
+        };
+        deliver(0,10,true,payload.size());
+        assert(callbacks == 0);
+        deliver(10,payload.size()-10,false,payload.size());
+        assert(callbacks == 1 && received == payload);
+        // Changed total/offset, oversized and overrun fragments never dispatch.
+        deliver(0,10,true,payload.size());
+        deliver(10,payload.size()-10,false,payload.size()-1);
+        deliver(0,10,true,payload.size());
+        deliver(11,payload.size()-11,false,payload.size());
+        deliver(0,10,true,16385);
+        deliver(0,payload.size(),true,payload.size()-1);
+        assert(callbacks == 1);
+        // KWS messages from publisher-bound topics reach the control boundary.
+        topic="home/kws/SB111111111111/1/command";
+        deliver(0,payload.size(),true,payload.size());
+        assert(callbacks == 2);
+        topic="home/kws/SB111111111111/OTHER/command";
+        deliver(0,payload.size(),true,payload.size());
+        assert(callbacks == 2);
     }
     connected_uri.clear();
     {

@@ -155,13 +155,8 @@ class _FeatureDeviceDetailScreenState extends ConsumerState<FeatureDeviceDetailS
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          () {
-                            final p = device.powerWatts ?? (device.metadata['power'] as num?)?.toDouble();
-                            if (p != null && p > 0) {
-                              return 'Công suất tiêu thụ: ${p.toStringAsFixed(1)} W';
-                            }
-                            return 'Chưa có dữ liệu đo';
-                          }(),
+                          device.measurementText,
+                          textAlign: TextAlign.center,
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                         ),
                       ),

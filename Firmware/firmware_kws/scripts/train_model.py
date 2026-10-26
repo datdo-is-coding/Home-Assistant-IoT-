@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+from pathlib import Path
 import numpy as np
 
 if sys.stdout.encoding.lower() != 'utf-8':
@@ -11,9 +12,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 
-DATA_DIR = "d:/KWS/data"
-MODEL_DIR = "d:/KWS/models"
-os.makedirs(MODEL_DIR, exist_ok=True)
+DATA_DIR = str(Path(__file__).resolve().parents[1] / "data")
+MODEL_DIR = str(Path(__file__).resolve().parents[1] / "models")
 
 class TinyKWS(nn.Module):
     def __init__(self, num_classes=10):
@@ -50,10 +50,11 @@ class TinyKWS(nn.Module):
         return x
 
 def train():
+    os.makedirs(MODEL_DIR, exist_ok=True)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Thiết bị huấn luyện: {device}")
 
-    print("Đang nạp dữ liệu từ d:/KWS/data...")
+    print(f"Đang nạp dữ liệu từ {DATA_DIR}...")
     X_train = np.load(os.path.join(DATA_DIR, "X_train.npy"))
     y_train = np.load(os.path.join(DATA_DIR, "y_train.npy"))
     X_val = np.load(os.path.join(DATA_DIR, "X_val.npy"))

@@ -61,8 +61,10 @@ extern "C" esp_err_t bl0942_read_channel(uint8_t, CurrentMeasurement* out) {
     out->timestamp_ms = esp_timer_get_time() / 1000;
     return ESP_OK;
 }
-extern "C" esp_err_t bl0942_get_latest_measurement(uint8_t, CurrentMeasurement* out) {
-    *out = {UINT32_MAX, UINT32_MAX, INT32_MIN, UINT32_MAX, SENSOR_STATUS_VALID, false, 1, UINT32_MAX};
+extern "C" esp_err_t bl0942_get_latest_measurement(uint8_t channel, CurrentMeasurement* out) {
+    if (channel == 1) return ESP_ERR_TIMEOUT;
+    *out = {UINT32_MAX, UINT32_MAX, INT32_MIN, UINT32_MAX, SENSOR_STATUS_VALID, false,
+            channel == 2 ? 0u : 1u, (uint32_t)(esp_timer_get_time() / 1000)};
     return ESP_OK;
 }
 int main() {
@@ -109,6 +111,11 @@ int main() {
     auto* channels = cJSON_GetObjectItem(telemetry, "channels");
     assert(cJSON_GetArraySize(channels) == 3);
     assert(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 2), "channel")->valueint == 3);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 0), "valid")));
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 1), "valid")));
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 2), "valid")));
+    assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 2), "voltage_v")));
+    assert(cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetArrayItem(channels, 2), "power_w")));
     cJSON_Delete(telemetry);
     char alert[APP_FAULT_ALERT_BUFFER_SIZE];
     assert(protocol_serialize_fault_alert(3, RELAY_FAULT_OVERCURRENT, UINT32_MAX, alert, sizeof(alert)) == ESP_OK);
@@ -123,4 +130,20 @@ int main() {
     ActionBoxCommand listen{};
     assert(protocol_parse_command(json, &listen) == ESP_OK);
     assert(listen.cmd == CMD_TYPE_LISTEN_FOLLOWUP);
+    for (const char* kind : {"IDENTIFY", "REBOOT", "NETWORK_RESET", "FACTORY_RESET"}) {
+        snprintf(json, sizeof(json), "{\"protocol_version\":3,\"node_id\":\"%s\",\"hardware_uid\":\"%s\",\"config_version\":%u,\"request_id\":3,\"session_id\":7,\"cmd\":\"%s\",\"operation_id\":\"op_test\",\"owner_epoch\":%u,\"confirmed\":true}",
+            cfg.node_id, protocol_get_hardware_uid(), cfg.config_version, kind, nvs_storage_get_owner_epoch());
+        ActionBoxCommand maintenance{};
+        assert(protocol_parse_command(json, &maintenance) == ESP_OK);
+        cJSON* request = cJSON_Parse(json);
+        cJSON_ReplaceItemInObject(request, "confirmed", cJSON_CreateFalse());
+        char* bad = cJSON_PrintUnformatted(request);
+        if (strcmp(kind, "IDENTIFY")) assert(protocol_parse_command(bad, &maintenance) != ESP_OK);
+        cJSON_free(bad);
+        cJSON_DeleteItemFromObject(request, "operation_id");
+        bad = cJSON_PrintUnformatted(request);
+        assert(protocol_parse_command(bad, &maintenance) != ESP_OK);
+        cJSON_free(bad); cJSON_Delete(request);
+    }
+
 }
