@@ -22,6 +22,7 @@
 #include "voice_capture.h"
 #include "hc_runtime.h"
 #include "hc_ota.h"
+#include "hc_factory.h"
 #include "hc_provisioning.h"
 #include "device_reset.h"
 #include "esp_timer.h"
@@ -109,6 +110,7 @@ extern "C" void app_main(void) {
     hardware_disable_speaker();
 
     ESP_ERROR_CHECK(nvs_storage_init());
+    ESP_ERROR_CHECK(hc_factory_apply());
     ESP_ERROR_CHECK(relay_driver_init());
 
     if (resume_interrupted_reset()) {

@@ -6,6 +6,7 @@ hc/v1/subbox/<node>/up and down topics; the tag is additionally verified here.
 import asyncio
 import hmac
 import logging
+import re
 import secrets
 import ssl
 import struct
@@ -125,9 +126,17 @@ class Bridge:
             self.uptimes[node]=(struct.unpack('<Q',f.payload)[0],self.registry.clock())
             self.registry.db.execute("UPDATE registered_nodes SET last_seen=?,connectivity='ONLINE' WHERE node_id=?",(self.registry.clock(),node))
         elif f.type in (MessageType.OTA_PROGRESS,MessageType.OTA_CHUNK_ACK,MessageType.OTA_RESULT) and self.ota:
-            self.ota.receive(f)
             if f.type==MessageType.OTA_RESULT:
+                require(len(f.payload)==49 and f.payload[48] in (1,2),'invalid_ota_result')
+                version=f.payload[:16].split(b'\0',1)[0]
+                require(re.fullmatch(rb'[A-Za-z0-9_.-]{1,15}',version) is not None and version.ljust(16,b'\0')==f.payload[:16],'invalid_ota_result')
+                try:self.ota.receive(f)
+                except CoreError as error:
+                    if error.code not in ('not_found','boot_unconfirmed'):raise
+                    self.registry.event(n['home_id'],'ota_late_result',dict(node_id=node,version=version.decode('ascii'),reason=error.code))
+                # Receipt ACK does not commit a boot; the device has already checked local health.
                 return [(parent,self.frame(node,MessageType.OTA_RESULT))]
+            self.ota.receive(f)
         elif f.type==MessageType.STATE_SYNC_REQUEST:
             return [(parent,self.frame(node,MessageType.CONFIG_PUSH,struct.pack('<I',n['config_rev'])))]
         return []
@@ -163,15 +172,18 @@ class Bridge:
                     result.append((parent,self.frame(parent,MessageType.PAIR_ACCEPT,grant)))
         return result
 
-async def run_mqtt(bridge,host,port,username,password,ca):
-    context=ssl.create_default_context(cafile=ca)
+async def run_mqtt(bridge,host,port,username,password,ca,*,poll_interval=.25,client_id="home-competition-core",tls_context=None):
+    if not .01<=poll_interval<=1:raise ValueError("invalid MQTT scheduler interval")
+    context=tls_context if tls_context is not None else ssl.create_default_context(cafile=ca)
     delay=1
     while True:
         try:
             async with aiomqtt.Client(hostname=host,port=port,username=username,password=password,tls_context=context,
-                                      identifier='home-competition-core',max_queued_incoming_messages=128,max_queued_outgoing_messages=128,
+                                      identifier=client_id,max_queued_incoming_messages=128,max_queued_outgoing_messages=128,
                                       will=aiomqtt.Will('hc/v1/gateway/availability',b'offline',qos=1,retain=True)) as client:
-                await client.subscribe('hc/v1/subbox/+/up',qos=1)
+                granted=await client.subscribe('hc/v1/subbox/+/up',qos=1)
+                if not granted or any(getattr(code,'value',code)>=128 for code in granted):
+                    raise aiomqtt.MqttError('Required HC upstream subscription rejected')
                 if bridge.ha:
                     for topic in bridge.ha.subscriptions:
                         await client.subscribe(topic,qos=1)
@@ -189,7 +201,7 @@ async def run_mqtt(bridge,host,port,username,password,ca):
                                 messages=[]
                             for message in messages:
                                 await client.publish(message.topic,message.payload,qos=message.qos,retain=message.retain)
-                        await asyncio.sleep(.25)
+                        await asyncio.sleep(poll_interval)
                 async def receive_messages():
                     async for message in client.messages:
                         try:
@@ -203,8 +215,8 @@ async def run_mqtt(bridge,host,port,username,password,ca):
                             parent=int(parts[3])
                             for target,data in bridge.receive(parent,bytes(message.payload)):
                                 await client.publish(f'hc/v1/subbox/{target}/down',data,qos=1,retain=False)
-                        except (CoreError,ValueError,TypeError,IndexError):
-                            logging.getLogger(__name__).warning('Rejected HC frame')
+                        except (CoreError,ValueError,TypeError,IndexError) as error:
+                            logging.getLogger(__name__).warning('Rejected HC frame: %s',error.code if isinstance(error,CoreError) else type(error).__name__)
                 sender=asyncio.create_task(publish_due())
                 receiver=asyncio.create_task(receive_messages())
                 try:
@@ -214,6 +226,7 @@ async def run_mqtt(bridge,host,port,username,password,ca):
                 finally:
                     sender.cancel();receiver.cancel()
                     await asyncio.gather(sender,receiver,return_exceptions=True)
-        except aiomqtt.MqttError:
+        except aiomqtt.MqttError as error:
+            logging.getLogger(__name__).warning('MQTT unavailable (%s); retrying in %ss',type(error).__name__,delay)
             await asyncio.sleep(delay)
             delay=min(30,delay*2)

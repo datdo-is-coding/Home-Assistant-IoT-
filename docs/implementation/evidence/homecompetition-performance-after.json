@@ -1,0 +1,19 @@
+{
+  "scroll_120_channels_5hz": {
+    "build": {
+      "count": 575,
+      "p50_ms": 5.113,
+      "p95_ms": 14.749,
+      "p99_ms": 34.044,
+      "over_16ms": 19
+    },
+    "raster": {
+      "count": 575,
+      "p50_ms": 2.368,
+      "p95_ms": 4.094,
+      "p99_ms": 6.744,
+      "over_16ms": 0
+    },
+    "updates": 84
+  }
+}

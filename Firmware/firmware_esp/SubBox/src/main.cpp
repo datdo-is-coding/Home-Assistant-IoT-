@@ -41,6 +41,7 @@
 #include "system/dev_console.h"
 #include "hc_runtime.h"
 #include "hc_ota.h"
+#include "hc_factory.h"
 #include "hc_provisioning.h"
 static MqttClient* hc_mqtt=nullptr;
 static bool hc_uplink(const uint8_t* data,size_t length) { return hc_mqtt && hc_mqtt->publishCore(data,length); }
@@ -162,6 +163,7 @@ extern "C" void app_main(void) {
     subbox_led_init();
 
     ESP_ERROR_CHECK(NVSManager::init());
+    ESP_ERROR_CHECK(hc_factory_apply());
 
     SubBoxPersistentConfig cfg;
     NVSManager::loadConfig(cfg);

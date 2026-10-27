@@ -58,7 +58,11 @@ static int mac(void *ctx,const uint8_t *data,size_t len,uint8_t out[16]) {
     if(result==PSA_SUCCESS) result=psa_mac_compute(handle,PSA_ALG_HMAC(PSA_ALG_SHA_256),data,len,digest,sizeof(digest),&length);
     if(handle) psa_destroy_key(handle);
     psa_reset_key_attributes(&attr);
-    if(result!=PSA_SUCCESS || length!=32) return -1;
+    if(result!=PSA_SUCCESS || length!=32) {
+        static bool reported;
+        if(!reported) {ESP_LOGE("HC","Frame authentication failed: PSA %ld, length %u",(long)result,(unsigned)length);reported=true;}
+        return -1;
+    }
     memcpy(out,digest,16); memset(digest,0,sizeof(digest)); return 0;
 }
 static bool send_frame(uint8_t type,const uint8_t *payload,size_t len,uint64_t id) {
@@ -222,7 +226,8 @@ static void worker(void *arg) {
             last_pair=now;
         }
         if(registered && gateway_window.boot && now-last_report>2000000) { report(); last_report=now; }
-        if(!is_subbox && !hc_provisioning_active() && now-last_gateway>15000000 && now-last_hop>250000) {
+        /* Keep the probe channel long enough for the Gateway challenge to return. */
+        if(!is_subbox && !hc_provisioning_active() && now-last_gateway>15000000 && now-last_hop>250000 && now-last_hello>500000) {
             wifi_country_t country;
             if(esp_wifi_get_country(&country)==ESP_OK) {
                 if(channel<country.schan || channel>=country.schan+country.nchan) channel=country.schan;

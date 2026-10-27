@@ -1,0 +1,23 @@
+[Unit]
+Description=HomeCompetition Gateway OTA boot recovery gate
+After=local-fs.target
+Before=smarthome-gateway.service homecompetition-gateway.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+UMask=0077
+Environment=PYTHONPATH=/opt/homecompetition-updater/Gateway
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/homecompetition-updater/venv/bin/python -m gateway.ota_updater --config /etc/homecompetition/ota-updater.json boot-recover
+TimeoutStartSec=120
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/homecompetition/releases
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

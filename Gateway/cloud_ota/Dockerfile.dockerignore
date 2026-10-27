@@ -1,0 +1,12 @@
+**
+!Gateway/
+!Gateway/gateway/
+!Gateway/gateway/__init__.py
+!Gateway/gateway/fleet_ota/
+!Gateway/gateway/fleet_ota/__init__.py
+!Gateway/gateway/fleet_ota/service.py
+!Gateway/gateway/fleet_ota/policy.py
+!Gateway/gateway/fleet_ota/store.py
+!Gateway/gateway/fleet_ota/identity.py
+!Gateway/cloud_ota/
+!Gateway/cloud_ota/requirements.txt

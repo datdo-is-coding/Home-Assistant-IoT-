@@ -1,0 +1,3 @@
+# systemctl edit smarthome-gateway.service; use the actual private path on the Pi.
+[Service]
+Environment=HOME_COMPETITION_FIREBASE_CONFIG=/home/pi4/.config/homecompetition/firebase-commissioning.json

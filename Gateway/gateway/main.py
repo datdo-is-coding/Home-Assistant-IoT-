@@ -39,6 +39,7 @@ from auth_manager import AuthManager
 from sound_manager import SoundManager
 from device_lifecycle import DeviceLifecycleManager
 from gateway_beacon import GatewayBeacon
+from firebase_commissioning import configured_bridge
 
 if getattr(config, "AI_ENABLED", False):
     try:
@@ -103,6 +104,7 @@ class SmartHomeGateway:
         if HAS_INFLUX:
             self.telemetry_writer = TelemetryWriter()
         self._running = False
+        self.firebase_commissioning = None
 
     async def start(self):
         logger.info("=" * 60)
@@ -149,6 +151,13 @@ class SmartHomeGateway:
         self.mqtt.on_message("smarthome/operation/ack/#", self._on_device_operation_ack)
 
         self._running = True
+        if getattr(self, "firebase_commissioning", None) is None:
+            try:
+                self.firebase_commissioning = configured_bridge(self)
+                if self.firebase_commissioning:
+                    self.firebase_commissioning.task = asyncio.create_task(self.firebase_commissioning.run())
+            except Exception as exc:
+                logger.error("Firebase commissioning not started (%s)", type(exc).__name__)
         asyncio.create_task(self._announce_all_nodes())
         if hasattr(self, "proactive") and self.proactive:
             self.proactive.start()
@@ -1449,6 +1458,11 @@ class SmartHomeGateway:
         return ok
 
     async def stop(self):
+        if getattr(self, "firebase_commissioning", None):
+            try:
+                await asyncio.wait_for(self.firebase_commissioning.close(), 12)
+            except Exception as exc:
+                logger.warning("Firebase commissioning shutdown (%s)", type(exc).__name__)
         if getattr(self, "kws", None):
             await self.kws.stop()
         if hasattr(self, "beacon") and self.beacon:

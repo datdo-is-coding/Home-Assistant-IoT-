@@ -1,0 +1,7 @@
+{
+  "database_url": "https://home-companion-fed2e-default-rtdb.asia-southeast1.firebasedatabase.app",
+  "gateway_id": "homecompetition-pi4",
+  "installer_uids": [],
+  "mqtt_host": "192.168.11.29",
+  "mqtt_port": 8883
+}

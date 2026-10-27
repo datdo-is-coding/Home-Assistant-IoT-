@@ -1,0 +1,2 @@
+# Optional transport; the normal Gateway does not need Firebase credentials.
+firebase-admin==7.7.0

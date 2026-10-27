@@ -35,3 +35,4 @@ CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y
 # PCM upload must not wait for speaker playback in WebSocket receive callbacks.
 CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y
 
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

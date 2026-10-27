@@ -4,6 +4,7 @@ Only public verification keys are accepted here. The offline signer is external
 and never runs on the production gateway.
 """
 import hashlib
+import math
 from pathlib import Path
 import re
 import secrets
@@ -26,12 +27,16 @@ def manifest_bytes(m):
     return MANIFEST.pack(m['model'].encode(),m['version'].encode(),m['size'],bytes.fromhex(m['sha256']))
 
 class OtaManager:
-    def __init__(self,registry,directory,public_key):
+    def __init__(self,registry,directory,public_key,*,recover=True,retry_interval=1,chunk_window=1):
         require(isinstance(public_key,ec.EllipticCurvePublicKey) and isinstance(public_key.curve,ec.SECP256R1))
         self.r=registry; self.directory=Path(directory); self.directory.mkdir(parents=True,exist_ok=True)
         self.public_key=public_key; self.waiting={}
+        require(type(retry_interval) in (int,float) and .05<=retry_interval<=1)
+        self.retry_interval=retry_interval;self.retry_attempts=math.ceil(5/retry_interval)
+        require(type(chunk_window) is int and 1<=chunk_window<=4)
+        self.chunk_window=chunk_window
 
-        self.r.db.execute("UPDATE ota_targets SET status='FAILED',reason='gateway_restart' WHERE status IN ('TRANSFERRING','VERIFYING')")
+        if recover:self.r.db.execute("UPDATE ota_targets SET status='FAILED',reason='gateway_restart' WHERE status IN ('TRANSFERRING','VERIFYING')")
 
     def upload(self,manifest,signature,image):
         raw=manifest_bytes(manifest)
@@ -92,6 +97,10 @@ class OtaManager:
             j=self.r.one('SELECT home_id FROM ota_jobs WHERE job_id=?',(job,))
             self.r.event(j['home_id'],'ota',{'job_id':job,'node_id':node,'status':status,'offset':offset,'reason':reason})
 
+    def start_payload(self,artifact,node=None):
+        import json
+        return manifest_bytes(json.loads(artifact['manifest']))+bytes.fromhex(artifact['signature'])
+
     def outgoing(self,bridge):
         import json
         targets=self.r.rows("SELECT t.*,j.artifact_id FROM ota_targets t JOIN ota_jobs j USING(job_id) WHERE t.status IN ('QUEUED','TRANSFERRING','VERIFYING','REBOOTING','HEALTH_CHECK') ORDER BY j.created,t.node_id")
@@ -101,42 +110,67 @@ class OtaManager:
             if parent in busy:continue
             busy.add(parent)
             if node not in bridge.windows:continue
+            key=(t['job_id'],node)
+            if t['status']=='VERIFYING':
+                current=self.r.one('SELECT boot_id FROM registered_nodes WHERE node_id=?',(node,))['boot_id']
+                if current is not None and current!=t['old_boot']:
+                    self.update(t['job_id'],node,'REBOOTING');self.waiting.pop(key,None);continue
+                if self.r.clock()-t['updated']>300:
+                    self.update(t['job_id'],node,'FAILED',reason='verification_timeout');self.waiting.pop(key,None);continue
             if t['status'] in ('REBOOTING','HEALTH_CHECK'):
-                if self.r.clock()-t['updated']>120:self.update(t['job_id'],node,'FAILED',reason='health_timeout')
+                # Device health can take 120 s to fail, then reboot and report rollback.
+                if self.r.clock()-t['updated']>300:self.update(t['job_id'],node,'FAILED',reason='health_timeout')
                 continue
-            key=(t['job_id'],node);pending=self.waiting.get(key)
+            pending=self.waiting.get(key)
             if pending:
                 if self.r.clock()<pending[0]:continue
-                if pending[1]>=5:
+                if pending[1]>=self.retry_attempts and pending[3]!=MessageType.OTA_OFFER:
                     self.update(t['job_id'],node,'FAILED',reason='transfer_timeout');self.waiting.pop(key,None)
                     result.append((parent,bridge.frame(node,MessageType.OTA_ABORT)));continue
             a=self.artifact(t['artifact_id']);attempts=pending[1]+1 if pending else 1
             if t['status']=='QUEUED':
-                payload=manifest_bytes(json.loads(a['manifest']))+bytes.fromhex(a['signature'])
+                if pending is None:
+                    self.r.db.execute('UPDATE ota_targets SET old_boot=(SELECT boot_id FROM registered_nodes WHERE node_id=?) WHERE job_id=? AND node_id=?',(node,t['job_id'],node))
+                payloads=[self.start_payload(a,node)]
                 typ=MessageType.OTA_START
             elif t['offset']<a['size']:
-                data=self.read_chunk(t['artifact_id'],t['offset'])
-                payload=struct.pack('<I',t['offset'])+data;typ=MessageType.OTA_CHUNK
+                payloads=[struct.pack('<I',at)+self.read_chunk(t['artifact_id'],at)
+                          for at in range(t['offset'],min(a['size'],t['offset']+192*self.chunk_window),192)]
+                typ=MessageType.OTA_CHUNK
             else:
-                payload=b'';typ=MessageType.OTA_OFFER
-            expected=0 if typ==MessageType.OTA_START else (t['offset']+len(payload)-4 if typ==MessageType.OTA_CHUNK else a['size'])
-            self.waiting[key]=(self.r.clock()+1,attempts,expected,typ)
-            result.append((parent,bridge.frame(node,typ,payload)))
+                payloads=[b''];typ=MessageType.OTA_OFFER
+                if t['status']!='VERIFYING':self.update(t['job_id'],node,'VERIFYING')
+            expected=0 if typ==MessageType.OTA_START else (t['offset']+sum(len(p)-4 for p in payloads) if typ==MessageType.OTA_CHUNK else a['size'])
+            interval=max(1,self.retry_interval) if typ==MessageType.OTA_OFFER else self.retry_interval
+            self.waiting[key]=(self.r.clock()+interval,attempts,expected,typ)
+            result.extend((parent,bridge.frame(node,typ,payload)) for payload in payloads)
         return result
 
     def receive(self,frame):
-        t=self.r.one("SELECT t.*,j.artifact_id FROM ota_targets t JOIN ota_jobs j USING(job_id) WHERE node_id=? AND status IN ('QUEUED','TRANSFERRING','VERIFYING','REBOOTING','HEALTH_CHECK')",(frame.source,))
+        rows=self.r.rows("SELECT t.*,j.artifact_id FROM ota_targets t JOIN ota_jobs j USING(job_id) WHERE node_id=? AND status IN ('QUEUED','TRANSFERRING','VERIFYING','REBOOTING','HEALTH_CHECK')",(frame.source,))
+        late=False
+        if not rows and frame.type==MessageType.OTA_RESULT:
+            rows=self.r.rows('SELECT t.*,j.artifact_id FROM ota_targets t JOIN ota_jobs j USING(job_id) WHERE node_id=? ORDER BY j.created DESC LIMIT 1',(frame.source,))
+            late=bool(rows and rows[0]['status']=='FAILED' and rows[0]['reason'] in ('transfer_timeout','verification_timeout','health_timeout','gateway_restart'))
+            require(late,'not_found',404)
+        require(bool(rows),'not_found',404);t=rows[0]
         a=self.artifact(t['artifact_id']); key=(t['job_id'],frame.source)
+        if late:require(t['offset']==a['size'],'boot_unconfirmed')
         if frame.type in (MessageType.OTA_PROGRESS,MessageType.OTA_CHUNK_ACK):
             require(len(frame.payload)==5)
             offset,status=struct.unpack('<IB',frame.payload)
-            require(0<=offset<=a['size'] and offset>=t['offset'],'invalid_progress')
+            require(status==2 or 0<=offset<=a['size'],'invalid_progress')
+            if status==0 and t['status']!='QUEUED' and offset<=t['offset']:return
+            require(status==2 or offset>=t['offset'],'invalid_progress')
             pending=self.waiting.get(key)
             require(pending is not None,'unsolicited_progress')
-            require(status==2 or offset<=pending[2],'invalid_progress')
-            if status==0 and offset!=pending[2]:return
+            require(status==2 or offset<=pending[2] or pending[3]==MessageType.OTA_START,'invalid_progress')
             if status==1:require(pending[3]==MessageType.OTA_OFFER and offset==a['size'],'invalid_progress')
-            if status==0:self.update(t['job_id'],frame.source,'TRANSFERRING',offset)
+            if status==0:
+                self.update(t['job_id'],frame.source,'TRANSFERRING',offset)
+                if pending[3]==MessageType.OTA_CHUNK and offset<pending[2]:
+                    self.waiting[key]=(pending[0],0,pending[2],pending[3])
+                    return
             elif status==1:self.update(t['job_id'],frame.source,'REBOOTING',offset)
             elif status==2:self.update(t['job_id'],frame.source,'FAILED',reason='device_verification_failed')
             else:raise CoreError('invalid_progress')
@@ -144,9 +178,11 @@ class OtaManager:
         elif frame.type==MessageType.OTA_RESULT:
             require(len(frame.payload)==49)
             version=frame.payload[:16].split(b'\0',1)[0].decode('ascii');digest=frame.payload[16:48].hex();health=frame.payload[48]
-            require(t['status'] in ('REBOOTING','HEALTH_CHECK') and str(frame.boot_id)!=t['old_boot'],'boot_unconfirmed')
+            require((late or t['status'] in ('VERIFYING','REBOOTING','HEALTH_CHECK')) and str(frame.boot_id)!=t['old_boot'],'boot_unconfirmed')
             if health==1 and version==a['version'] and digest==a['sha256']:
-                self.update(t['job_id'],frame.source,'SUCCEEDED',a['size'])
+                self.update(t['job_id'],frame.source,'SUCCEEDED',a['size'],reason='late_boot_confirmation' if late else None)
                 self.r.db.execute('UPDATE registered_nodes SET firmware=? WHERE node_id=?',(version,frame.source))
             elif health==2:self.update(t['job_id'],frame.source,'ROLLED_BACK',reason='boot_health_failed')
+            elif late:raise CoreError('boot_unconfirmed')
             else:self.update(t['job_id'],frame.source,'FAILED',reason='boot_result_mismatch')
+            self.waiting.pop(key,None)

@@ -1,0 +1,18 @@
+[Unit]
+Description=HomeCompetition authenticated local OTA pilot coordinator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/lib/homecompetition-ota
+Environment=PYTHONPATH=%h/.local/lib/homecompetition-ota
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/.local/lib/homecompetition-ota/venv/bin/python -m gateway.fleet_ota.local --config %h/.local/state/commercial-ota/pilot/pi-pilot-config.json --data %h/.local/state/commercial-ota/pilot/data serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,89 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "gateway_access": {
+      ".read": false,
+      ".write": false,
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$gateway_id": {
+          ".validate": "newData.val() === true"
+        }
+      }
+    },
+    "gateways": {
+      ".read": false,
+      ".write": false,
+      "$gateway_id": {
+        "status": {
+          ".read": "auth != null && root.child('gateway_access').child(auth.uid).child($gateway_id).val() === true",
+          ".write": false,
+          ".validate": "newData.hasChildren(['online', 'last_seen', 'mqtt_host', 'mqtt_port'])",
+          "online": {
+            ".validate": "newData.isBoolean()"
+          },
+          "last_seen": {
+            ".validate": "newData.isNumber()"
+          },
+          "mqtt_host": {
+            ".validate": "newData.isString()"
+          },
+          "mqtt_port": {
+            ".validate": "newData.isNumber()"
+          },
+          "$other": {
+            ".validate": false
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "gateway_rpc": {
+      ".read": false,
+      ".write": false,
+      "$gateway_id": {
+        "requests": {
+          "$uid": {
+            "$request_id": {
+              ".write": "auth != null && auth.uid === $uid && root.child('gateway_access').child(auth.uid).child($gateway_id).val() === true && !data.exists() && newData.exists()",
+              ".validate": "newData.hasChildren(['request_id', 'method', 'path', 'created_at', 'expires_at']) && newData.child('created_at').isNumber() && newData.child('expires_at').isNumber() && newData.child('created_at').val() <= now + 5000 && newData.child('expires_at').val() >= now - 5000 && newData.child('expires_at').val() > newData.child('created_at').val() && newData.child('expires_at').val() - newData.child('created_at').val() <= 30000",
+              "request_id": {
+                ".validate": "newData.isString() && newData.val() === $request_id"
+              },
+              "method": {
+                ".validate": "newData.isString()"
+              },
+              "path": {
+                ".validate": "newData.isString()"
+              },
+              "body": {
+                ".validate": "newData.hasChildren()"
+              },
+              "created_at": {
+                ".validate": "newData.isNumber()"
+              },
+              "expires_at": {
+                ".validate": "newData.isNumber()"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          }
+        },
+        "responses": {
+          ".write": false,
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid && root.child('gateway_access').child(auth.uid).child($gateway_id).val() === true"
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

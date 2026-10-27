@@ -107,7 +107,7 @@ idf.py -p /dev/ttyACM0 flash
 ## 5. Flutter App Execution
 
 ```bash
-cd App/dtv_energy_flutter
+cd App/HomeCompetition
 flutter pub get
 flutter run -d <device_id>
 ```
@@ -115,3 +115,8 @@ flutter run -d <device_id>
 Secure local Box commissioning currently requires Android. A fresh host build
 and test report is available at [test_plan_and_report.md](../testing/test_plan_and_report.md);
 physical provisioning and OTA acceptance still require its HIL scenarios.
+
+HomeCompetition now uses Firebase Auth/Realtime Database by default. See
+[app setup](../../App/HomeCompetition/README.md). The local commissioning
+paragraph above applies to the retained Gateway implementation, not the new
+Firebase entrypoint; cloud commissioning/OTA has no worker yet.
