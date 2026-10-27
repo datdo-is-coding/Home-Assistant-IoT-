@@ -51,32 +51,33 @@ To use this document other than the curriculum of Samsung Innovation Campus, you
 ## 1. Introduction (Giới Thiệu)
 
 ### 1.1. Background Information (Thông Tin Bối Cảnh)
-Trong xu thế phát triển mạnh mẽ của kỷ nguyên số và Công nghệ Thông minh, việc tự động hóa ngôi nhà và quản lý sử dụng điện năng thông minh đang trở thành mối quan tâm hàng đầu của người tiêu dùng. Tuy nhiên, phần lớn các giải pháp nhà thông minh thương mại hiện nay vẫn tồn tại những rào cản kỹ thuật lớn:
-1. **Thiếu sự kiểm chứng thực tế (Điều khiển vòng hở - Open-loop control):** Khi người dùng điều khiển bật/tắt thiết bị qua công tắc truyền thống hoặc ứng dụng di động, hệ thống chỉ gửi tín hiệu đi một chiều. Nếu tải thực tế gặp sự cố (bóng đèn bị đứt tóc, quạt bị rút phích cắm, rơ-le nhiệt ngắt), giao diện người dùng vẫn hiển thị trạng thái "BẬT" (ON), dẫn đến sai lệch thông tin nghiêm trọng.
-2. **Lãng phí điện năng do tải ngầm (Vampire/Standby Power):** Các thiết bị điện tử gia dụng như TV, điều hòa, dàn âm thanh, bình nước nóng khi tắt ở chế độ chờ vẫn âm thầm tiêu thụ dòng điện rò từ 5W đến 30W liên tục 24/7 mà người dùng không hề hay biết.
-3. **Trải nghiệm điều khiển phân mảnh:** Người dùng gặp khó khăn khi vừa muốn điều khiển tiện lợi bằng giọng nói tiếng Việt rảnh tay tại nhà, vừa muốn theo dõi, giám sát chi tiết các thông số điện năng và trạng thái thiết bị mọi lúc mọi nơi trên cả ứng dụng di động (Mobile App) lẫn trình duyệt web (Web Application).
-4. **Hạ tầng lưu trữ và đồng bộ hóa:** Các giải pháp cục bộ thường gặp khó khăn trong việc đồng bộ trạng thái tức thời giữa nhiều nền tảng client nếu không có một dịch vụ đám mây thời gian thực ổn định và bảo mật.
+Trong sinh hoạt gia đình hàng ngày, việc quản lý và sử dụng các thiết bị điện thường gặp phải hai vấn đề thực tế:
+1. **Vấn đề điều khiển và kiểm chứng trạng thái tải:** Khi người dùng điều khiển bật/tắt thiết bị qua công tắc thông minh hoặc ứng dụng di động, hệ thống hầu hết chỉ xác nhận việc gửi lệnh đến rơ-le đóng ngắt. Khi rơ-le nhảy, ứng dụng lập tức hiển thị trạng thái là "Đang bật" (ON). Tuy nhiên, nếu phụ tải bên ngoài gặp sự cố (ví dụ: bóng đèn bị đứt tóc/cháy hỏng, quạt hoặc ấm đun nước bị tuột phích cắm, dây dẫn bị đứt ngầm), rơ-le đã đóng nhưng thiết bị thực tế hoàn toàn không chạy, dẫn đến việc báo sai trạng thái cho người dùng.
+2. **Vấn đề theo dõi và quản lý điện năng:** Người dùng hầu như không biết chính xác từng thiết bị điện trong nhà đang tiêu thụ bao nhiêu Watt, thiết bị nào đang tốn nhiều điện, cũng như tổng lượng điện năng (kWh) tiêu thụ trong ngày/tháng là bao nhiêu cho đến khi nhận hóa đơn tiền điện cuối tháng.
 
-Để giải quyết triệt để các vấn đề trên, dự án **Home Companion** do nhóm DTV phát triển đã xây dựng một hệ sinh thái IoT hoàn chỉnh từ phần cứng đo lường, vi điều khiển phân tầng, máy chủ biên đến ứng dụng di động Flutter và ứng dụng Web. Điểm đột phá của dự án là việc ứng dụng **Mô hình nhận diện từ khóa giọng nói KWS (Keyword Spotting)** chuyên sâu tiếng Việt, cơ sở dữ liệu thời gian thực **Firebase (Firebase Realtime Database & Auth)** để lưu trữ và đồng bộ trạng thái tức thì, cùng chuỗi điều khiển phân tầng: **App / Web Application $\rightarrow$ Gateway (Raspberry Pi 4) $\rightarrow$ SubGateway (ESP32-S3 SubBox) $\rightarrow$ Node Thiết bị Chấp hành (ESP32-S3 ActionBox)**.
+Xuất phát từ các nhu cầu thiết thực trên, nhóm thực hiện dự án **Home Companion** nhằm giải quyết hai mục tiêu chính: **Điều khiển thiết bị điện linh hoạt (có kiểm chứng xem tải thực tế đã bật hay chưa)** và **Giám sát điện năng tiêu thụ chi tiết theo thời gian thực** thông qua ứng dụng di động Flutter, ứng dụng Web và nhận diện từ nói KWS, dữ liệu được đồng bộ qua Firebase.
 
 ---
 
 ### 1.2. Motivation and Objective (Động Lực và Mục Tiêu Đề Tài)
 
-#### Động Lực Phát Triển
-- **Trải nghiệm người dùng toàn diện:** Kết hợp sức mạnh của **App di động (Flutter)** và **Ứng dụng Web (Web Application)**, cho phép người dùng bật/tắt thiết bị, theo dõi công suất tức thời và kiểm tra lịch sử tiêu thụ điện mọi lúc, mọi nơi một cách trực quan, mượt mà.
-- **Tương tác giọng nói tự nhiên với KWS Model:** Nhận diện trực tiếp các từ khóa khẩu lệnh điều khiển tiếng Việt ("bật", "tắt", "đèn", "quạt", "phòng", "khách", "ngủ", "bếp") bằng mô hình mạng nơ-ron học sâu tối ưu hóa (Keyword Spotting - KWS), đạt độ phản hồi tức thì và chính xác cao.
-- **Đồng bộ hóa dữ liệu thời gian thực qua Firebase:** Sử dụng Firebase Realtime Database làm trung tâm lưu trữ và đồng bộ hóa trạng thái hai chiều giữa App, Web và phần cứng, đảm bảo độ trễ cập nhật dưới 100ms và bảo mật tài khoản qua Firebase Authentication.
-- **Xác thực đóng ngắt vòng lặp kín (Closed-Loop Verification):** Sử dụng IC đo điện chuyên dụng BL0942 để đo lường công suất thực tế trước và sau khi đóng rơ-le ($\Delta P$). Nếu rơ-le đóng nhưng công suất tiêu thụ không tăng, hệ thống lập tức thông báo thiết bị hỏng hoặc chưa cắm điện lên App/Web.
-- **An toàn điện năng chủ động:** Tự động ngắt cứng phần cứng trong thời gian <20ms khi phát hiện dòng điện vượt ngưỡng an toàn ($I > 16\text{A}$), ngăn ngừa nguy cơ chập cháy điện gia đình.
+#### Động Lực Đề Tài
+- **Điều khiển thiết bị điện tin cậy & tiện lợi:** Cho phép người dùng bật/tắt các thiết bị điện trong nhà dễ dàng qua nhiều phương thức (App di động Flutter, Web Application trên máy tính, và khẩu lệnh từ nói KWS rảnh tay), đồng thời giải quyết triệt để tình trạng "báo ảo" bằng cách đo công suất trước và sau khi đóng rơ-le ($\Delta P$) để xác nhận chính xác xem phụ tải thực tế đã bật hay chưa.
+- **Giám sát điện năng tiêu thụ trực quan:** Đo lường chính xác các thông số điện lưới (Điện áp $U$, Dòng điện $I$, Công suất tiêu thụ $P$, Điện năng tích lũy $E$) và vẽ biểu đồ tiêu thụ theo Giờ/Ngày/Tháng trên giao diện App và Web, giúp người dùng nắm bắt tình hình sử dụng điện và ước tính chi phí tiền điện sinh hoạt.
+- **Lưu trữ và đồng bộ hóa đám mây:** Cập nhật trạng thái điều khiển và thông số điện năng tức thời lên Firebase Realtime Database, đảm bảo dữ liệu hiển thị trên App và Web luôn đồng nhất và tức thời.
 
-#### Mục Tiêu Cụ Thể
-1. **Phát triển Ứng dụng Di động Flutter & Ứng dụng Web:** Xây dựng giao diện điều khiển đa nền tảng (iOS, Android, Web), cung cấp chức năng bật/tắt thiết bị từng phòng, hiển thị thông số điện năng tức thời (V, I, P, E) và biểu đồ tiêu thụ điện lũy tiến.
-2. **Xây dựng Mô hình Nhận diện Từ Nói KWS (Keyword Spotting):** Huấn luyện và nhúng mô hình mạng nơ-ron nhận diện giọng nói tiếng Việt 10 lớp (`bật`, `tắt`, `đèn`, `quạt`, `phòng`, `khách`, `ngủ`, `bếp`, `noise`, `unknown`) với trích xuất đặc trưng MFCC 13 hệ số, chạy tối ưu trên vi điều khiển ESP32-S3 và Gateway.
-3. **Triển khai Hệ Thống Lưu Trữ Firebase:** Cấu hình Firebase Realtime Database (`home-companion-fed2e`) lưu trữ trạng thái thiết bị và dữ liệu điện năng, tích hợp Firebase Authentication quản lý tài khoản người dùng an toàn.
-4. **Hiện thực hóa Chuỗi Truyền Thông Phân Tầng:**
-   $$\text{App / Web} \longleftrightarrow \text{Gateway (Pi 4)} \longleftrightarrow \text{SubGateway (ESP32-S3 SubBox)} \longleftrightarrow \text{Node Chấp Hành (ESP32-S3 ActionBox)}$$
-5. **Chế tạo Phần Cứng Đo Điện & Đóng Ngắt An Toàn:** Chế tạo bo mạch ActionBox tích hợp rơ-le chốt từ (Magnetic-Latching) không sinh nhiệt, IC đo điện Belling BL0942 qua UART và mạch bảo vệ cách ly quang Opto PC817.
+#### Hai Mục Tiêu Cốt Lõi Của Dự Án
+1. **Mục Tiêu 1 — Điều Khiển Thiết Bị Điện & Xác Nhận Trạng Thái Tải:**
+   - Điều khiển bật/tắt các kênh tải qua App Flutter, Web Application và giọng nói KWS ("bật", "tắt", "đèn", "quạt").
+   - Xác nhận tải hoạt động thực tế: Sử dụng IC đo điện Belling BL0942 đo dòng điện và biến thiên công suất ($\Delta P$), đối soát chính xác xem tải đã thực sự có dòng điện chạy qua hay chưa (phát hiện bóng đèn cháy, phích cắm lỏng).
+2. **Mục Tiêu 2 — Giám Sát Điện Năng Tiêu Thụ Chi Tiết:**
+   - Thu thập liên tục các thông số điện năng: Điện áp (V), Dòng điện (A), Công suất tức thời (W), Điện năng tích lũy (kWh), Hệ số công suất ($\cos\varphi$).
+   - Trực quan hóa điện năng trên App và Web qua biểu đồ tiêu thụ (theo Giờ, Ngày, Tháng) và tính toán ước tính hóa đơn tiền điện theo biểu giá lũy tiến EVN.
+3. **Mục Tiêu Kỹ Thuật Bổ Trợ:**
+   - Huấn luyện mô hình từ nói KWS (Keyword Spotting) nhận diện các từ lệnh tiếng Việt cơ bản tại biên.
+   - Thiết lập cơ sở dữ liệu Firebase Realtime Database lưu trữ và đồng bộ hóa dữ liệu thời gian thực.
+   - Kết nối thông suốt chuỗi phần cứng 4 tầng:
+     $$\text{App / Web} \longleftrightarrow \text{Gateway (Raspberry Pi 4)} \longleftrightarrow \text{SubGateway (ESP32-S3 SubBox)} \longleftrightarrow \text{ActionBox Node (ESP32-S3)}$$
 
 ---
 

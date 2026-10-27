@@ -51,33 +51,33 @@ To use this document other than the curriculum of Samsung Innovation Campus, you
 ## 1. Introduction
 
 ### 1.1. Background Information
-In the ongoing evolution of smart living and IoT automation, homeowners increasingly expect seamless ambient control combined with actionable insights into domestic power consumption. However, the vast majority of commercial smart home systems (smart plugs, wireless switches, and cloud-bound assistants) suffer from fundamental architectural deficiencies:
-1. **Unverified Actuation (Open-Loop Control):** Conventional smart home controllers operate on an open-loop model where a command dispatch is assumed to be successful merely because a network packet was delivered. If an appliance has a severed cord, a burned-out bulb filament, or an unplugged power plug, the software interface deceptively displays "ON", leaving users misinformed.
-2. **Unmonitored Vampire / Standby Power:** Consumer electronics (televisions, sound bars, microwave displays, air conditioning inverters) continuously draw between 5W and 30W while in standby mode, silently inflating household utility bills without user awareness.
-3. **Fragmented User Interaction:** Homeowners often face a disjointed experience when wanting hands-free local Vietnamese voice control in the room while simultaneously requiring remote telemetry monitoring and remote switching across both smartphones (**Mobile App**) and desktop browsers (**Web Application**).
-4. **Synchronization Latency & Cloud Fragility:** Purely local setups often lack multi-client synchronization, while fully cloud-reliant platforms fail during internet outages and introduce privacy concerns.
+In everyday household living, managing and using electrical appliances commonly faces two distinct practical challenges:
+1. **Appliance Control & Physical Load Verification:** When users switch devices via conventional smart switches or mobile applications, the system only confirms that the command reached the switching relay. Once the relay clicks, the interface immediately claims the device is "ON". However, if an external fault exists (e.g., a burned-out lightbulb filament, an unplugged fan or kettle, or a severed wire), the relay has closed but the appliance is completely non-operational, providing false status information to the user.
+2. **Energy Monitoring & Usage Visibility:** Homeowners typically have no visibility into how many Watts individual appliances are consuming in real time, which devices are energy-intensive, or what the cumulative daily/monthly consumption (in kWh) is until receiving an unexpected electricity bill at the end of the month.
 
-To overcome these challenges, the **Home Companion** system was developed by team DTV under the Samsung Innovation Campus (SIC) capstone curriculum. The system integrates custom hardware sensing and actuation, on-device/edge **Keyword Spotting (KWS)** voice recognition, real-time **Firebase Cloud synchronization (Firebase Realtime Database & Auth)**, and cross-platform user interfaces (**Flutter Mobile App & Web Application**) connected via a rigorous hierarchical chain:
-$$\text{App / Web Application} \longleftrightarrow \text{Gateway (Raspberry Pi 4)} \longleftrightarrow \text{SubGateway (ESP32-S3 SubBox)} \longleftrightarrow \text{ActionBox Node (ESP32-S3)}$$
+Addressing these real-world needs, team DTV developed the **Home Companion** capstone project with two primary objectives: **Flexible Electrical Appliance Control (with empirical physical load verification)** and **Detailed Real-Time Electrical Energy Monitoring** via a cross-platform Flutter Mobile App, a Web Application, and spoken Keyword Spotting (KWS) voice commands, synchronized through Firebase.
 
 ---
 
 ### 1.2. Motivation and Objective
 
 #### Motivation
-- **Unified Multi-Platform Experience:** Empowering users to monitor instantaneous electrical telemetry (Voltage, Current, Active Power, Energy Accumulation) and remotely switch appliances anytime, anywhere through a responsive **Flutter Mobile App** and a dedicated **Web Application**.
-- **Spoken Voice Interaction via KWS Model:** Delivering low-latency on-device command recognition using a deep neural network **Keyword Spotting (KWS)** model trained specifically on Vietnamese command vocabulary ("bật", "tắt", "đèn", "quạt", "phòng", "khách", "ngủ", "bếp").
-- **Real-Time Firebase Synchronization:** Implementing **Firebase Realtime Database** as a reactive, low-latency state bus that instantly harmonizes device states across the Flutter App, Web Application, and physical nodes in sub-100ms.
-- **Closed-Loop Physical Verification:** Employing high-precision Belling BL0942 metering ICs to compute power deltas before and after relay actuation ($\Delta P = P_{\text{after}} - P_{\text{before}}$). If a relay engages but power does not increase, the system alerts the user that the load is burned out or unplugged.
-- **Autonomous Overcurrent Protection:** Guaranteeing electrical fire safety with a localized, interrupt-driven FreeRTOS safety supervisor that physically disconnects the relay within 20ms during sudden current spikes ($I > 16\text{A}$).
+- **Reliable & Convenient Electrical Appliance Control:** Enabling users to switch domestic electrical appliances easily across multiple convenient modalities (Flutter Mobile App on smartphones, Web Application on desktop browsers, and hands-free spoken KWS voice commands), while eliminating false "ON" status by measuring power deltas before and after relay engagement ($\Delta P$) to confirm whether the physical load actually turned on.
+- **Intuitive & Real-Time Energy Monitoring:** Accurately measuring grid metrics (Voltage $U$, Current $I$, Active Power $P$, Accumulated Energy $E$) and rendering dynamic consumption charts (Hourly, Daily, Monthly) on the App and Web to help users track power usage trends and estimate domestic electricity costs.
+- **Continuous Cloud Synchronization:** Continuously synchronizing control states and real-time electrical telemetry to the Firebase Realtime Database, ensuring instantaneous and consistent display across all client interfaces.
 
-#### Primary Objectives
-1. **Develop Flutter Mobile App & Web Application:** Build cross-platform client interfaces (iOS, Android, Web) allowing users to toggle appliances, view room telemetry, analyze progressive consumption charts, and estimate electricity bills under progressive EVN tariff ladders.
-2. **Train and Deploy the KWS Recognition Model:** Implement an INT8-quantized Keyword Spotting neural network featuring 13-coefficient MFCC feature extraction across 10 output classes, operating smoothly within the memory constraints of the ESP32-S3 and Gateway.
-3. **Configure Real-Time Cloud Persistence with Firebase:** Establish the Firebase project (`home-companion-fed2e`) for Realtime Database storage and Firebase Authentication security.
-4. **Implement the Hierarchical 4-Tier Control Chain:**
-   $$\text{App / Web} \longleftrightarrow \text{Gateway (Pi 4)} \longleftrightarrow \text{SubGateway (ESP32-S3)} \longleftrightarrow \text{ActionBox Node (ESP32-S3)}$$
-5. **Fabricate Custom Hardware with Zero-Holding-Power Relays:** Design and assemble the ActionBox PCB integrating dual/triple magnetic-latching relays, BL0942 metering via UART, and optocoupled PC817 isolation.
+#### Two Core Project Objectives
+1. **Objective 1 — Electrical Appliance Control & Physical Load Verification:**
+   - Control load channels ON/OFF via the Flutter App, Web Application, and on-device KWS voice commands ("bật", "tắt", "đèn", "quạt").
+   - Physical load verification: Utilize the Belling BL0942 metering IC to measure current and power deltas ($\Delta P$), confirming whether electric current is genuinely flowing through the load (detecting burned-out bulbs and loose plugs).
+2. **Objective 2 — Detailed Electrical Energy Monitoring:**
+   - Continuously collect electrical parameters: Voltage (V), Current (A), Instantaneous Power (W), Accumulated Energy (kWh), and Power Factor ($\cos\varphi$).
+   - Visualize energy consumption on the App and Web through interactive charts (Hourly, Daily, Monthly) and estimate electricity bills under progressive EVN tariff ladders.
+3. **Supporting Technical Objectives:**
+   - Train a lightweight Keyword Spotting (KWS) neural network to recognize essential Vietnamese voice commands at the edge.
+   - Deploy Firebase Realtime Database for responsive, bidirectional state synchronization.
+   - Maintain the hierarchical 4-tier communication link:
+     $$\text{App / Web} \longleftrightarrow \text{Gateway (Raspberry Pi 4)} \longleftrightarrow \text{SubGateway (ESP32-S3 SubBox)} \longleftrightarrow \text{ActionBox Node (ESP32-S3)}$$
 
 ---
 
