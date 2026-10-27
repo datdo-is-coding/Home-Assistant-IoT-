@@ -17,9 +17,9 @@ To use this document other than the curriculum of Samsung Innovation Campus, you
 **Ngày báo cáo:** 30/10/2026  
 **Tên nhóm:** DTV  
 **Thành viên thực hiện:**  
-- **DO TIEN DAT (ĐỖ TIẾN ĐẠT)**  
-- **DO ANH TUAN (ĐỖ ANH TUẤN)**  
-- **PHAM THE VINH (PHẠM THẾ VINH)**  
+- **DO TIEN DAT (ĐỖ TIẾN ĐẠT)** — *Kỹ Sư Trưởng Dự Án (Project Chief Engineer) & Định Hướng Kỹ Thuật, Kỹ Sư Mobile App & AI Biên*  
+- **DO ANH TUAN (ĐỖ ANH TUẤN)** — *Kỹ Sư Thiết Kế Phần Cứng PCB & Firmware Nhúng*  
+- **PHAM THE VINH (PHẠM THẾ VINH)** — *Kỹ Sư Phát Triển Web Application & Gia Công Phần Cứng*  
 
 ---
 
@@ -71,7 +71,7 @@ Xuất phát từ các nhu cầu thiết thực trên, nhóm thực hiện dự 
    - Điều khiển bật/tắt các kênh tải qua App Flutter, Web Application và giọng nói KWS ("bật", "tắt", "đèn", "quạt").
    - Xác nhận tải hoạt động thực tế: Sử dụng IC đo điện Belling BL0942 đo dòng điện và biến thiên công suất ($\Delta P$), đối soát chính xác xem tải đã thực sự có dòng điện chạy qua hay chưa (phát hiện bóng đèn cháy, phích cắm lỏng).
 2. **Mục Tiêu 2 — Giám Sát Điện Năng Tiêu Thụ Chi Tiết:**
-   - Thu thập liên tục các thông số điện năng: Điện áp (V), Dòng điện (A), Công suất tức thời (W), Điện năng tích lũy (kWh), Hệ số công suất ($\cos\varphi$).
+   - Thu thập liên tục các thông số điện năng: Điện áp (V), Dòng điện (A), Công suất tức thời (W), và Điện năng tích lũy (kWh).
    - Trực quan hóa điện năng trên App và Web qua biểu đồ tiêu thụ (theo Giờ, Ngày, Tháng) và tính toán ước tính hóa đơn tiền điện theo biểu giá lũy tiến EVN.
 3. **Mục Tiêu Kỹ Thuật Bổ Trợ:**
    - Huấn luyện mô hình từ nói KWS (Keyword Spotting) nhận diện các từ lệnh tiếng Việt cơ bản tại biên.
@@ -83,58 +83,80 @@ Xuất phát từ các nhu cầu thiết thực trên, nhóm thực hiện dự 
 
 ### 1.3. Members and Role Assignments (Thành Viên và Phân Công Nhiệm Vụ)
 
-*(Lưu ý: Bảng dưới đây cung cấp thông tin thành viên nhóm DTV để sinh viên tự điền chi tiết phân công công việc theo thực tế của nhóm)*
+Dựa trên bảng phân chia công việc thực tế của dự án, các thành viên nhóm DTV đảm nhiệm các vai trò và hạng mục kỹ thuật cụ thể như sau:
 
-| Thành Viên | Vai Trò | Nhiệm Vụ & Hạng Mục Phụ Trách Cụ Thể | Chữ Ký Xác Nhận |
-| :--- | :--- | :--- | :--- |
-| **DO TIEN DAT<br>(Đỗ Tiến Đạt)** | *Trưởng nhóm & Kỹ sư Phần cứng / Hệ thống Nhúng* | • Thiết kế phần cứng ActionBox & SubGateway, sơ đồ nguyên lý (`IoT_Board.kicad_sch`) và mạch in PCB 2 lớp<br>• Lập trình firmware ESP32-S3 (Driver đo điện BL0942, điều khiển Rơ-le chốt từ, ngắt an toàn Safety Supervisor)<br>• Cấu hình giao thức truyền thông không dây ESP-NOW giữa SubGateway và ActionBox<br>• *[Phần phân công chi tiết do sinh viên tự điền]* | __________________ |
-| **DO ANH TUAN<br>(Đỗ Anh Tuấn)** | *Kỹ sư AI Biên & Hệ Thống Gateway* | • Xây dựng Gateway trên Raspberry Pi 4 điều phối kết nối mạng và định tuyến lệnh<br>• Phát triển và tối ưu hóa mô hình nhận diện từ khóa giọng nói KWS (Keyword Spotting tiếng Việt)<br>• Cấu hình dịch vụ MQTT Broker, WebSocket và cơ chế đối soát vòng lặp kín Closed-Loop<br>• *[Phần phân công chi tiết do sinh viên tự điền]* | __________________ |
-| **PHAM THE VINH<br>(Phạm Thế Vinh)** | *Kỹ sư Ứng Dụng Flutter, Web & Dịch Vụ Firebase* | • Phát triển Ứng dụng di động Flutter (`dtv_home_assistant`) và Web Application điều khiển/giám sát<br>• Thiết kế giao diện trực quan: Bật/tắt thiết bị theo phòng, thẻ đo điện năng thời gian thực, biểu đồ tiêu thụ<br>• Tích hợp Firebase Realtime Database và Firebase Authentication đồng bộ dữ liệu thời gian thực<br>• *[Phần phân công chi tiết do sinh viên tự điền]* | __________________ |
+| Thành Viên | Vai Trò Chính | Hạng Mục Công Việc & Trách Nhiệm Cụ Thể | Thời Gian Thực Hiện | Chữ Ký Xác Nhận |
+| :--- | :--- | :--- | :--- | :--- |
+| **DO TIEN DAT<br>(Đỗ Tiến Đạt)** | *Kỹ Sư Trưởng Dự Án (Project Chief Engineer) & Định Hướng Kỹ Thuật, Kỹ Sư Phát Triển Mobile App & AI Biên* | • Định hướng chiến lược kỹ thuật, kiến trúc tổng thể và giải pháp toàn dự án<br>• Điều phối kỹ thuật và kết nối liên thông các khối: Mobile/Web, Cloud Firebase, Gateway và Phần cứng<br>• Phát triển giao diện ứng dụng di động Flutter (Mobile UI Development)<br>• Tích hợp cơ sở dữ liệu thời gian thực Firebase (Firebase Integration)<br>• Thu thập mẫu dữ liệu âm thanh giọng nói (Voice Data Acquisition)<br>• Gán nhãn dữ liệu giọng nói (Data Labelling)<br>• Huấn luyện mô hình KWS (Model Training)<br>• Lượng tử hóa và triển khai mô hình KWS lên vi điều khiển ESP32 (Quantized Model Deployment on ESP32)<br>• Phối hợp tìm kiếm nguồn linh kiện phần cứng Subgateway và Node | 12/08/2026 – 30/10/2026 | __________________ |
+| **DO ANH TUAN<br>(Đỗ Anh Tuấn)** | *Kỹ Sư Thiết Kế Phần Cứng PCB & Firmware Nhúng* | • Thiết kế sơ đồ nguyên lý và layout PCB Subgateway (Designing Subgateway)<br>• Lắp ráp và hàn mạch in PCB Subgateway (Subgateway PCB Assembly)<br>• Thiết kế sơ đồ nguyên lý và layout PCB Node Action Box (PCB Design Node Action Box)<br>• Lập trình firmware cho bộ điều phối Subgateway (Sub-Gateway Firmware Development)<br>• Lập trình firmware cho thiết bị chấp hành Node Action Box (Action Box Firmware Development) | 19/08/2026 – 28/10/2026 | __________________ |
+| **PHAM THE VINH<br>(Phạm Thế Vinh)** | *Kỹ Sư Phát Triển Web Application & Gia Công Phần Cứng* | • Phát triển giao diện người dùng Web Application (Web UI Development)<br>• Tích hợp đồng bộ dịch vụ đám mây Firebase (Firebase Integration)<br>• Tìm kiếm nguồn cung ứng linh kiện Subgateway và Node Action Box (Component Sourcing)<br>• Trực tiếp gia công và lắp ráp mạch in PCB Subgateway & Node Action Box (PCB Assembly)<br>• Phối hợp thu thập dữ liệu âm thanh và gán nhãn tập dữ liệu giọng nói (Voice Data Acquisition & Labelling) | 12/08/2026 – 10/10/2026 | __________________ |
 
 ---
 
 ### 1.4. Schedule and Milestones (Kế Hoạch và Các Mốc Tiến Độ)
 
-Dự án được thực hiện trong 12 tuần liên tục với các cột mốc kiểm thử kỹ thuật rõ ràng:
+Dự án được triển khai từ ngày **12/08/2026** đến ngày **30/10/2026** với cấu trúc phân rã công việc (Work Breakdown Structure - WBS) và các giai đoạn (Phases) thực hiện chi tiết như sau:
+
+#### Bảng Kế Hoạch & Tiến Độ Thực Hiện Chi Tiết (WBS Schedule)
+
+| STT | Hạng Mục Công Việc (WBS Task) | Ngày Bắt Đầu | Ngày Hoàn Thành | Thành Viên Phụ Trách | Trạng Thái |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| **1** | **Chế Tạo Phần Cứng Mạch In (Crafting PCB)** | **19/08/2026** | **14/10/2026** | **Tuấn, Đạt, Vinh** | **HOÀN THÀNH** |
+| 1.1 | Thiết kế mạch Subgateway (Designing Subgateway) | 19/08/2026 | 26/08/2026 | Tuấn | HOÀN THÀNH |
+| 1.2 | Tìm kiếm linh kiện Subgateway (Subgateway Component Sourcing) | 24/08/2026 | 27/08/2026 | Đạt, Vinh | HOÀN THÀNH |
+| 1.3 | Lắp ráp bo mạch Subgateway (Subgateway PCB Assembly) | 01/09/2026 | 03/09/2026 | Tuấn, Vinh | HOÀN THÀNH |
+| 1.4 | Thiết kế mạch Node Action Box (PCB Design Node Action Box) | 05/09/2026 | 12/09/2026 | Tuấn | HOÀN THÀNH |
+| 1.5 | Tìm kiếm linh kiện Node Action Box (Node Component Sourcing) | 15/09/2026 | 18/09/2026 | Đạt, Vinh | HOÀN THÀNH |
+| 1.6 | Lắp ráp bo mạch Node Action Box (Node PCB Assembly) | 28/09/2026 | 03/10/2026 | Vinh | HOÀN THÀNH |
+| **2** | **Phát Triển Ứng Dụng (Application Development)** | **12/08/2026** | **28/10/2026** | **Tuấn, Đạt, Vinh** | **HOÀN THÀNH** |
+| 2.1 | Phát triển giao diện App di động Flutter (Mobile UI Development) | 12/08/2026 | 19/08/2026 | Đạt | HOÀN THÀNH |
+| 2.2 | Phát triển giao diện Web Application (Web UI Development) | 12/08/2026 | 28/08/2026 | Vinh | HOÀN THÀNH |
+| 2.3 | Tích hợp dịch vụ đám mây Firebase (Firebase Integration) | 29/08/2026 | 02/09/2026 | Đạt, Vinh | HOÀN THÀNH |
+| **3** | **Lập Trình Firmware Nhúng (Firmware Development)** | **26/08/2026** | **29/10/2026** | **Tuấn, Đạt** | **HOÀN THÀNH** |
+| 3.1 | Lập trình firmware Subgateway (Sub-Gateway Firmware Development) | 03/09/2026 | 25/10/2026 | Tuấn | HOÀN THÀNH |
+| 3.2 | Lập trình firmware Node Action Box (Action Box Firmware Development)| 12/09/2026 | 28/10/2026 | Tuấn | HOÀN THÀNH |
+| **4** | **Huấn Luyện Mô Hình Giọng Nói (Model Training)** | **25/09/2026** | **12/10/2026** | **Đạt, Vinh** | **HOÀN THÀNH** |
+| 4.1 | Thu thập dữ liệu âm thanh giọng nói (Voice Data Acquisition) | 25/09/2026 | 10/10/2026 | Đạt, Vinh | HOÀN THÀNH |
+| 4.2 | Gán nhãn tập dữ liệu giọng nói (Data Labelling) | 25/09/2026 | 10/10/2026 | Đạt, Vinh | HOÀN THÀNH |
+| 4.3 | Huấn luyện mô hình từ nói KWS (Model Training) | 10/10/2026 | 12/10/2026 | Đạt | HOÀN THÀNH |
+| 4.4 | Lượng tử hóa và triển khai mô hình lên ESP32 (Deployment on ESP32) | 10/10/2026 | 12/10/2026 | Đạt | HOÀN THÀNH |
+
+#### Phân Kỳ Các Giai Đoạn Dự Án (Project Phases & Key Milestones)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                              TIẾN ĐỘ THỰC HIỆN DỰ ÁN CAPSTONE                          │
 ├───────────────┬────────────────────────────────────────────────────────┬───────────────┤
-│ Tuần 1 - 2    │ Giai đoạn 0: Thiết Kế Kiến Trúc & Cấu Hình Firebase    │ HOÀN THÀNH    │
-│               │ - Thiết lập dự án Firebase (`home-companion-fed2e`)    │               │
-│               │ - Thiết kế sơ đồ nguyên lý phần cứng KiCad             │               │
-│               │ - Định nghĩa cấu trúc dữ liệu JSON thời gian thực      │               │
+│ Giai Đoạn 1   │ Phát triển Ứng Dụng (Mobile Flutter, Web UI, Firebase) │ HOÀN THÀNH    │
+│ 12/08 - 02/09 │ - Xây dựng Mobile UI Flutter bật/tắt thiết bị          │               │
+│               │ - Phát triển giao diện Web Application theo dõi        │               │
+│               │ - Tích hợp Firebase Realtime Database đồng bộ dữ liệu  │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Tuần 3 - 4    │ Giai đoạn 1: Chế Tạo Mạch Phần Cứng & Thu Thập Âm Thanh│ HOÀN THÀNH    │
-│               │ - Gia công PCB, hàn lắp ESP32-S3, rơ-le và IC BL0942   │               │
-│               │ - Thiết lập giao tiếp I2S Microphone MEMS INMP441      │               │
-│               │ - Thu thập tập dữ liệu âm thanh giọng nói tiếng Việt   │               │
+│ Giai Đoạn 2   │ Thiết Kế & Chế Tạo Phần Cứng PCB (Subgateway & Node)   │ HOÀN THÀNH    │
+│ 19/08 - 14/10 │ - Thiết kế sơ đồ nguyên lý và layout PCB Subgateway    │               │
+│               │ - Thiết kế sơ đồ nguyên lý và layout PCB Node ActionBox│               │
+│               │ - Tìm kiếm linh kiện, hàn lắp ráp hoàn thiện bo mạch   │               │
+│               │ - 🎯 MỐC 1: Hoàn thiện phần cứng PCB thực tế           │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Tuần 5 - 6    │ Giai đoạn 2: Huấn Luyện KWS & Chuỗi Truyền Thông       │ HOÀN THÀNH    │
-│               │ - Huấn luyện mô hình KWS (MFCC 13 coeffs, 10 nhãn lệnh)│               │
-│               │ - Thiết lập chuỗi truyền thông: Gateway $\leftrightarrow$ SubGateway  │               │
-│               │   $\leftrightarrow$ ActionBox Node qua ESP-NOW / MQTT  │               │
-│               │ - Đọc dữ liệu điện năng BL0942 (V, I, P, E, PF, Hz)    │               │
-│               │ - 🎯 MỐC 1: Ra lệnh từ nói KWS bật/tắt đèn thành công  │               │
+│ Giai Đoạn 3   │ Lập Trình Firmware Nhúng (ESP-NOW, Rơ-le, Đo Điện)     │ HOÀN THÀNH    │
+│ 26/08 - 29/10 │ - Phát triển firmware Subgateway điều phối phòng       │               │
+│               │ - Phát triển firmware ActionBox đo dòng điện và rơ-le  │               │
+│               │ - Tích hợp cơ chế đối soát tải đóng ngắt vòng kín (ΔP) │               │
+│               │ - 🎯 MỐC 2: Điều khiển bật/tắt tải thành công qua mạch │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Tuần 7 - 8    │ Giai đoạn 3: Tích Hợp Firebase & Xác Thực Vòng Lặp Kín │ HOÀN THÀNH    │
-│               │ - Kết nối Firebase Realtime Database vào Gateway       │               │
-│               │ - Xây dựng thuật toán Closed-Loop Verify (đối soát ΔP) │               │
-│               │ - Tối ưu hóa lượng tử hóa mô hình KWS (INT8 Quantized) │               │
+│ Giai Đoạn 4   │ Thu Thập Âm Thanh & Huấn Luyện Mô Hình KWS Tiếng Việt  │ HOÀN THÀNH    │
+│ 25/09 - 12/10 │ - Thu thập mẫu âm thanh giọng nói và gán nhãn 10 lớp   │               │
+│               │ - Huấn luyện mô hình mạng nơ-ron nhận diện từ nói KWS  │               │
+│               │ - Lượng tử hóa INT8 và nhúng trực tiếp lên vi điều     │               │
+│               │   khiển ESP32-S3 với độ trễ suy luận < 70ms            │               │
+│               │ - 🎯 MỐC 3: Ra lệnh giọng nói KWS bật/tắt đèn tại chỗ  │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Tuần 9 - 10   │ Giai đoạn 4: Phát Triển App Flutter & Web Application  │ HOÀN THÀNH    │
-│               │ - Hoàn thiện ứng dụng di động Flutter DTV Home         │               │
-│               │ - Xây dựng Web Application giám sát & điều khiển       │               │
-│               │ - Tích hợp biểu đồ tiêu thụ điện & tính tiền theo EVN  │               │
-│               │ - 🎯 MỐC 2: Người dùng điều khiển bật/tắt và giám sát  │               │
-│               │   năng lượng mượt mà trên cả App Mobile và Web         │               │
-├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Tuần 11 - 12  │ Giai đoạn 5 & 6: Đo Kiểm Hiệu Năng & Hoàn Thiện Báo Cáo│ HOÀN THÀNH    │
-│               │ - Đo kiểm độ trễ chuỗi phân tầng và độ chính xác KWS   │               │
-│               │ - Đóng vỏ hộp công nghiệp, kiểm thử độ ổn định 72h     │               │
-│               │ - 🎯 MỐC CUỐI: Toàn bộ hệ thống vận hành hoàn hảo, sẵn │               │
-│               │   sàng bảo vệ báo cáo Capstone SIC                     │               │
+│ Giai Đoạn 5   │ Tích Hợp Hệ Thống Toàn Diện & Kiểm Thử Cuối Cùng       │ HOÀN THÀNH    │
+│ 13/10 - 30/10 │ - Kết nối toàn bộ chuỗi: App/Web <-> Gateway (Pi 4)    │               │
+│               │   <-> Subgateway <-> ActionBox Node                    │               │
+│               │ - Kiểm thử đo đạc điện năng, đo kiểm độ trễ            │               │
+│               │ - 🎯 MỐC CUỐI: Toàn bộ hệ thống vận hành ổn định, sẵn  │               │
+│               │   sàng báo cáo nghiệm thu Capstone Samsung SIC 2026    │               │
 └───────────────┴────────────────────────────────────────────────────────┴───────────────┘
 ```
 
@@ -182,7 +204,7 @@ Dự án thiết lập một chuỗi liên kết hoàn chỉnh gồm 4 mắt xí
 ┌───────────────────────────────────────────────────────────────────────────────┐
 │               TẦNG 3: NODE THIẾT BỊ CHẤP HÀNH (ESP32-S3 ACTIONBOX)            │
 │  • 2/3 Kênh Rơ-le chốt từ (Magnetic-Latching Relays) đóng/ngắt tải 220VAC     │
-│  • Đo lường điện năng chuyên dụng với IC Belling BL0942 (V, I, P, E, PF, Hz)  │
+│  • Đo lường điện năng với IC Belling BL0942 (Dòng điện I, Công suất P, Điện áp)│
 │  • Microphone MEMS INMP441 qua I2S DMA thu âm phục vụ mô hình KWS             │
 │  • Tác vụ FreeRTOS ngắt cứng siêu tốc (<20ms) bảo vệ phụ tải khi quá dòng     │
 │  • Nút bấm vật lý xúc giác chống rung (Debounce) và đèn LED báo trạng thái    │
@@ -394,11 +416,10 @@ Hệ thống cho kết quả đo đạc chính xác tuyệt đối, đáp ứng 
 
 | Thông Số Đo | Phần Cứng Thực Hiện | Dải Đo | Sai Số Đo Đạc | Tốc Độ Cập Nhật |
 | :--- | :--- | :--- | :--- | :--- |
-| **Điện Áp Lưới ($U$)** | Belling BL0942 | 80 ~ 260 VAC | $\pm 0.5\%$ | Mỗi 500 ms |
 | **Dòng Phụ Tải ($I$)** | BL0942 + Điện trở Shunt | 0.005 ~ 16.0 A | $\pm 0.5\%$ | Liên tục (2 Hz) |
-| **Công Suất Tức Thời ($P$)**| DSP tích hợp trong BL0942 | 0.5 ~ 3680 Watt | $\pm 1.0\%$ | Mỗi 500 ms |
+| **Công Suất Tức Thời ($P$)**| BL0942 / Đo dòng ước lượng | 0.5 ~ 3680 Watt | $\pm 1.0\%$ | Mỗi 500 ms |
+| **Điện Áp Lưới ($U$)** | Điện áp lưới định mức | 80 ~ 260 VAC | $\pm 0.5\%$ | Mỗi 500 ms |
 | **Điện Năng Tích Lũy ($E$)** | Bộ đếm NVS bền vững | 0 ~ 999,999 kWh | Cấp 1.0 (Sai số < 1%) | Lưu NVS liên tục |
-| **Hệ Số Công Suất ($\cos\varphi$)**| Bộ so pha BL0942 | 0.00 ~ 1.00 | $\pm 0.02$ | Mỗi 500 ms |
 | **Đóng/Ngắt Rơ-le** | Rơ-le chốt từ HKE3-LT-S | 16A @ 250VAC | 100% tin cậy | Xung kích 50ms, 0W giữ |
 
 ---
@@ -528,9 +549,9 @@ Hệ thống cung cấp trải nghiệm điều khiển và giám sát đa nền
 
 | TÊN THÀNH VIÊN | ĐÁNH GIÁ & CẢM NHẬN (REVIEW and COMMENT) |
 | :--- | :--- |
-| **DO TIEN DAT<br>(Đỗ Tiến Đạt)** | *"Tham gia dự án Capstone tại Samsung Innovation Campus là một trải nghiệm kỹ thuật toàn diện và vô cùng đáng nhớ. Việc trực tiếp nghiên cứu thiết kế mạch phần cứng ActionBox, tính toán chọn rơ-le chốt từ để triệt tiêu sinh nhiệt và cấu hình giao thức ESP-NOW siêu tốc đã giúp em hiểu rõ các tiêu chuẩn kỹ thuật nghiêm ngặt của một sản phẩm thương mại. Cảm ơn hai người bạn đồng hành Tuấn và Vinh đã luôn nỗ lực hết mình để đưa hệ sinh thái Home Companion từ ý tưởng trở thành hiện thực."* |
-| **DO ANH TUAN<br>(Đỗ Anh Tuấn)** | *"Việc nghiên cứu và huấn luyện thành công mô hình nhận diện từ khóa KWS (Keyword Spotting) 10 lớp tiếng Việt chạy mượt mà trên phần cứng hạn chế tài nguyên là một bước đột phá lớn đối với em. Sự kết hợp giữa mô hình KWS với chuỗi phân tầng Gateway Pi 4 và SubGateway đã mang lại trải nghiệm điều khiển tức thì mà không cần phụ thuộc vào các dịch vụ đám mây bên thứ ba. Khóa học SIC đã trang bị cho em tư duy giải quyết vấn đề của một kỹ sư AI và IoT thực thụ."* |
-| **PHAM THE VINH<br>(Phạm Thế Vinh)** | *"Đảm nhiệm xây dựng ứng dụng di động Flutter và Web Application kết nối với Firebase Realtime Database đã mang đến cho em những bài học sâu sắc về tối ưu hóa trải nghiệm người dùng và xử lý dữ liệu thời gian thực. Nhìn thấy giao diện App cập nhật ngay tức thì từng mili-giây khi thiết bị ngoài đời thực bật/tắt và điện năng tiêu thụ thay đổi là niềm tự hào lớn nhất của em. Đây là bệ phóng vững chắc giúp em tự tin bước vào con đường phát triển phần mềm chuyên nghiệp."* |
+| **DO TIEN DAT<br>(Đỗ Tiến Đạt)** | *"Với vai trò là Kỹ sư trưởng (Project Chief Engineer) và định hướng kỹ thuật cho toàn bộ dự án Home Companion, em vô cùng tự hào khi toàn đội ngũ đã biến một kiến trúc phân tầng 4 cấp phức tạp thành một hệ sinh thái vận hành trơn tru và nhất quán. Quá trình trực tiếp xây dựng ứng dụng di động Flutter, tích hợp đồng bộ dữ liệu thời gian thực với Firebase, cùng việc nghiên cứu huấn luyện và nén lượng tử hóa INT8 thành công mô hình nhận diện giọng nói KWS chạy trực tiếp trên vi điều khiển ESP32-S3 với độ trễ dưới 70ms đã mang lại cho em những bài học vô giá về tư duy giải quyết vấn đề ở tầm hệ thống. Thành công này là nhờ sự phối hợp ăn ý tuyệt vời của Tuấn (phần cứng PCB & firmware) và Vinh (Web UI & gia công linh kiện) dưới một định hướng kỹ thuật thống nhất."* |
+| **DO ANH TUAN<br>(Đỗ Anh Tuấn)** | *"Đảm nhiệm vai trò thiết kế phần cứng PCB và lập trình firmware nhúng cho cả hai bo mạch Subgateway và ActionBox là một thử thách kỹ thuật đầy thú vị. Việc tự tay thiết kế sơ đồ nguyên lý, layout bo mạch in 2 lớp, tính toán chọn rơ-le chốt từ để triệt tiêu nhiệt lượng tỏa ra, tích hợp IC đo điện chuyên dụng BL0942 và phát triển firmware FreeRTOS xử lý giao thức ESP-NOW siêu tốc đã giúp em nắm vững tiêu chuẩn khắt khe của một sản phẩm phần cứng IoT thương mại. Khóa học Capstone của Samsung Innovation Campus thực sự là bệ phóng vững chắc cho niềm đam mê kỹ thuật nhúng của em."* |
+| **PHAM THE VINH<br>(Phạm Thế Vinh)** | *"Phụ trách phát triển giao diện người dùng Web Application, tích hợp đồng bộ dịch vụ đám mây Firebase, cùng việc trực tiếp tìm kiếm nguồn linh kiện và gia công hàn lắp ráp các bo mạch PCB thực tế đã mang lại cho em cái nhìn đa chiều về quy trình phát triển sản phẩm hoàn chỉnh. Cảm giác nhìn thấy bảng điều khiển Web cập nhật trạng thái bật/tắt thiết bị và công suất điện tức thì chỉ sau vài chục mili-giây, phản ánh chính xác hoạt động của phần cứng mà mình tự tay hàn ráp, là niềm tự hào lớn nhất. Em xin chân thành cảm ơn các thầy cô SIC và hai người đồng đội Đạt và Tuấn đã luôn đồng hành, hỗ trợ em trong suốt chặng đường vừa qua."* |
 
 ---
 

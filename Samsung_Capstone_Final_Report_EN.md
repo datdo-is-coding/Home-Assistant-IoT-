@@ -17,9 +17,9 @@ To use this document other than the curriculum of Samsung Innovation Campus, you
 **Date:** 30/10/2026  
 **Team Name:** DTV  
 **Members:**  
-- **DO TIEN DAT**  
-- **DO ANH TUAN**  
-- **PHAM THE VINH**  
+- **DO TIEN DAT** — *Project Chief Engineer & Technical Direction, Mobile Application & Edge AI Engineer*  
+- **DO ANH TUAN** — *PCB Hardware Designer & Lead Firmware Engineer*  
+- **PHAM THE VINH** — *Web Application Developer & Hardware Fabrication Engineer*  
 
 ---
 
@@ -71,7 +71,7 @@ Addressing these real-world needs, team DTV developed the **Home Companion** cap
    - Control load channels ON/OFF via the Flutter App, Web Application, and on-device KWS voice commands ("bật", "tắt", "đèn", "quạt").
    - Physical load verification: Utilize the Belling BL0942 metering IC to measure current and power deltas ($\Delta P$), confirming whether electric current is genuinely flowing through the load (detecting burned-out bulbs and loose plugs).
 2. **Objective 2 — Detailed Electrical Energy Monitoring:**
-   - Continuously collect electrical parameters: Voltage (V), Current (A), Instantaneous Power (W), Accumulated Energy (kWh), and Power Factor ($\cos\varphi$).
+   - Continuously collect electrical parameters: Voltage (V), Current (A), Instantaneous Power (W), and Accumulated Energy (kWh).
    - Visualize energy consumption on the App and Web through interactive charts (Hourly, Daily, Monthly) and estimate electricity bills under progressive EVN tariff ladders.
 3. **Supporting Technical Objectives:**
    - Train a lightweight Keyword Spotting (KWS) neural network to recognize essential Vietnamese voice commands at the edge.
@@ -83,55 +83,77 @@ Addressing these real-world needs, team DTV developed the **Home Companion** cap
 
 ### 1.3. Members and Role Assignments
 
-*(Note: The table below outlines team DTV member information with dedicated sections for students to customize their detailed assignments)*
+Based on the actual project execution plan, team DTV structured the engineering responsibilities across the three members as follows:
 
-| Member Name | Primary Role | Core Responsibilities & Key Deliverables | Signature / Confirmation |
-| :--- | :--- | :--- | :--- |
-| **DO TIEN DAT** | *Team Leader & Embedded Hardware / Firmware Engineer* | • Overall IoT system architecture & hierarchical communication design<br>• Hardware schematic design (`IoT_Board.kicad_sch`), PCB layout, and component fabrication<br>• ESP32-S3 firmware engineering (BL0942 UART driver, magnetic-latching relay pulses, FreeRTOS safety trip task)<br>• ESP-NOW low-latency wireless protocol between SubGateway and ActionBox nodes<br>• *[Detailed task breakdown written by user]* | __________________ |
-| **DO ANH TUAN** | *Edge AI & Gateway Systems Engineer* | • Raspberry Pi 4 central Gateway orchestration (Python `asyncio`)<br>• Vietnamese Keyword Spotting (KWS) model development and MFCC pipeline optimization<br>• MQTT Broker (EMQX), WebSocket server configuration, and Closed-Loop Verification engine ($\Delta P$ testing)<br>• *[Detailed task breakdown written by user]* | __________________ |
-| **PHAM THE VINH** | *Flutter Mobile App, Web Application & Firebase Engineer* | • Cross-platform Flutter Mobile Application (`dtv_home_assistant`) & Web Application development<br>• Real-time device switching, room-by-room cards, and interactive energy charts (Hourly/Daily/Monthly)<br>• Firebase Realtime Database integration (`RealtimeEnergyService`) & Firebase Authentication setup<br>• Progressive electricity bill calculation engine based on EVN pricing tiers<br>• *[Detailed task breakdown written by user]* | __________________ |
+| Member Name | Primary Role | Core Technical Responsibilities & Deliverables | Working Period | Signature / Confirmation |
+| :--- | :--- | :--- | :--- | :--- |
+| **DO TIEN DAT** | *Project Chief Engineer & Technical Direction, Mobile Application & Edge AI Engineer* | • Technical strategy, overall system architecture, and project technical direction<br>• Technical coordination and full-stack integration across Mobile/Web, Firebase Cloud, Gateway, and Hardware<br>• Mobile UI Development (Flutter cross-platform application)<br>• Firebase Realtime Database cloud integration<br>• Voice Data Acquisition for Vietnamese commands<br>• Acoustic Data Labelling<br>• KWS Neural Network Model Training<br>• INT8 Quantized Model Deployment on ESP32-S3 microcontroller<br>• Component sourcing support for Subgateway & Node Action Box | 08/12/2026 – 10/30/2026 | __________________ |
+| **DO ANH TUAN** | *PCB Hardware Designer & Lead Firmware Engineer* | • Subgateway Schematic Capture and PCB Layout Design<br>• Subgateway PCB Soldering & Assembly<br>• Node Action Box Schematic Capture and PCB Layout Design<br>• Subgateway Room Coordinator Firmware Development (ESP-IDF/FreeRTOS)<br>• Action Box Actuator Firmware Development (BL0942 metering, latching relays, safety trip) | 08/19/2026 – 10/28/2026 | __________________ |
+| **PHAM THE VINH** | *Web Application Developer & Hardware Fabrication Engineer* | • Web UI Development (responsive desktop web dashboard)<br>• Firebase Cloud synchronization & Auth integration<br>• Component Sourcing for Subgateway and Node Action Box<br>• PCB Soldering & Hardware Assembly for Subgateway & Node Action Box<br>• Voice Data Acquisition & Acoustic Dataset Labelling collaboration | 08/12/2026 – 10/10/2026 | __________________ |
 
 ---
 
 ### 1.4. Schedule and Milestones
 
-The project was executed across an intensive 12-week development lifecycle structured into six milestone phases:
+The project was executed between **August 12, 2026** and **October 30, 2026**, organized into a clear Work Breakdown Structure (WBS) and engineering development phases:
+
+#### Detailed Work Breakdown Structure (WBS Schedule)
+
+| # | Work Breakdown Task (WBS) | Start Date | End Date | Assigned Member(s) | Status |
+| :---: | :--- | :---: | :---: | :---: | :---: |
+| **1** | **Crafting PCB** | **08/19/2026** | **10/14/2026** | **Tuan, Dat, Vinh** | **COMPLETED** |
+| 1.1 | Designing Subgateway PCB | 08/19/2026 | 08/26/2026 | Tuan | COMPLETED |
+| 1.2 | Subgateway Component Sourcing | 08/24/2026 | 08/27/2026 | Dat, Vinh | COMPLETED |
+| 1.3 | Subgateway PCB Assembly | 09/01/2026 | 09/03/2026 | Tuan, Vinh | COMPLETED |
+| 1.4 | PCB Design Node (Action Box) | 09/05/2026 | 09/12/2026 | Tuan | COMPLETED |
+| 1.5 | Node Component Sourcing | 09/15/2026 | 09/18/2026 | Dat, Vinh | COMPLETED |
+| 1.6 | Node PCB Assembly | 09/28/2026 | 10/03/2026 | Vinh | COMPLETED |
+| **2** | **Application Development** | **08/12/2026** | **10/28/2026** | **Tuan, Dat, Vinh** | **COMPLETED** |
+| 2.1 | Mobile UI Development (Flutter) | 08/12/2026 | 08/19/2026 | Dat | COMPLETED |
+| 2.2 | Web UI Development | 08/12/2026 | 08/28/2026 | Vinh | COMPLETED |
+| 2.3 | Firebase Cloud Integration | 08/29/2026 | 09/02/2026 | Dat, Vinh | COMPLETED |
+| **3** | **Firmware Development** | **08/26/2026** | **10/29/2026** | **Tuan, Dat** | **COMPLETED** |
+| 3.1 | Sub-Gateway Firmware Development | 09/03/2026 | 10/25/2026 | Tuan | COMPLETED |
+| 3.2 | Action Box Firmware Development | 09/12/2026 | 10/28/2026 | Tuan | COMPLETED |
+| **4** | **Model Training & Deployment** | **09/25/2026** | **10/12/2026** | **Dat, Vinh** | **COMPLETED** |
+| 4.1 | Voice Data Acquisition | 09/25/2026 | 10/10/2026 | Dat, Vinh | COMPLETED |
+| 4.2 | Data Labelling | 09/25/2026 | 10/10/2026 | Dat, Vinh | COMPLETED |
+| 4.3 | KWS Model Training | 10/10/2026 | 10/12/2026 | Dat | COMPLETED |
+| 4.4 | Quantized Model Deployment on ESP32 | 10/10/2026 | 10/12/2026 | Dat | COMPLETED |
+
+#### Project Phases & Key Milestones
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                               PROJECT MILESTONE TIMELINE                               │
 ├───────────────┬────────────────────────────────────────────────────────┬───────────────┤
-│ Weeks 1 - 2   │ Phase 0: System Architecture & Firebase Setup          │ COMPLETED     │
-│               │ - Firebase project setup (`home-companion-fed2e`)      │               │
-│               │ - KiCad schematic design (`IoT_Board.kicad_sch`)       │               │
-│               │ - Realtime JSON tree specification                     │               │
+│ Phase 1       │ Application Development (Mobile Flutter, Web UI, Cloud)│ COMPLETED     │
+│ 08/12 - 09/02 │ - Flutter Mobile UI built for appliance switching     │               │
+│               │ - Web Application dashboard created                    │               │
+│               │ - Firebase Realtime Database synchronized with clients │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Weeks 3 - 4   │ Phase 1: Hardware Fabrication & Audio Interface        │ COMPLETED     │
-│               │ - PCB milling, soldering of ESP32-S3, relays & BL0942  │               │
-│               │ - INMP441 MEMS microphone I2S DMA driver               │               │
-│               │ - Speech dataset collection for Vietnamese commands    │               │
+│ Phase 2       │ Hardware PCB Design & Assembly (Subgateway & Node)     │ COMPLETED     │
+│ 08/19 - 10/14 │ - Schematic and PCB layouts finished for Subgateway    │               │
+│               │ - Node Action Box PCB designed and assembled           │               │
+│               │ - Component sourcing and manual soldering completed    │               │
+│               │ - 🎯 MILESTONE 1: Custom PCBs fully operational        │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Weeks 5 - 6   │ Phase 2: KWS Model Training & Hierarchical Link        │ COMPLETED     │
-│               │ - KWS training (MFCC 13 coeffs, 10 command classes)    │               │
-│               │ - Gateway $\leftrightarrow$ SubGateway $\leftrightarrow$ ActionBox chain setup │               │
-│               │ - BL0942 telemetry extraction (V, I, P, E, PF, Hz)     │               │
-│               │ - 🎯 MILESTONE 1: Successful KWS voice control of lamp │               │
+│ Phase 3       │ Embedded Firmware Engineering (ESP-NOW, Relay, BL0942) │ COMPLETED     │
+│ 08/26 - 10/29 │ - Subgateway room coordinator firmware established     │               │
+│               │ - Action Box current sensing & latching relay control  │               │
+│               │ - Closed-Loop Verification engine ($\Delta P$)         │               │
+│               │ - 🎯 MILESTONE 2: Successful physical switching via PCB│               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Weeks 7 - 8   │ Phase 3: Firebase Integration & Closed-Loop Verify     │ COMPLETED     │
-│               │ - Realtime Database integration on Gateway             │               │
-│               │ - Closed-Loop Verification Engine ($\Delta P$ testing) │               │
-│               │ - Model quantization (INT8 TFLite Micro on ESP32-S3)   │               │
+│ Phase 4       │ Voice Dataset Collection & Edge KWS Model Deployment   │ COMPLETED     │
+│ 09/25 - 10/12 │ - Vietnamese speech samples recorded and labelled      │               │
+│               │ - 10-class KWS deep neural network trained             │               │
+│               │ - INT8 quantization deployed to ESP32-S3 (<70ms latency│               │
+│               │ - 🎯 MILESTONE 3: Hands-free KWS voice control of load │               │
 ├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Weeks 9 - 10  │ Phase 4: Flutter Mobile App & Web Application          │ COMPLETED     │
-│               │ - Flutter Mobile App release (`dtv_home_assistant`)   │               │
-│               │ - Web Application deployment for desktop monitoring    │               │
-│               │ - Consumption charts & progressive EVN tariff engine   │               │
-│               │ - 🎯 MILESTONE 2: Real-time multi-platform control     │               │
-│               │   and monitoring active across App and Web             │               │
-├───────────────┼────────────────────────────────────────────────────────┼───────────────┤
-│ Weeks 11 - 12 │ Phase 5 & 6: System Benchmarking & Final Reporting     │ COMPLETED     │
-│               │ - Latency benchmarks and 72-hour burn-in stress test   │               │
-│               │ - 3D enclosure printing and physical field testing     │               │
+│ Phase 5       │ End-to-End System Integration & Final Evaluation       │ COMPLETED     │
+│ 10/13 - 10/30 │ - Full chain tested: App/Web <-> Gateway (Pi 4) <->    │               │
+│               │   Subgateway <-> ActionBox Node                        │               │
+│               │ - 72-hour continuous electrical stress and latency test│               │
 │               │ - 🎯 FINAL MILESTONE: Complete autonomous operation,   │               │
 │               │   final documentation & presentation readiness         │               │
 └───────────────┴────────────────────────────────────────────────────────┴───────────────┘
@@ -348,11 +370,10 @@ Laboratory and in-home testing verified high measurement precision meeting Class
 
 | Measured Parameter | Hardware Subsystem | Dynamic Range | Measurement Accuracy | Polling Cycle |
 | :--- | :--- | :--- | :--- | :--- |
-| **Grid Voltage ($U$)** | Belling BL0942 | 80 ~ 260 VAC | $\pm 0.5\%$ | 500 ms |
 | **Load Current ($I$)** | BL0942 Shunt | 0.005 ~ 16.0 A | $\pm 0.5\%$ | Continuous (2 Hz) |
-| **Active Power ($P$)** | BL0942 Internal DSP | 0.5 ~ 3680 Watts | $\pm 1.0\%$ | 500 ms |
+| **Active Power ($P$)** | BL0942 / Current Estimation | 0.5 ~ 3680 Watts | $\pm 1.0\%$ | 500 ms |
+| **Grid Voltage ($U$)** | Rated AC Mains | 80 ~ 260 VAC | $\pm 0.5\%$ | 500 ms |
 | **Accumulated Energy ($E$)**| Non-Volatile NVS Counter| 0 ~ 999,999 kWh | Class 1.0 (< 1% error)| Continuous NVS save |
-| **Power Factor ($\cos\varphi$)**| BL0942 Phase Comparator | 0.00 ~ 1.00 | $\pm 0.02$ | 500 ms |
 | **Relay Actuation** | Dual-Coil Magnetic Latching| 16A @ 250VAC | 100% Reliable | 50ms pulse, 0W static |
 
 ---
@@ -482,9 +503,9 @@ The system provides a polished multi-platform visualization experience:
 
 | NAME | REVIEW and COMMENT |
 | :--- | :--- |
-| **DO TIEN DAT** | *"Participating in the Samsung Innovation Campus Capstone Project has been an exceptional engineering journey. Designing the ActionBox hardware PCB, mastering magnetic-latching relay pulses to eliminate heat, and orchestrating low-latency ESP-NOW links gave me deep appreciation for production-grade embedded development. Collaborating with Tuan and Vinh made it possible to transform an ambitious vision into an operating, reliable reality."* |
-| **DO ANH TUAN** | *"Developing and training the 10-class Vietnamese Keyword Spotting (KWS) model to run efficiently on resource-constrained microcontrollers was a breakthrough experience. Combining KWS with the hierarchical Gateway and SubGateway pipeline achieved real-time responsiveness without relying on third-party cloud voice APIs. SIC has equipped me with practical skills in Edge AI and distributed systems."* |
-| **PHAM THE VINH** | *"Creating the cross-platform Flutter Mobile App and Web Application while integrating Firebase Realtime Database provided invaluable lessons in user experience design and real-time cloud data pipelines. Witnessing appliance states and energy cards update seamlessly across screens in sub-second intervals was deeply fulfilling. This capstone has provided an exceptional foundation for my career in software engineering."* |
+| **DO TIEN DAT** | *"Serving as the Project Chief Engineer and Technical Director for the Home Companion ecosystem, I am immensely proud of how our team brought a sophisticated 4-tier distributed architecture into a robust, real-time operating product. Directing the overall technical roadmap, engineering the cross-platform Flutter Mobile App, architecting the Firebase real-time data synchronization pipeline, and successfully training and deploying the INT8-quantized Vietnamese KWS neural network on resource-constrained ESP32-S3 microcontrollers (<70ms latency) taught me invaluable lessons in end-to-end systems engineering. This achievement was made possible through the flawless synergy between Tuan (PCB hardware & firmware) and Vinh (Web UI & fabrication) working toward our unified technical vision."* |
+| **DO ANH TUAN** | *"Taking charge of the PCB hardware design and embedded firmware development for both the Subgateway and ActionBox node was a tremendously rewarding engineering challenge. Personally capturing schematics, designing 2-layer PCB layouts, engineering pulse-driven magnetic-latching relays to eliminate thermal build-up, interfacing the BL0942 metering IC, and architecting FreeRTOS firmware over high-speed ESP-NOW gave me rigorous insights into commercial-grade IoT hardware standards. Samsung Innovation Campus has solidified my engineering foundation in embedded systems."* |
+| **PHAM THE VINH** | *"Leading the development of the Web Application dashboard, integrating Firebase Cloud synchronization, and actively handling component procurement and PCB assembly gave me a well-rounded perspective across software and hardware execution. Seeing the web dashboard update relay statuses and energy metrics instantaneously in sub-second intervals—faithfully reflecting hardware that I helped assemble with my own hands—was the most gratifying milestone. I express my deepest gratitude to the Samsung Innovation Campus instructors and my teammates Dat and Tuan for their guidance and teamwork throughout this project."* |
 
 ---
 
