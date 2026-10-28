@@ -1,0 +1,20 @@
+[
+  {
+    "factory_id": "HC-288485350B54",
+    "schema": 2,
+    "role": 1,
+    "artifact_type": 1,
+    "flags": 0,
+    "compatibility_id": "642a9f3f5180c03795bcaac6662afe00d1db4fb8e62ff253fac58d0e4ebe3952",
+    "version": "2.0.2-b1",
+    "size": 1191280,
+    "sha256": "a884a6eb609a6f8c5227c58da38f7bc197ff582f8f5d2b23097dfa623e18e76d",
+    "min_agent": 2,
+    "min_bootloader": 1,
+    "protocol_min": 1,
+    "protocol_max": 1,
+    "release_counter": 4,
+    "security_epoch": 0,
+    "key_id": 1721249707
+  }
+]

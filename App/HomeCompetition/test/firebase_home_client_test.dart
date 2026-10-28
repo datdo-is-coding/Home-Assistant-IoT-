@@ -462,7 +462,7 @@ void main() {
   test('unsupported Gateway operations never fall back to port 8000', () async {
     await ready();
     await expectLater(
-        client.request('/api/kws/config'), throwsA(isA<GatewayException>()));
+        client.request('/api/kws/train'), throwsA(isA<GatewayException>()));
     await expectLater(
         client.request('/api/devices/AB_1/operations',
             body: {'kind': 'factory_reset'}),
@@ -477,6 +477,49 @@ void main() {
     await expectLater(
         client.uploadFirmware('x.bin', [1]), throwsA(isA<GatewayException>()));
     expect(requests, isEmpty);
+  });
+  test(
+      'KWS configuration uses Firebase mailbox and grants only verified Gateway configuration UI',
+      () async {
+    await ready();
+    mailbox(result: {
+      'profile': 'core-v1',
+      'revision': 1,
+    });
+    final empty = await client.request('/api/kws/config');
+    expect(empty['sources'], isEmpty);
+    expect(empty['bindings'], isEmpty);
+    expect(client.isAdmin, isTrue);
+    await client.request('/api/kws/config',
+        method: 'PUT', body: {'revision': 1, 'sources': [], 'bindings': []});
+    final envelopes = requests
+        .where((r) => r.method == 'PUT')
+        .map((r) => jsonDecode(r.body) as Map)
+        .toList();
+    expect(envelopes.map((e) => e['method']), ['GET', 'PUT']);
+    expect(envelopes.every((e) => e['path'] == '/api/kws/config'), isTrue);
+    expect(requests.every((r) => r.url.scheme == 'https' && r.url.port != 8000),
+        isTrue);
+  });
+  test('Core relay commands use Firebase RPC and require APPLIED', () async {
+    await ready();
+    final raw = fixture(DateTime.now());
+    raw['box']['core_node_id'] = 42;
+    raw['box']['channels']['ch1']['logical_device_id'] = 'DEV-test';
+    db.devices.send(raw);
+    mailbox(result: {'command_id': 'CMD-test', 'status': 'APPLIED'});
+    final result = await client.relay('box', 'ch1', true);
+    expect(result['status'], 'relay_reported');
+    expect(result['load_confirmed'], isFalse);
+    final writes = requests.where((r) => r.method == 'PUT').toList();
+    expect(writes, hasLength(1));
+    final envelope = jsonDecode(writes.single.body) as Map;
+    expect(envelope['path'], '/api/v1/channels/command');
+    expect(envelope['body']['channel'], 1);
+    expect(requests.any((r) => r.url.path.startsWith('/devices/')), isFalse);
+    mailbox(result: {'command_id': 'CMD-failed', 'status': 'FAILED'});
+    await expectLater(
+        client.relay('box', 'ch1', true), throwsA(isA<GatewayException>()));
   });
   testWidgets(
       'unified login has Firebase email/signup/Google and no Gateway URL',

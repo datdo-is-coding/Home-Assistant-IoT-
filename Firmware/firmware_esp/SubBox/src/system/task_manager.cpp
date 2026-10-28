@@ -10,6 +10,7 @@
 #include "nvs_manager.h"
 #include "security_config.h"
 #include "esp_system.h"
+#include "hc_runtime.h"
 #include <new>
 
 static const char* TAG = "TASK_MGR";
@@ -253,7 +254,10 @@ void TaskManager::kwsTask(void* pvParameters) {
     while (1) {
         if (xQueueReceive(self->m_kws_queue, &job, pdMS_TO_TICKS(250)) == pdTRUE && job) {
             if (job->kind == 0) {
-                self->m_kws->utterance(job->topic, job->payload);
+                if(hc_runtime_enabled()) {
+                    if(!self->m_core_kws || !self->m_core_kws->utterance(job->topic,job->payload))
+                        SoundPlayer::instance().play(SoundType::ERROR);
+                } else self->m_kws->utterance(job->topic, job->payload);
             } else if (job->kind == 1) {
                 self->m_kws->handle(job->topic, job->payload);
             } else if (job->kind == 2) {

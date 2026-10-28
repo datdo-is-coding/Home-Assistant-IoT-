@@ -38,6 +38,8 @@ constexpr int ESP_ERR_INVALID_RESPONSE = 0x108;
 constexpr int ESP_ERR_INVALID_CRC = 0x109;
 constexpr int ESP_ERR_INVALID_VERSION = 0x10A;
 constexpr int ESP_ERR_INVALID_MAC = 0x10B;
+constexpr int ESP_LOG_WARN = 2;
+inline void esp_log_level_set(const char*, int) {}
 
 using nvs_handle_t = uint32_t;
 constexpr uint32_t NVS_READONLY = 0;
@@ -91,14 +93,14 @@ using protocomm_security1_params_t = struct { const uint8_t* data; size_t len; }
 using protocomm_security_t = void*;
 extern protocomm_security_t protocomm_security1;
 
-struct httpd_config_t { int stack_size; };
+struct protocomm_http_server_config_t { uint16_t port; size_t stack_size; unsigned task_priority; };
 struct protocomm_httpd_config_t {
     bool ext_handle_provided;
     struct {
-        httpd_config_t config;
+        protocomm_http_server_config_t config;
     } data;
 };
-#define PROTOCOMM_HTTPD_DEFAULT_CONFIG() { 4096 }
+#define PROTOCOMM_HTTPD_DEFAULT_CONFIG() { 80, 4096, 5 }
 
 protocomm_t* protocomm_new();
 void protocomm_delete(protocomm_t* s);
@@ -275,7 +277,12 @@ void* esp_netif_create_default_wifi_ap() { return (void*)1; }
 
 protocomm_t* protocomm_new() { return (protocomm_t*)malloc(sizeof(void*)); }
 void protocomm_delete(protocomm_t* s) { free(s); }
-esp_err_t protocomm_httpd_start(protocomm_t*, protocomm_httpd_config_t*) { return ESP_OK; }
+esp_err_t protocomm_httpd_start(protocomm_t*, protocomm_httpd_config_t* config) {
+    assert(config->data.config.port == 80);
+    assert(config->data.config.task_priority > 0);
+    assert(config->data.config.stack_size >= 4096);
+    return ESP_OK;
+}
 void protocomm_httpd_stop(protocomm_t*) {}
 esp_err_t protocomm_set_security(protocomm_t*, const char*, const protocomm_security_t*, void*) { return ESP_OK; }
 esp_err_t protocomm_add_endpoint(protocomm_t*, const char*, protocomm_req_handler_t, void*) { return ESP_OK; }
@@ -396,6 +403,17 @@ int main() {
 
     hc_provisioning_stop();
     printf("[TEST 3] PASS: NVS synchronized to subbox_cfg & subbox_sec and status confirmed.\n");
+
+    hc_provisioned_config speaker{};
+    assert(hc_provisioning_load(&speaker)==ESP_OK);
+    char token[65]{};
+    assert(hc_provisioning_speaker_token(token)==ESP_ERR_INVALID_STATE);
+    speaker.committed=1;
+    memset(speaker.key,0x22,sizeof(speaker.key));
+    uint32_t sh;assert(nvs_open("hc_core",NVS_READWRITE,&sh)==ESP_OK);
+    assert(nvs_set_blob(sh,"enrollment",&speaker,sizeof(speaker))==ESP_OK);nvs_close(sh);
+    assert(hc_provisioning_speaker_token(token)==ESP_OK);
+    assert(std::string(token)==std::string(64,'1')); // Host PSA returns the fixed 0x11 digest.
 
     // TEST 4: Wi-Fi Disconnect Reconnects and Never Opens AP
     printf("[TEST 4] Testing Wi-Fi disconnect reconnects and never opens AP...\n");

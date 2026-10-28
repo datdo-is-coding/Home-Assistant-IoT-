@@ -6,10 +6,11 @@ import unittest
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE.parent / "firmware_esp/ActionBox_V2/src"
+V1_BASELINE = HERE.parents[1] / "archive/2026-10-28-cleanup/files/Firmware/firmware_esp/ActionBox/src"
 
 class ActionBoxV2Test(unittest.TestCase):
     def run_driver(self, name, sources, v2=True, json=False):
-        source_root = SRC if v2 else HERE.parent / "firmware_esp/ActionBox/src"
+        source_root = SRC if v2 else V1_BASELINE
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for header in ("esp_err.h", "esp_log.h", "esp_timer.h", "esp_attr.h", "esp_system.h",
@@ -27,7 +28,7 @@ class ActionBoxV2Test(unittest.TestCase):
                 file.seek(0)
                 file.write("#pragma once\n" + content)
             (root / "hc_runtime.h").write_text("#pragma once\nbool hc_runtime_enabled(void);\n")
-            includes = [source_root.parent.parent / "common", source_root, *[p for p in source_root.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
+            includes = [SRC.parent.parent, SRC.parent.parent / "common", source_root, *[p for p in source_root.rglob("*") if p.is_dir()], root, HERE / "actionbox_host"]
             command = ["g++", "-std=c++17", "-pthread", "-g", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-o", str(root / "check")]
             command += [f"-I{path}" for path in includes]
             command += [str(source_root / source) for source in sources]

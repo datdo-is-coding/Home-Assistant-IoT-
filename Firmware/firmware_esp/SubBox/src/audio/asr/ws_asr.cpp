@@ -6,6 +6,7 @@
 #include "storage/security_config.h"
 #include "esp_timer.h"
 #include "hc_runtime.h"
+#include "hc_provisioning.h"
 #include "esp_random.h"
 #include "audio_output/sound_player.h"
 
@@ -47,16 +48,29 @@ bool WsASR::init() {
         m_uri = sec_uri;
     }
     m_ca = SecurityConfig::get("ca_pem");
-    const auto token = SecurityConfig::get("ws_token");
+    auto token = SecurityConfig::get("ws_token");
 
-    if (hc_runtime_enabled()) {
-        m_node_id = std::to_string(hc_runtime_node_id());
-        if (m_uri.rfind("wss://", 0) != 0 ||
-            m_uri.size() < 16 || m_uri.substr(m_uri.size() - 16) != "/api/v1/voice/ws") {
-            ESP_LOGE(TAG, "Core voice requires a pinned WSS Core voice endpoint provisioned over USB");
+    hc_provisioned_config enrollment{};
+    m_core_playback = hc_provisioning_load(&enrollment) == ESP_OK && enrollment.subbox;
+    if (m_core_playback) {
+        char derived[65]{};
+        if (!enrollment.committed || m_ca.empty() || hc_provisioning_speaker_token(derived) != ESP_OK ||
+                strncmp(enrollment.mqtt_uri, "mqtts://", 8) != 0) {
+            memset(&enrollment, 0, sizeof(enrollment));
+            ESP_LOGE(TAG, "Core speaker requires committed identity and pinned Gateway CA");
             return false;
         }
+        std::string host(enrollment.mqtt_uri + 8);
+        host = host.substr(0, host.find_first_of(":/"));
+        if (host.empty() || host.size() > 63 || host.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-") != std::string::npos) {
+            memset(&enrollment, 0, sizeof(enrollment));memset(derived, 0, sizeof(derived));return false;
+        }
+        m_node_id = "SB" + std::string(enrollment.factory_id + 3, 12);
+        m_uri = "wss://" + host + ":8765/ws/audio";
+        token = derived;
+        memset(derived, 0, sizeof(derived));
     }
+    memset(&enrollment, 0, sizeof(enrollment));
 
     bool is_wss = (m_uri.rfind("wss://", 0) == 0);
     bool is_ws = (m_uri.rfind("ws://", 0) == 0);
@@ -116,6 +130,7 @@ void WsASR::setSourceNodeId(const char* node_id) {
 }
 
 bool WsASR::start() {
+    if (m_core_playback) return false;
     std::lock_guard<std::mutex> send_lock(m_send_mutex);
     std::string source_node_id;
     {
@@ -294,11 +309,11 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
             ESP_LOGI(TAG, "✅ Connected to Pi 4 Audio Server (%s)!", self->m_uri.c_str());
             self->m_connected = true;
 
-            if (!hc_runtime_enabled()) {
+            {
                 char hello[192];
                 snprintf(hello, sizeof(hello),
-                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":true,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
-                         self->m_node_id.c_str());
+                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":true,\"playback_only\":%s,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
+                         self->m_node_id.c_str(), self->m_core_playback ? "true" : "false");
                 esp_websocket_client_send_text(self->m_client, hello, strlen(hello), pdMS_TO_TICKS(1000));
             }
             break;
@@ -320,7 +335,11 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
             } else if (data->op_code == 0x02 && data->data_ptr && data->data_len > 0) {
                 if (self->m_receiving_tts.load()) {
                     size_t samples = data->data_len / sizeof(int16_t);
-                    SoundPlayer::instance().streamPcmChunk(reinterpret_cast<const int16_t*>(data->data_ptr), samples);
+                    self->m_playback_bytes += data->data_len;
+                    if ((data->data_len & 1) || (self->m_playback_bytes > self->m_playback_expected && self->m_core_playback) ||
+                            !SoundPlayer::instance().streamPcmChunk(reinterpret_cast<const int16_t*>(data->data_ptr), samples)) {
+                        self->m_playback_ok = false;
+                    }
                 }
             }
             break;
@@ -375,12 +394,34 @@ void WsASR::handleTextMessage(const char* data, int len) {
                 return;
             }
             ESP_LOGI(TAG, "🔊 Incoming TTS audio stream starting from Gateway...");
-            m_receiving_tts = true;
-            SoundPlayer::instance().startPcmStream();
+            const auto* id = cJSON_GetObjectItem(root, "playback_id");
+            const auto* size = cJSON_GetObjectItem(root, "size");
+            m_playback_id = cJSON_IsString(id) ? id->valuestring : "";
+            m_playback_expected = cJSON_IsNumber(size) && size->valuedouble > 0 && size->valuedouble <= 256000 &&
+                static_cast<unsigned>(size->valuedouble) == size->valuedouble ? static_cast<size_t>(size->valuedouble) : 0;
+            const auto* rate = cJSON_GetObjectItem(root, "sample_rate");
+            const auto* channels = cJSON_GetObjectItem(root, "channels");
+            const auto* width = cJSON_GetObjectItem(root, "sample_width");
+            if (m_core_playback && (m_playback_id.size() != 32 || m_playback_id.find_first_not_of("0123456789abcdef") != std::string::npos ||
+                    !m_playback_expected || (m_playback_expected & 1) || !cJSON_IsNumber(rate) || rate->valuedouble != 16000 ||
+                    !cJSON_IsNumber(channels) || channels->valuedouble != 1 || !cJSON_IsNumber(width) || width->valuedouble != 2)) {
+                cJSON_Delete(root);return;
+            }
+            m_playback_bytes = 0;
+            m_playback_ok = SoundPlayer::instance().startPcmStream();
+            m_receiving_tts = m_playback_ok;
         } else if (strcmp(type->valuestring, "audio_end") == 0) {
             ESP_LOGI(TAG, "🏁 Incoming TTS audio stream finished.");
             if (m_receiving_tts.exchange(false)) {
-                SoundPlayer::instance().finishPcmStream();
+                m_playback_ok = SoundPlayer::instance().finishPcmStream() && m_playback_ok;
+                const auto* id = cJSON_GetObjectItem(root, "playback_id");
+                if (m_core_playback && cJSON_IsString(id) && m_playback_id == id->valuestring) {
+                    char reply[192];
+                    snprintf(reply,sizeof(reply),"{\"type\":\"playback_complete\",\"playback_id\":\"%s\",\"success\":%s,\"received_bytes\":%u}",
+                             m_playback_id.c_str(),m_playback_ok && m_playback_bytes==m_playback_expected ? "true" : "false",static_cast<unsigned>(m_playback_bytes));
+                    std::lock_guard<std::mutex> send_lock(m_send_mutex);
+                    esp_websocket_client_send_text(m_client,reply,strlen(reply),pdMS_TO_TICKS(1000));
+                }
                 const auto* command = cJSON_GetObjectItem(root, "follow_up_command");
                 if (cJSON_IsTrue(cJSON_GetObjectItem(root, "follow_up")) && cJSON_IsString(command)) {
                     std::function<void(const std::string&)> callback;

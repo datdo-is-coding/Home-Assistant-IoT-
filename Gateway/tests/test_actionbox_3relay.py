@@ -334,6 +334,7 @@ class TestActionBox3Relay(unittest.IsolatedAsyncioTestCase):
         ws.closed = False
         ws.asr_only = False
         ws.audio_relay = False
+        ws.playback_only = False
         server._ws_nodes["AB100"] = ws
 
         ok = await server.send_relay_ws("AB100", "ch3", "turn_on", seq=99)

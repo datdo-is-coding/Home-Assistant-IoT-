@@ -44,6 +44,10 @@
 #include "hc_factory.h"
 #include "hc_provisioning.h"
 static MqttClient* hc_mqtt=nullptr;
+static std::shared_ptr<CoreKwsControl> core_kws;
+static bool hc_application(uint8_t type,const uint8_t* data,size_t size) {
+    return type==HC_ROOM_SNAPSHOT && core_kws && core_kws->configure(data,size);
+}
 static bool hc_uplink(const uint8_t* data,size_t length) { return hc_mqtt && hc_mqtt->publishCore(data,length); }
 
 static const char *TAG = "SUBBOX_MAIN";
@@ -371,8 +375,13 @@ extern "C" void app_main(void) {
         [] { return static_cast<uint64_t>(std::time(nullptr)); }
     );
     std::string kws_snapshot;
+    core_kws=std::make_shared<CoreKwsControl>(
+        [](const uint8_t* data,size_t size){return hc_runtime_emit(HC_EVENT_REPORT,data,size);},
+        save_kws, []{return static_cast<uint64_t>(std::time(nullptr))*1000;});
     if (NVSManager::loadKwsSnapshot(kws_snapshot) == ESP_OK) {
-        if (!kws->restore(kws_snapshot)) ESP_LOGW(TAG, "Stored local KWS snapshot rejected");
+        if (core_kws->configure(reinterpret_cast<const uint8_t*>(kws_snapshot.data()),kws_snapshot.size(),false))
+            ESP_LOGI(TAG,"Stored Core KWS snapshot restored");
+        else if (!kws->restore(kws_snapshot)) ESP_LOGW(TAG, "Stored local KWS snapshot rejected");
         else ESP_LOGI(TAG, "Local KWS snapshot restored before network startup");
     }
 
@@ -387,12 +396,14 @@ extern "C" void app_main(void) {
         context_mgr, registry, command_router, rule_engine,
         room_mgr, mqtt, kws
     );
+    task_mgr->setCoreKws(core_kws);
     if (!task_mgr->init()) subbox_led_set_error(true);
     asr->registerPlaybackDoneCallback([task_mgr](const std::string& payload) {
         if (!task_mgr->queueKwsPlaybackDone(payload)) ESP_LOGW(TAG, "KWS playback-done queue full");
     });
 
     hc_mqtt=mqtt.get();
+    hc_runtime_set_application_handler(hc_application);
     ESP_ERROR_CHECK(hc_runtime_init(true,hc_uplink,nullptr,nullptr));
     mqtt->init();
     hc_ota_health_ready();

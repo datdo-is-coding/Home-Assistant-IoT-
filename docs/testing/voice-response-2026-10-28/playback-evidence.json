@@ -1,0 +1,22 @@
+{
+  "http_status": 200,
+  "cached_test_speak_ms": 41.88,
+  "api_response": {
+    "success": true,
+    "text": "Hệ thống nhà thông minh đang hoạt động ổn định.",
+    "type": "chao"
+  },
+  "audio_tcp_connections": 1,
+  "stream_pcm_log_count": 0,
+  "user_confirmed_audible": false,
+  "user_feedback": "Không nghe thấy",
+  "logs": [
+    "19:05:47 [tts         ] INFO    ✨ VieNeu-TTS synthesized local in 4.55s: \"Đây là kiểm tra giọng nói của Gateway....\" (106124 bytes)",
+    "19:05:54 [tts         ] INFO    ✨ VieNeu-TTS synthesized local in 6.84s: \"Tôi chưa nhận được trạng thái thiết bị. Bạn v...\" (195404 bytes)",
+    "19:06:05 [tts         ] INFO    ✨ VieNeu-TTS synthesized local in 10.67s: \"Bạn có thể gán từng kênh cho đèn hoặc quạt tr...\" (322124 bytes)",
+    "19:06:10 [tts         ] INFO    ✨ VieNeu-TTS synthesized local in 4.57s: \"Hệ thống nhà thông minh đang hoạt động ổn địn...\" (122444 bytes)",
+    "19:08:45 [tts         ] INFO    ⚡ TTS PCM hit memory cache: 'Hệ thống nhà thông minh đang hoạt động ổ' (81600 bytes)",
+    "19:10:26 [tts         ] INFO    ⚡ TTS PCM hit memory cache: 'Hệ thống nhà thông minh đang hoạt động ổ' (81600 bytes)"
+  ],
+  "inference": "TCP connection exists, but live test has no PCM streaming log; API can fall back to synthesis-only success. This does not establish a registered playback target."
+}

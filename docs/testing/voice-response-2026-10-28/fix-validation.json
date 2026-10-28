@@ -1,0 +1,82 @@
+{
+  "checked_at": "2026-10-28T04:37:08.304153+00:00",
+  "checks": {
+    "gateway": {
+      "tests": 462,
+      "passed": true,
+      "skipped": false,
+      "log_sha256": "37143c5bc82930e54a8b21d472b6909eeee136a12f76594cf425158f67f28be8"
+    },
+    "firmware": {
+      "tests": 35,
+      "passed": true,
+      "skipped": false,
+      "log_sha256": "601019740f31f0c185766000e481cfb40dd16b208913628284f745799f58ed7b"
+    },
+    "core_speaker_after_diagnostic_log": {
+      "tests": 11,
+      "passed": true,
+      "log_sha256": "88341edfb312b9621cfa9e07ddd225e764e584a9f6a7f3340a1ed9181bcc2a8b"
+    }
+  },
+  "builds": {
+    "subbox": true,
+    "actionbox": true
+  },
+  "firmware": {
+    "factory_id": "HC-288485350B54",
+    "schema": 2,
+    "role": 1,
+    "artifact_type": 1,
+    "flags": 0,
+    "compatibility_id": "642a9f3f5180c03795bcaac6662afe00d1db4fb8e62ff253fac58d0e4ebe3952",
+    "version": "2.0.2-b2",
+    "size": 1191280,
+    "sha256": "243cc6984a072975bd0ef05dc060738bc329fca3378dcca08bbc2d646b7f7e7e",
+    "min_agent": 2,
+    "min_bootloader": 1,
+    "protocol_min": 1,
+    "protocol_max": 1,
+    "release_counter": 5,
+    "security_epoch": 0,
+    "key_id": 1721249707
+  },
+  "source_sha256": {
+    "Gateway/gateway/audio_server.py": "d92e59a7d2c7e86799d0b642f5b9b929ccb4d42fdbdca5f1b6e40a9f8ccd40d4",
+    "Gateway/gateway/web_server.py": "a573c44d419a6069fd8803425be58b9539fd2de2145591fa313e0d3cea06b1e0",
+    "Firmware/firmware_esp/common/hc_core/hc_provisioning.c": "443edd6ff8c65c6a7e1d9f3eb51fb25f3a256f63b4b33871a979f40216f25a46",
+    "Firmware/firmware_esp/common/hc_core/hc_provisioning.h": "d29fb76cfcc09effd59b9763286dd3d8023976779e06e592fc88b882985720e8",
+    "Firmware/firmware_esp/SubBox/src/audio/asr/ws_asr.cpp": "9b7abdbfeffb6b387a28e699bac280ab5b71e32791c83d1e4a7ca8fb314beaed",
+    "Firmware/firmware_esp/SubBox/src/audio/asr/ws_asr.h": "fe0751c0b93e24fa5764a6194caa83178dc4d2bd82513d0ad46344af54351ecf",
+    "Firmware/firmware_esp/SubBox/src/audio/audio_output/sound_player.cpp": "2d5828135aacf2d94fd03d90a7548115c5de6a9ea97c1d233f8b0bc7a3fb692f",
+    "Firmware/firmware_esp/SubBox/src/audio/audio_output/sound_player.h": "69552bbb913afb840b4f3a5a908c4d219974fa7809de1a59f41420b9f3869d2d"
+  },
+  "hardware_status": "2.0.2-b2 OTA SUCCEEDED; 81600-byte playback confirmed by device; user heard complete sentence on prior b1 test",
+  "final_checked_at": "2026-10-28T04:42:57.293148+00:00",
+  "final_state": {
+    "node": {
+      "node_id": 3476308,
+      "factory_id": "HC-288485350B54",
+      "registration": "REGISTERED",
+      "connectivity": "ONLINE",
+      "firmware": "2.0.2-b2",
+      "boot_id": "2434315757960391137",
+      "last_seen": 1793162531.9258873,
+      "config_rev": 1,
+      "reported_rev": 1
+    },
+    "ota": {
+      "status": "SUCCEEDED",
+      "offset": 1191280,
+      "reason": null
+    },
+    "checked_at": 1793162533.0590725,
+    "source_sha256": {
+      "audio_server.py": "d92e59a7d2c7e86799d0b642f5b9b929ccb4d42fdbdca5f1b6e40a9f8ccd40d4",
+      "web_server.py": "a573c44d419a6069fd8803425be58b9539fd2de2145591fa313e0d3cea06b1e0"
+    },
+    "gateway_pid": 2776,
+    "radio_pid": 864
+  },
+  "playback_evidence": "playback-final-b2.json"
+}

@@ -1,4 +1,4 @@
-# Legacy Gateway commissioning Rules
+# Gateway commissioning through Firebase
 
 `commissioning.rules.json` is a **merge fragment**, not a replacement Rules
 document. It contains only the root deny defaults and these commissioning
@@ -43,7 +43,7 @@ intentional fragment change requires review and an updated digest.
 
 Admin SDK credentials bypass client Rules, so the runner must validate inputs,
 authorization, timestamp bounds, and its path/method allowlist itself. This
-fragment has not been deployed. The namespace authorization and request/response
+fragment must be merged and checked in each deployment. The namespace authorization and request/response
 flow have also been verified with the official RTDB emulator, separately from
 the Python preflight checks. Physical device commissioning still requires HIL.
 
@@ -81,7 +81,7 @@ dependency is pinned in `requirements.txt` in this directory.
    when reachable. That worker grants only the configured installer UIDs to
    its ID, publishes a heartbeat/broker metadata, and consumes allowlisted
    requests. It must not be enabled against public root Rules.
-5. Install HomeCompetition1.2.1 over the existing app, preserving its identity
+5. Install HomeCompetition1.2.3 over the existing app, preserving its identity
    and login data. Open Add device, put the actual compatible Box into its
    physical setup mode, scan/identify it, choose room/channels and confirm.
    A claim accepted by Gateway remains pending until the original device ACK.
@@ -95,9 +95,38 @@ never creates sample devices or exports pending proofs. It does not read cloud
 state writes to turn relays on, and does not add maintenance/OTA/reset APIs.
 Missing reported state/measurements remain unavailable.
 
-This restores **legacy** commissioning. Core-only OTA pilot enrollment still
-needs its explicit registry/transport integration; do not relabel a successful
-unit/emulator test as radio acceptance on those boards. Remove a UID from the
+Without a `core` config section this uses **legacy** commissioning. With `core`
+configured, `/api/commissioning/context` selects the existing Core Security1
+workflow in the app. The worker opens the existing Core registry with recovery
+disabled; the running radio coordinator remains the sole radio bridge. Claims
+remain pending until independently authenticated device and parent receipts
+arrive. Registered Core nodes publish inventory and availability; relay control
+and binding management are separate from this commissioning transport.
+
+The private `core` section requires `data_dir` (the existing `core.db` and
+`master.key` directory), `home_id`, actual radio `channel`, TLS `mqtt_uri`,
+65-byte uncompressed P-256 `ota_pubkey` as hex, and `parents`. Each parent key is
+its decimal Core node ID and contains its actual `sta_mac` and current persisted
+`generation`. Read these from the enrolled hardware; do not invent identities,
+keys or generation counters. The worker preserves the greater stored generation
+and does not reset coordinator sessions. Configured Firebase installers receive
+only Installer membership in the configured Core home.
+
+Core provisioning stores each SubBox's radio PMK encrypted in
+`commissioning_radio_keys`; its ActionBoxes must share that PMK and have their
+own LMKs. A SubBox enrolled through this API creates its record automatically.
+An existing USB-enrolled SubBox needs an explicit import from its trusted
+manufacturing record, checked against physical NVS first. Do not add the PMK to
+the app context or `parents` config. A missing key is rejected with
+`parent_radio_key_missing`; a conflicting import is rejected rather than
+silently rotating an active network key.
+
+Run `flutter pub get` after a fresh checkout or branch switch before building
+the app. The ignored Android plugin registrant must be generated before using
+`flutter build ... --no-pub`; otherwise native Firebase initialization can fail
+even when Dart tests pass.
+
+Do not relabel a successful unit/emulator test as radio acceptance. Remove a UID from the
 private config and its `gateway_access/<uid>/<gateway_id>` grant when revoking
 an installer. To roll back the code, remove the service environment override
 and restore the previous source; do not erase device NVS or registry data.
@@ -115,6 +144,8 @@ This test refuses every other host/port, uses only namespace
 checks real Rules compilation, own-UID access, forged response/access/status
 denials, request immutability/expiry/unknown fields, RTDB normalization of empty
 objects and the claim→device-ACK→inventory path with simulated radio input.
+It also checks the Core context and pending claim through the same protected
+mailbox, including empty arrays disappearing in RTDB.
 
 Firebase references: [Rules inheritance](https://firebase.google.com/docs/database/security),
 [conditions and validation](https://firebase.google.com/docs/database/security/rules-conditions),

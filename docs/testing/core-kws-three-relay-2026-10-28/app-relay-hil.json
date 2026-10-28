@@ -1,0 +1,116 @@
+{
+  "steps": [
+    {
+      "command_id": "CMD-ed943e05d7973a1efe31328d",
+      "channel_id": "HC-28848533DDE8:CH1",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793165981.4927933,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-76e7633d86fc9106c6636b60",
+      "channel_id": "HC-28848533DDE8:CH2",
+      "desired": 1,
+      "status": "APPLIED",
+      "created": 1793165986.4937215,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-04b4800ab4b7d29355c7a7ad",
+      "channel_id": "HC-28848533DDE8:CH2",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793165990.9316845,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-19d0ab7d1e522c0bf142691d",
+      "channel_id": "HC-28848533DDE8:CH3",
+      "desired": 1,
+      "status": "APPLIED",
+      "created": 1793165994.635528,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-424ea706b1b185cabade4f7c",
+      "channel_id": "HC-28848533DDE8:CH3",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793166001.9952428,
+      "reason": null
+    }
+  ],
+  "final": {
+    "commands": [
+      {
+        "command_id": "CMD-424ea706b1b185cabade4f7c",
+        "channel_id": "HC-28848533DDE8:CH3",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793166001.9952428,
+        "reason": null
+      },
+      {
+        "command_id": "CMD-19d0ab7d1e522c0bf142691d",
+        "channel_id": "HC-28848533DDE8:CH3",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793165994.635528,
+        "reason": null
+      },
+      {
+        "command_id": "CMD-04b4800ab4b7d29355c7a7ad",
+        "channel_id": "HC-28848533DDE8:CH2",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793165990.9316845,
+        "reason": null
+      },
+      {
+        "command_id": "CMD-76e7633d86fc9106c6636b60",
+        "channel_id": "HC-28848533DDE8:CH2",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793165986.4937215,
+        "reason": null
+      },
+      {
+        "command_id": "CMD-ed943e05d7973a1efe31328d",
+        "channel_id": "HC-28848533DDE8:CH1",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793165981.4927933,
+        "reason": null
+      },
+      {
+        "command_id": "CMD-f692cb6f196a63add0e4e8f0",
+        "channel_id": "HC-28848533DDE8:CH1",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793165877.895154,
+        "reason": null
+      }
+    ],
+    "channels": [
+      {
+        "number": 1,
+        "relay_state": 0,
+        "ct_valid": 1,
+        "fault_flags": 0
+      },
+      {
+        "number": 2,
+        "relay_state": 0,
+        "ct_valid": 1,
+        "fault_flags": 0
+      },
+      {
+        "number": 3,
+        "relay_state": 0,
+        "ct_valid": 1,
+        "fault_flags": 0
+      }
+    ]
+  }
+}

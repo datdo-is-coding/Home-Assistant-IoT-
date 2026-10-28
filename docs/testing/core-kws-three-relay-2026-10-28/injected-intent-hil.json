@@ -1,0 +1,154 @@
+{
+  "results": [
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-5fa744c3350790d2a40bfa30",
+        "channel_id": "HC-28848533DDE8:CH1",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793166461.6930718,
+        "reason": null
+      },
+      "voice_revision": 2,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021237499",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 55040,
+      "elapsed_s": 2.578
+    },
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-4d4cf7c889d6a22e71d26b4e",
+        "channel_id": "HC-28848533DDE8:CH1",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793166464.2719996,
+        "reason": null
+      },
+      "voice_revision": 2,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021240079",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 55680,
+      "elapsed_s": 7.113
+    },
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-fb5dd8df298fdd88e1acf4ee",
+        "channel_id": "HC-28848533DDE8:CH2",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793166471.3861718,
+        "reason": null
+      },
+      "voice_revision": 2,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021247195",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 55680,
+      "elapsed_s": 7.061
+    },
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-d29913d8b033ad5f20af0078",
+        "channel_id": "HC-28848533DDE8:CH2",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793166478.4490395,
+        "reason": null
+      },
+      "voice_revision": 2,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021254258",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 54080,
+      "elapsed_s": 6.501
+    },
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-84e9c283b42bb19a92dc6202",
+        "channel_id": "HC-28848533DDE8:CH3",
+        "desired": 1,
+        "status": "APPLIED",
+        "created": 1793166486.9773448,
+        "reason": null
+      },
+      "voice_revision": 3,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021262786",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 54080,
+      "elapsed_s": 6.508
+    },
+    {
+      "test": "injected_intent_not_speech_recognition",
+      "command": {
+        "command_id": "CMD-3c48813b5d916f0d11090124",
+        "channel_id": "HC-28848533DDE8:CH3",
+        "desired": 0,
+        "status": "APPLIED",
+        "created": 1793166493.4854379,
+        "reason": null
+      },
+      "voice_revision": 3,
+      "request_key": "kws:3476308:13632356330802601459:9223373830021269297",
+      "relay_reported": true,
+      "load_confirmed": false,
+      "ct_valid": true,
+      "fault_flags": 0,
+      "speaker": "SB288485350B54",
+      "playback_bytes": 54400,
+      "elapsed_s": 6.492
+    }
+  ],
+  "restored_config": {
+    "bindings": [
+      {
+        "channel": 1,
+        "device": "LIGHT",
+        "node_id": "AB28848533DDE8",
+        "room": "BEDROOM"
+      },
+      {
+        "channel": 2,
+        "device": "FAN",
+        "node_id": "AB28848533DDE8",
+        "room": "BEDROOM"
+      }
+    ],
+    "revision": 4,
+    "sources": [
+      {
+        "node_id": "SB288485350B54",
+        "room": "BEDROOM"
+      }
+    ],
+    "sync": {
+      "SB288485350B54": {
+        "revision": 4,
+        "status": "applied"
+      }
+    },
+    "profile": "core-v1"
+  }
+}

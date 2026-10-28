@@ -84,6 +84,26 @@ class ProvisioningTest(unittest.TestCase):
                 self.assertEqual(self.p.accept_receipt(receipt)['node_id'], node['node_id'])
                 self.assertEqual(self.p.accept_receipt(peer)['node_id'], node['node_id'])
 
+    def test_parent_and_children_share_pmk_but_have_distinct_link_keys(self):
+        parent, envelope, _, receipt = self.prepare(1)
+        self.p.accept_receipt(receipt)
+        parent_packet = bytes.fromhex(envelope['packet'])
+        stored = self.r.one('SELECT pmk_cipher FROM commissioning_radio_keys')['pmk_cipher']
+        self.assertNotIn(parent_packet[160:176], stored)
+        restarted = Provisioning(self.r)
+        self.assertEqual(restarted.radio_key(parent['node_id']), parent_packet[160:176])
+        with self.assertRaises(CoreError):
+            restarted.remember_radio_key(parent['node_id'], b'x' * 16)
+        child_packets = [bytes.fromhex(self.prepare(number, parent['node_id'])[1]['packet'])
+                         for number in (2, 3)]
+        for packet in child_packets:
+            self.assertEqual(packet[160:176], parent_packet[160:176])
+        self.assertNotEqual(child_packets[0][176:192], child_packets[1][176:192])
+        self.r.db.execute('DELETE FROM commissioning_radio_keys')
+        with self.assertRaises(CoreError) as caught:
+            self.prepare(4, parent['node_id'])
+        self.assertEqual(caught.exception.code, 'parent_radio_key_missing')
+
     def test_wrong_receipt_and_expiry_cannot_register_or_emit_grants(self):
         parent, key = self.parent()
         claim, _, _, receipt = self.prepare(2, parent)

@@ -52,6 +52,10 @@ private:
     void handleTextMessage(const char* data, int len);
 
     std::string m_uri;
+    bool m_core_playback = false;
+    std::string m_playback_id;
+    size_t m_playback_bytes = 0, m_playback_expected = 0;
+    bool m_playback_ok = false;
     std::string m_ca, m_headers;
     std::atomic<int64_t> m_disconnected_at{0};
     std::string m_node_id;

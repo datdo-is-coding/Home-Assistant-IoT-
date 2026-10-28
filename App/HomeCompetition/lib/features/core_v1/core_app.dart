@@ -1612,6 +1612,10 @@ class _CoreClaimState extends State<CoreClaim> {
     final response = await widget.client.request(
         '/provisioning/${Uri.encodeComponent(claim!['claim_id'] as String)}');
     if (mounted) setState(() => status = response['status'] as String);
+    if (response['status'] == 'EXPIRED') {
+      throw const CoreException('claim_expired',
+          'Phiên ghép đã hết hạn. Quay lại và mở quy trình ghép mới.');
+    }
     if (response['status'] == 'REGISTERED') {
       await widget.client.refresh(widget.room.homeId);
       if (mounted) setState(() => stage = 4);
@@ -1635,7 +1639,7 @@ class _CoreClaimState extends State<CoreClaim> {
               'Secure provisioning hiện chỉ có trên Android. Trên nền tảng này có thể quản lý Box đã đăng ký bằng công cụ commissioning.'),
         if (stage == 0) ...[
           const Text(
-              'Giữ BOOT khoảng 3 giây rồi thả để mở ghép nối. Trong cài đặt Wi-Fi Android, kết nối siciot_sub_XXXXXX hoặc siciot_act_XXXXXX bằng mật khẩu riêng trên nhãn. Cửa sổ ghép nối kéo dài 180 giây. Giữ điện thoại kết nối AP dù không có Internet. Không giữ BOOT tới 10 giây vì đó là thao tác reset.'),
+              'Giữ BOOT khoảng 4 giây rồi thả để mở ghép nối. Trong cài đặt Wi-Fi Android, kết nối siciot_sub_XXXXXX hoặc siciot_act_XXXXXX bằng mật khẩu riêng trên nhãn. Cửa sổ ghép nối kéo dài 180 giây. Giữ điện thoại kết nối AP dù không có Internet. Không giữ BOOT tới 10 giây vì đó là thao tác reset.'),
           const SizedBox(height: 16),
           TextField(
               controller: qr,
@@ -1659,7 +1663,10 @@ class _CoreClaimState extends State<CoreClaim> {
           TextField(
               controller: factory,
               readOnly: widget.transfer != null,
-              decoration: const InputDecoration(labelText: 'Factory ID')),
+              keyboardType: TextInputType.visiblePassword,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'Mã thiết bị')),
           const SizedBox(height: 16),
           TextField(
               controller: setup,
@@ -1667,7 +1674,7 @@ class _CoreClaimState extends State<CoreClaim> {
               enableSuggestions: false,
               autocorrect: false,
               decoration: const InputDecoration(
-                  labelText: 'Setup code / Proof of possession')),
+                  labelText: 'Mã thiết lập trên nhãn Box')),
           const SizedBox(height: 16),
           FilledButton(
               onPressed: busy || !CoreProvisioning.supported

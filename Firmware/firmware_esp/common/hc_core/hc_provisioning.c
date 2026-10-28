@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_system.h"
+#include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_netif.h"
 #include "protocomm.h"
@@ -76,6 +77,24 @@ esp_err_t hc_provisioning_load(hc_provisioned_config *out) {
     if(err!=ESP_OK)return err;
     hc_factory_id(base,actual);
     return memcmp(actual,out->factory_id,sizeof(actual))==0?ESP_OK:ESP_ERR_INVALID_MAC;
+}
+esp_err_t hc_provisioning_speaker_token(char out[65]) {
+    if(!out)return ESP_ERR_INVALID_ARG;
+    out[0]=0;
+    hc_provisioned_config c={0};
+    esp_err_t err=hc_provisioning_load(&c);
+    uint8_t digest[32]={0};
+    if(err==ESP_OK && (!c.subbox||!c.committed||!nonzero(c.key,sizeof(c.key))))err=ESP_ERR_INVALID_STATE;
+    static const uint8_t domain[]="HC-SPEAKER-V1";
+    if(err==ESP_OK)err=mac(c.key,sizeof(c.key),domain,sizeof(domain),digest);
+    memset(&c,0,sizeof(c));
+    if(err==ESP_OK){
+        static const char hex[]="0123456789abcdef";
+        for(unsigned i=0;i<32;++i){out[2*i]=hex[digest[i]>>4];out[2*i+1]=hex[digest[i]&15];}
+        out[64]=0;
+    }
+    memset(digest,0,sizeof(digest));
+    return err;
 }
 static esp_err_t sync_subbox_credentials(const hc_provisioned_config *c) {
     if (!c || !c->subbox) return ESP_OK;
@@ -380,7 +399,10 @@ esp_err_t hc_provisioning_start(bool subbox) {
     if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_AP,&ap);
     memset(&ap,0,sizeof(ap));if(err!=ESP_OK)return err;
     server=protocomm_new();if(!server)return ESP_ERR_NO_MEM;
+    esp_log_level_set("security1", ESP_LOG_WARN);
     protocomm_httpd_config_t cfg = {0};
+    const protocomm_http_server_config_t defaults = PROTOCOMM_HTTPD_DEFAULT_CONFIG();
+    cfg.data.config = defaults;
     cfg.data.config.stack_size = 6144;
     err=protocomm_httpd_start(server,&cfg);
     security_params.data=(const uint8_t *)setup;security_params.len=strlen(setup);

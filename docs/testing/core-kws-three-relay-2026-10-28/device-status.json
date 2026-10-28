@@ -1,0 +1,145 @@
+{
+  "captured_at_unix": 1793166613.4355595,
+  "nodes": [
+    {
+      "node_id": 3476308,
+      "factory_id": "HC-288485350B54",
+      "registration": "REGISTERED",
+      "connectivity": "ONLINE",
+      "firmware": "2.0.3-b1",
+      "boot_id": "13632356330802601459",
+      "config_rev": 1,
+      "reported_rev": 1,
+      "last_seen": 1793166611.9848
+    },
+    {
+      "node_id": 3476310,
+      "factory_id": "HC-28848533DDE8",
+      "registration": "REGISTERED",
+      "connectivity": "ONLINE",
+      "firmware": "2.0.3-b1",
+      "boot_id": "804230880295596463",
+      "config_rev": 4,
+      "reported_rev": 4,
+      "last_seen": 1793166611.9753954
+    }
+  ],
+  "channels": [
+    {
+      "number": 1,
+      "channel_id": "HC-28848533DDE8:CH1",
+      "relay_state": 0,
+      "current_rms_a": 0.0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "boot_id": "804230880295596463",
+      "state_seq": 460,
+      "config_rev": 4,
+      "reported_at": 1793166611.9752393
+    },
+    {
+      "number": 2,
+      "channel_id": "HC-28848533DDE8:CH2",
+      "relay_state": 0,
+      "current_rms_a": 0.0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "boot_id": "804230880295596463",
+      "state_seq": 460,
+      "config_rev": 4,
+      "reported_at": 1793166611.9753053
+    },
+    {
+      "number": 3,
+      "channel_id": "HC-28848533DDE8:CH3",
+      "relay_state": 0,
+      "current_rms_a": 0.0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "boot_id": "804230880295596463",
+      "state_seq": 460,
+      "config_rev": 4,
+      "reported_at": 1793166611.975352
+    }
+  ],
+  "real_speech_events": [
+    {
+      "event_id": 53324,
+      "kind": "core_kws_result",
+      "data": {
+        "expires": 1793166168.0869412,
+        "parent": 3476308,
+        "reason": "no_command",
+        "request_key": "kws:3476308:13632356330802601459:1",
+        "source": 3476310
+      }
+    },
+    {
+      "event_id": 53334,
+      "kind": "core_kws_result",
+      "data": {
+        "expires": 1793166186.0672228,
+        "parent": 3476308,
+        "reason": "incomplete_command",
+        "request_key": "kws:3476308:13632356330802601459:2",
+        "source": 3476310
+      }
+    }
+  ],
+  "manual_app_commands": [
+    {
+      "command_id": "CMD-f692cb6f196a63add0e4e8f0",
+      "channel_id": "HC-28848533DDE8:CH1",
+      "desired": 1,
+      "status": "APPLIED",
+      "created": 1793165877.895154,
+      "expires": 1793165882.895154,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-ed943e05d7973a1efe31328d",
+      "channel_id": "HC-28848533DDE8:CH1",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793165981.4927933,
+      "expires": 1793165986.4927933,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-76e7633d86fc9106c6636b60",
+      "channel_id": "HC-28848533DDE8:CH2",
+      "desired": 1,
+      "status": "APPLIED",
+      "created": 1793165986.4937215,
+      "expires": 1793165991.4937215,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-04b4800ab4b7d29355c7a7ad",
+      "channel_id": "HC-28848533DDE8:CH2",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793165990.9316845,
+      "expires": 1793165995.9316845,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-19d0ab7d1e522c0bf142691d",
+      "channel_id": "HC-28848533DDE8:CH3",
+      "desired": 1,
+      "status": "APPLIED",
+      "created": 1793165994.635528,
+      "expires": 1793165999.635528,
+      "reason": null
+    },
+    {
+      "command_id": "CMD-424ea706b1b185cabade4f7c",
+      "channel_id": "HC-28848533DDE8:CH3",
+      "desired": 0,
+      "status": "APPLIED",
+      "created": 1793166001.9952428,
+      "expires": 1793166006.9952428,
+      "reason": null
+    }
+  ]
+}

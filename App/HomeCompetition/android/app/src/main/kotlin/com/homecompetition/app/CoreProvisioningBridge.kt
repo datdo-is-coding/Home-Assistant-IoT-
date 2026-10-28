@@ -179,9 +179,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
         }
 
         val connectivity = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = boundNetwork ?: connectivity.allNetworks.firstOrNull {
-            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-        }
+        val network = setupNetwork(connectivity)
 
         if (network == null) {
             busy.set(false)
@@ -265,7 +263,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
                         session.sendDataToDevice("hc-config", configJson, object : ResponseListener {
                             override fun onSuccess(returnData: ByteArray) {
                                 if (finished.get()) return
-                                session.sendDataToDevice("hc-status", ByteArray(0), object : ResponseListener {
+                                session.sendDataToDevice("hc-status", ByteArray(1), object : ResponseListener {
                                     override fun onSuccess(statusData: ByteArray) {
                                         main.removeCallbacks(timeoutRunnable)
                                         val resultMap = mapOf(
@@ -315,6 +313,14 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
         }
     }
 
+    private fun setupNetwork(connectivity: ConnectivityManager): Network? =
+        boundNetwork ?: connectivity.allNetworks.firstOrNull {
+            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
+                connectivity.getLinkProperties(it)?.linkAddresses?.any { address ->
+                    address.address.hostAddress?.startsWith("192.168.4.") == true
+                } == true
+        }
+
     private fun exchange(pop: String, endpoint: String, data: ByteArray, result: MethodChannel.Result) {
         val finished = AtomicBoolean(false)
         fun complete(bytes: ByteArray?) {
@@ -327,9 +333,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
         }
         main.postDelayed({ complete(null) }, 18000)
         val connectivity = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = boundNetwork ?: connectivity.allNetworks.firstOrNull {
-            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
-        }
+        val network = setupNetwork(connectivity)
         if (network == null) { complete(null); return }
         var cookie: String? = null
         val transport = object : Transport {
@@ -373,7 +377,8 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
                 override fun OnSessionEstablished() {
                     if (finished.get()) return
                     try {
-                        session.sendDataToDevice(endpoint, data, object : ResponseListener {
+                        // ESP-IDF's HTTP transport rejects a zero-length encrypted request body.
+                        session.sendDataToDevice(endpoint, if (data.isEmpty()) ByteArray(1) else data, object : ResponseListener {
                             override fun onSuccess(returnData: ByteArray) = complete(returnData)
                             override fun onFailure(e: Exception) = complete(null)
                         })

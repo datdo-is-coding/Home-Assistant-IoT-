@@ -1,5 +1,9 @@
 # Code lưu trữ
 
+Đợt mới nhất: [dọn toàn repo ngày 2026-10-28](2026-10-28-cleanup/README.md).
+Xem manifest trong thư mục này để biết vị trí gốc, lý do chuyển và SHA-256 từng
+file. Các ghi chú bên dưới mô tả đợt cũ, không phải bản đồ nguồn hiện hành.
+
 Đợt dọn ngày 2026-09-29 chuyển nguyên thư mục, bao gồm thay đổi chưa commit và
 file local. Không xóa nội dung. Các đường dẫn dưới đây tính từ gốc repository.
 

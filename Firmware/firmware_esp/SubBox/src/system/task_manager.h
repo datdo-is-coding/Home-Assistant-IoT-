@@ -18,6 +18,7 @@
 #include "room/room_manager.h"
 #include "mqtt/subbox_mqtt_client.h"
 #include "audio/kws/kws_control.h"
+#include "audio/kws/core_kws_control.h"
 
 struct UtteranceQueueItem {
     char origin_node_id[32];
@@ -62,6 +63,7 @@ public:
         std::shared_ptr<KwsControl> kws = {}
     );
     ~TaskManager();
+    void setCoreKws(std::shared_ptr<CoreKwsControl> core) { m_core_kws=std::move(core); }
 
     bool init();
 
@@ -74,6 +76,7 @@ public:
     bool queueKwsPlaybackDone(const std::string& payload);
 
 private:
+    std::shared_ptr<CoreKwsControl> m_core_kws;
     static void audioManagerTask(void* pvParameters);
     static void nluTask(void* pvParameters);
     static void commandTask(void* pvParameters);

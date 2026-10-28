@@ -1,0 +1,19 @@
+{
+  "dart": {
+    "total": 51,
+    "runtime": 51,
+    "test_only": [],
+    "unreferenced": []
+  },
+  "gateway_modules_no_static_import": [],
+  "SubBox": {
+    "compiled_sources": 30,
+    "headers_without_include": [
+      "Firmware/firmware_esp/SubBox/src/system/device_reset.h"
+    ]
+  },
+  "ActionBox_V2": {
+    "compiled_sources": 14,
+    "headers_without_include": []
+  }
+}

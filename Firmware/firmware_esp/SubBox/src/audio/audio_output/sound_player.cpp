@@ -209,11 +209,11 @@ void SoundPlayer::playRawInternal(const int16_t* pcm, size_t samples) {
     size_t bytes_to_write = samples * sizeof(int16_t);
     size_t bytes_written = 0;
 
-    i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, pdMS_TO_TICKS(2000));
+    i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, 2000);
 
     int16_t silence_buf[SOUND_DMA_FRAME_SAMPLES] = {0};
     size_t pad_written = 0;
-    i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, pdMS_TO_TICKS(100));
+    i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, 100);
 
     vTaskDelay(pdMS_TO_TICKS(30));
     if (!m_streaming_pcm) {
@@ -265,26 +265,33 @@ bool SoundPlayer::streamPcmChunk(const int16_t* pcm, size_t samples) {
     auto tx_handle = static_cast<i2s_chan_handle_t>(m_i2s_handle);
     size_t bytes_to_write = samples * sizeof(int16_t);
     size_t bytes_written = 0;
-    esp_err_t err = i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, pdMS_TO_TICKS(500));
+    esp_err_t err = i2s_channel_write(tx_handle, pcm, bytes_to_write, &bytes_written, 500);
     m_last_chunk_time_us = esp_timer_get_time();
     xSemaphoreGive(mutex);
-    return (err == ESP_OK);
+    return (err == ESP_OK && bytes_written == bytes_to_write);
 }
 
-void SoundPlayer::finishPcmStream() {
+bool SoundPlayer::finishPcmStream() {
     if (!m_initialized) {
         m_playing = false;
         m_streaming_pcm = false;
-        return;
+        return false;
     }
 
     auto mutex = static_cast<SemaphoreHandle_t>(m_mutex);
+    bool ok = false;
     if (mutex && xSemaphoreTake(mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
         if (m_i2s_handle) {
+            ok = true;
             auto tx_handle = static_cast<i2s_chan_handle_t>(m_i2s_handle);
             int16_t silence_buf[SOUND_DMA_FRAME_SAMPLES] = {0};
             size_t pad_written = 0;
-            i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, pdMS_TO_TICKS(100));
+            // Drain the four DMA buffers before shutting the amplifier down.
+            for (unsigned i = 0; i < 4; ++i) {
+                pad_written = 0;
+                const auto err = i2s_channel_write(tx_handle, silence_buf, sizeof(silence_buf), &pad_written, 100);
+                if (err != ESP_OK || pad_written != sizeof(silence_buf)) ok = false;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(30));
         enableAmp(false);
@@ -296,6 +303,7 @@ void SoundPlayer::finishPcmStream() {
         m_playing = false;
         m_streaming_pcm = false;
     }
+    return ok;
 }
 
 void SoundPlayer::playbackTask(void* pvParameters) {

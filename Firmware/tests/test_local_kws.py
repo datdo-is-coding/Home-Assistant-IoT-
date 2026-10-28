@@ -45,7 +45,7 @@ int main() {
             subprocess.run([str(exe)],check=True)
 
     def test_local_engine_emits_once_after_end(self):
-        dataset = ROOT / 'Firmware/firmware_kws/dataset'
+        dataset = ROOT / 'Firmware/tests/fixtures/kws/dataset'
         words = ['bật/100.wav', 'đèn/100.wav', 'phòng/100.wav', 'ngủ/100.wav']
         paths = [dataset / word for word in words]
         if not all(path.is_file() for path in paths):

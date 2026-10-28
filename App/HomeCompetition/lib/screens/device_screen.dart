@@ -46,7 +46,9 @@ class _DeviceScreenState extends State<DeviceScreen> {
     final channels = asMap(node['channels']);
     final ch1 = asMap(channels['ch1']);
     final ch2 = asMap(channels['ch2']);
-    final hasCh3 = channels.containsKey('ch3') || (node['relay_state'] is List && (node['relay_state'] as List).length >= 3);
+    final hasCh3 = channels.containsKey('ch3') ||
+        (node['relay_state'] is List &&
+            (node['relay_state'] as List).length >= 3);
     final ch3 = asMap(channels['ch3']);
 
     final name = TextEditingController(text: nodeName(widget.nodeId, node));
@@ -98,10 +100,14 @@ class _DeviceScreenState extends State<DeviceScreen> {
                                 const SizedBox(height: 12),
                                 TextFormField(
                                     controller: room,
+                                    readOnly: node['core_node_id'] is int,
                                     maxLength: 64,
-                                    decoration: const InputDecoration(
+                                    decoration: InputDecoration(
                                         labelText: 'Phòng',
-                                        hintText: 'phong_khach'),
+                                        hintText: 'phong_khach',
+                                        helperText: node['core_node_id'] is int
+                                            ? 'Phòng được quản lý tại SubBox → Khẩu lệnh.'
+                                            : null),
                                     validator: (s) =>
                                         s == null || s.trim().isEmpty
                                             ? 'Nhập phòng'
@@ -195,7 +201,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
                                       items: _deviceTypes,
                                       onChanged: busy
                                           ? null
-                                          : (v) => setDialog(() => ch3Type = v!)),
+                                          : (v) =>
+                                              setDialog(() => ch3Type = v!)),
                                 ],
                                 if (error != null)
                                   Padding(
@@ -230,7 +237,8 @@ class _DeviceScreenState extends State<DeviceScreen> {
                                     ch1Type: ch1Type,
                                     ch2Name: ch2Name.text.trim(),
                                     ch2Type: ch2Type,
-                                    ch3Name: hasCh3 ? ch3Name.text.trim() : null,
+                                    ch3Name:
+                                        hasCh3 ? ch3Name.text.trim() : null,
                                     ch3Type: hasCh3 ? ch3Type : null,
                                   );
                                   if (dialogContext.mounted) {
@@ -382,9 +390,9 @@ class _DeviceScreenState extends State<DeviceScreen> {
                         color: online ? const Color(0xFF10B981) : colors.error),
                     label: Text(online ? 'Trực tuyến' : 'Ngoại tuyến',
                         style: TextStyle(
-                            color: online ? const Color(0xFF10B981) : colors.error,
+                            color:
+                                online ? const Color(0xFF10B981) : colors.error,
                             fontWeight: FontWeight.w600))),
-
                 Chip(label: Text(roomName('${node['room'] ?? ''}'))),
               ]),
               const SizedBox(height: 24),
@@ -443,7 +451,6 @@ class _DeviceScreenState extends State<DeviceScreen> {
                         child: CustomPaint(
                             painter: PowerChart(values, const Color(0xFF0EA5E9),
                                 colors.outlineVariant)))),
-
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(
@@ -610,7 +617,6 @@ class PowerChart extends CustomPainter {
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round,
     );
-
   }
 
   @override

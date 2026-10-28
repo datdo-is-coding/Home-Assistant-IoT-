@@ -22,6 +22,7 @@ typedef struct {
     struct { uint32_t node_id; uint8_t mac[6], lmk[16], nonce[32]; } peers[4];
 } hc_provisioned_config;
 esp_err_t hc_provisioning_load(hc_provisioned_config *out);
+esp_err_t hc_provisioning_speaker_token(char out[65]);
 
 esp_err_t hc_provisioning_start(bool subbox);
 void hc_provisioning_stop(void);

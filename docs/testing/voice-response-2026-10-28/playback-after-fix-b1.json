@@ -1,0 +1,26 @@
+{
+  "status": 200,
+  "body": {
+    "success": false,
+    "text": "Hệ thống nhà thông minh đang hoạt động ổn định.",
+    "type": "chao",
+    "error": "Không có loa sẵn sàng hoặc chưa xác nhận phát âm thanh."
+  },
+  "elapsed_ms": 2757.23,
+  "at": 1793161950.8727875,
+  "health_during_playback": {
+    "requests": 14,
+    "all_http_200": true,
+    "median_ms": 1.92,
+    "max_ms": 46.7
+  },
+  "ota_job": "OTA-a86525734a2c519b8384808e",
+  "firmware": "2.0.2-b1",
+  "acoustic_confirmation": "User confirmed: clear, complete sentence",
+  "firmware_receipt": {
+    "received_bytes": 81600,
+    "expected_bytes": 81600,
+    "output_ok": false
+  },
+  "follow_up": "Fix I2S timeout units, deploy 2.0.2-b2"
+}

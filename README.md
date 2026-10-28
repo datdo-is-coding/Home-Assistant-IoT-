@@ -1,70 +1,70 @@
-# SIC — Home Assistant IoT
+# HomeCompetition
 
-Code đang phát triển tập trung vào ba thành phần:
+Ứng dụng Firebase, Gateway Pi4 và các Box ESP32-S3. Bản đồ nguồn đã rà soát ngày
+2026-10-28:
 
-| Thư mục | Vai trò |
-| --- | --- |
-| `Gateway/` | Gateway Python, MQTT, xử lý giọng nói và Web UI |
-| `Firmware/firmware_esp/ActionBox/` | Firmware thiết bị chấp hành ESP32-S3 |
-| `Firmware/firmware_esp/SubBox/` | Firmware điều phối phòng, audio và NLU |
+| Thành phần | Nguồn duy trì | Điểm vào |
+| --- | --- | --- |
+| App duy nhất | `App/HomeCompetition/` | `lib/main.dart` → `FirebaseHomeClient` |
+| Gateway chính | `Gateway/gateway/` | `main.py`, cầu nối `firebase_commissioning.py` |
+| Đăng ký/quyền/kênh/lệnh Core | `Gateway/gateway/core_v1/` | Registry SQLite, provisioning, command queue |
+| OTA đã ký | `Gateway/gateway/fleet_ota/` | `python -m gateway.fleet_ota.local` cho pilot Pi |
+| ActionBox 3 relay / 3 BL0942 | `Firmware/firmware_esp/ActionBox_V2/` | `src/main.cpp` |
+| SubBox điều phối / âm thanh | `Firmware/firmware_esp/SubBox/` | `src/main.cpp` |
+| Giao thức/OTA/bảo mật chung | `Firmware/firmware_esp/common/hc_core/` | Component ESP-IDF của cả hai Box |
+| Model/MFCC KWS hiện tại | `Firmware/firmware_esp/common/kws/` | Nhận diện đèn/quạt, khách/ngủ/bếp |
 
-Các thư mục hỗ trợ được giữ lại:
+Thông tin đang chạy và các phần chưa nối xong nằm trong
+[trạng thái hệ thống](docs/architecture/current_state.md). Bản phát hành đã giữ ở
+[`releases/`](releases/README.md). Bản sao cũ, công cụ demo, dữ liệu huấn luyện đã
+dừng và build/cache dư nằm trong
+[`archive/2026-10-28-cleanup/`](archive/2026-10-28-cleanup/README.md), kèm manifest
+hash và vị trí gốc. Archive giữ dữ liệu để phục hồi, không giảm dung lượng đĩa.
 
-- `MQTT_Server/`: broker Mosquitto và bộ dịch vụ Docker hiện có.
-- `Firmware/firmware_esp/Audio_Hardware_Test/`: firmware kiểm tra phần cứng âm thanh.
-- `Firmware/tools/` và các script test/visualizer: công cụ kiểm tra thiết bị.
-- `Gateway/tests/`, `Gateway/benchmark/`, `Gateway/training_data/`: kiểm thử, đo hiệu năng và dữ liệu NLU.
-- `Hardware/`, `sound/`, `apk/`, các firmware binary và tài liệu thiết kế: giữ nguyên.
-- `archive/`: code cũ, có [bảng đường dẫn khôi phục](archive/README.md).
+## App
 
-## Build firmware
-
-Trên Windows có ESP-IDF 6.0.2, chạy từ thư mục gốc repo:
-
-```powershell
-.\Firmware\firmware_esp\ActionBox\build.ps1
-.\Firmware\firmware_esp\SubBox\build.ps1
+```sh
+cd App/HomeCompetition
+flutter pub get
+flutter analyze
+flutter test --concurrency=1
+flutter build apk --debug
 ```
 
-Script dùng profile `C:\Espressif\tools\Microsoft.v6.0.2.PowerShell_profile.ps1`.
-Tham số `-Clean` thực hiện `fullclean` trước khi build. Các script build/flash
-truyền đường dẫn project bằng `-C`, nên không phụ thuộc thư mục terminal hiện tại.
-Nếu chạy trong terminal thiếu biến kiến trúc CPU và gặp lỗi `Windows-`, đặt biến
-cho phiên terminal trước khi build:
+Giữ Android application ID đã đăng ký Firebase. Sau khi đổi nhánh hoặc khôi phục
+cache, chạy `flutter pub get` để tạo lại phần đăng ký native plugin. Xem
+[hướng dẫn app](App/HomeCompetition/README.md).
 
-```powershell
-$env:PROCESSOR_ARCHITECTURE = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().Replace('X64', 'AMD64')
+## Firmware
+
+Trong môi trường ESP-IDF 6.0.2 đã kích hoạt, từ gốc repo:
+
+```sh
+idf.py -C Firmware/firmware_esp/ActionBox_V2 build
+idf.py -C Firmware/firmware_esp/SubBox build
 ```
 
-Nạp firmware khi đã chọn đúng board và cổng COM:
+`managed_components/`, `dependencies.lock`, `sdkconfig` và `sdkconfig.defaults`
+của hai project được giữ. `build/` sẽ tạo lại khi build. Không dùng firmware
+ActionBox đời cũ hoặc simulator để nạp thay cho `ActionBox_V2`.
 
-```powershell
-.\Firmware\firmware_esp\ActionBox\flash.ps1 -Port COM9 -NoMonitor
-.\Firmware\firmware_esp\SubBox\flash.ps1 -Port COM10 -NoMonitor
+## Gateway và kiểm thử
+
+Dịch vụ Pi dùng `Gateway/systemd/smarthome-gateway.service`; cấu hình ghép qua
+Firebase xem [`Gateway/firebase/README.md`](Gateway/firebase/README.md).
+`deployment/`, `MQTT_Server/`, `protocol/`, `Hardware/` và `sound/` vẫn chứa cấu
+hình triển khai, hợp đồng, thiết kế điện và tài nguyên được sử dụng.
+
+```sh
+PYTHONPATH=Gateway python -m unittest discover -s Gateway/tests -v
+python -m unittest discover -s Firmware/tests -v
 ```
 
-## Gateway
+Gateway cần các dependency đã cài; test Firebase Rules cần emulator loopback
+riêng theo hướng dẫn trong test. Firmware host tests cần `g++`, `numpy` và Python
+của ESP-IDF cho các bài NVS. Mẫu KWS dùng kiểm thử nằm ở
+`Firmware/tests/fixtures/kws/`; không cần chạy lại huấn luyện.
 
-```powershell
-python -m pip install -r Gateway/requirements.txt
-python Gateway/gateway/main.py
-```
-
-Cấu hình nằm trong `Gateway/gateway/config.py`; dịch vụ Linux nằm trong
-`Gateway/systemd/`. ASR/TTS local cần model và dependency riêng theo cấu hình.
-
-Kiểm thử offline từ thư mục gốc, không điều khiển thiết bị thật:
-
-```powershell
-python Gateway/tests/test_intent_engine_v3.py
-python Gateway/tests/test_runtime_utils.py
-```
-
-`test_clean_gateway.py` là script tích hợp có khởi tạo Gateway/registry, không nằm
-trong bộ test offline trên. Chỉ chạy với cấu hình và dữ liệu thử nghiệm riêng.
-
-## Tìm kiếm code
-
-`.ignore` loại code archive và thư viện bên thứ ba khỏi tìm kiếm `rg` mặc định;
-dùng `rg --no-ignore` khi cần tra cứu chúng. `.graphifyignore` giữ graph tập trung
-vào code hiện hành. Các file archive vẫn có thể được quản lý bằng Git.
+`archive/` được loại khỏi tìm kiếm mặc định. Dùng `rg --no-ignore` khi tra cứu
+lịch sử. Nguồn Gateway có các module tương thích được main, API hoặc test gọi;
+không tách chúng khỏi dịch vụ chỉ vì app hiện dùng Firebase.

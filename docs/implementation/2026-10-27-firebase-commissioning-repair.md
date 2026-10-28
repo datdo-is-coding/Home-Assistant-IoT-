@@ -1,79 +1,131 @@
-# HomeCompetition1.2.1 — restore Add device through Firebase
+# HomeCompetition 1.2.3 — Firebase device commissioning
 
-## Problem and resulting code
+## Implemented behavior
 
-The Firebase merge routed `/actionbox/add-device` to `_gatewayFeature`, which
-returned a missing-service message instead of the existing wizard. Merely
-removing that guard would still leave every lifecycle request unsupported by
-`FirebaseHomeClient`, and would send the Firebase hostname as the SubBox broker.
+Add device now uses an authenticated, UID-scoped Firebase RTDB mailbox in the
+existing Gateway process. It selects the legacy wizard or the existing Core
+Security1 workflow from the Gateway's trusted commissioning context. Broker,
+room, parent, channel and OTA key checks remain on the Gateway. There is no
+fallback to a Gateway HTTP port.
 
-The original wizard now opens for Firebase accounts. Candidate discovery,
-identify, claim and operation polling use authenticated HTTPS RTDB mailbox
-records. No IP/port login or local HTTP fallback is introduced. Discovery errors
-are visible and retryable. Broker settings come from the assigned Gateway's
-trusted status, never from the Firebase database hostname.
+Core claims remain pending until independently authenticated device and parent
+receipts arrive. Logical claim/prepare retries are idempotent; expired claims
+are reported as expired. Configured Firebase users receive Installer membership
+only in the configured Core home. The existing radio coordinator remains the
+only radio bridge; the Firebase worker opens its registry with `recover=False`.
 
-The optional worker runs inside the existing legacy `SmartHomeGateway`. It
-calls that process's existing `DeviceLifecycleManager` on the same MQTT event
-loop. Physical discovery/proof, room/SubBox capacity, revision/route checks and
-the original device-apply acknowledgement remain in force. A stored Firebase
-request or accepted claim never becomes a successful device registration by
-itself. Registered entries are projected only after the original lifecycle
-creates them; setup proofs and credentials are excluded.
+Physical testing exposed and corrected these integration defects:
 
-Explicit installer UIDs in a private Gateway config are mapped to its local
-admin authority. The browser/app cannot self-assign that authority. The worker
-requires the exact protected Rules before initialization and each request
-batch, rejects expired/oversized/forged requests, persists responses before
-removing requests, and uses the lifecycle's durable logical idempotency key
-across transport retries. Reset/remove/OTA/relay endpoints are not exposed by
-this commissioning transport. The worker is disabled by default, so existing
-Gateway deployments do not need new credentials to keep running.
+- Vietnamese input changed `DD` in a device ID to `Đ`. The ID field now uses a
+  password-style keyboard with correction/suggestions disabled, and Vietnamese
+  labels. Exact input was verified on the real phone.
+- Android could select a different Wi-Fi network on a phone with multiple
+  active Wi-Fi connections. Both native provisioning paths now select the
+  Box's `192.168.4.x` network unless a setup network was explicitly requested.
+- ESP-IDF rejects empty HTTP bodies. Security1 info/status reads now carry a
+  byte before encryption.
+- A zeroed protocomm config selected port zero and task priority zero. The
+  firmware now uses the SDK defaults with its larger existing stack; the host
+  fixture checks port 80 and nonzero priority.
+- ActionBox was given a random PMK that differed from its SubBox. The Gateway
+  now retains the parent's PMK in an encrypted registry table and uses it for
+  that parent's children, while generating distinct per-link LMKs. Missing or
+  conflicting imported radio keys are rejected. The private pilot importer
+  checks parent identity before importing its key. No radio key is exposed by
+  commissioning context. See the [Espressif network example](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP_NOW/examples/ESP_NOW_Network/ESP_NOW_Network.ino).
+- SDK Security1 informational key dumps are suppressed in the new firmware;
+  warnings and errors remain enabled.
 
-## Verification completed
+The physical window remains 180 seconds; BOOT instructions recommend four
+seconds to exceed the three-second threshold. Ten seconds still means reset.
+Model training remains stopped, and the stock model partition was retained.
 
-- `flutter analyze --no-pub`: no issues.
-- `flutter test --no-pub --concurrency=1 --reporter expanded`:162 passed.
-- Gateway full suite with the RTDB emulator enabled:442 passed.
-- Official Firebase RTDB emulator4.11.2: real Rules compiled; own-UID access,
-  unauthorized UID/response/status/access forgery, immutable requests, deadline
-  validation, empty-object normalization, and request→simulated device ACK→
-  registry→Firebase projection passed. This is an actual local RTDB process;
-  radio input is simulated and is not physical commissioning acceptance.
-- APK debug build: passed. Package remains
-  `com.dtv.homeassistant.dtv_home_assistant`; version1.2.1/code16. Signing SHA1
-  remains `69:52:90:33:FA:F8:FF:A5:9B:BD:BE:53:37:EF:85:11:6A:14:9A:E5`.
-- `git diff --check`, Python compilation and APK signature verification passed.
+## Deployment and backups
 
-APK: `App/HomeCompetition/build/app/outputs/flutter-apk/HomeCompetition-1.2.1.apk`
+The dedicated `homecompetition-gateway` service account has Firebase Realtime
+Database Admin in `home-companion-fed2e`. Its RSA key was generated and retained
+on the Pi; only the public certificate was uploaded. The unused earlier key was
+removed. The uploaded certificate expires on 2027-10-27.
 
-SHA256: `91adb26deabe19d28628349041f8371f271aa10cf1413234b68ab703d28de5ca`.
+Live Rules were backed up, then the reviewed commissioning namespaces were
+published with root grants disabled. Existing public `/devices` Rules were
+preserved for existing clients. This remains an internal pilot; that public
+legacy branch is not production tenant isolation.
 
-The initial parallel Flutter run had an intermittent voice-alias test failure.
-The isolated rerun and two full sequential runs passed. The first Gateway
-integration run found four missing-optional-attribute errors in legacy test
-fixtures; startup now handles the optional worker with `getattr`, and the full
-rerun passed. No failing check is treated as acceptance.
+The existing Pi main service was updated after code, environment and consistent
+SQLite backups. Credentials and deployed Rules passed the real preflight. The
+phone account's grant and fresh Firebase heartbeat were verified. PMK import
+matched a fingerprint read from the actual SubBox NVS and stored the key under
+the registry master key. The radio service was not restarted for this change.
 
-## Deployment and physical acceptance pending
+The source work is on `codex/commercial-ota`; the commit on `main` was preserved.
+After a branch switch, run `flutter pub get` before a no-pub build so the ignored
+Android plugin registrant is regenerated. Dart tests alone cannot establish
+that native Firebase plugins are packaged. The final APK was installed without
+clearing app data; Firebase startup and login retention were checked on-device.
 
-The user confirmed the Pi/phone cannot be reconnected at present. The workstation
-is on10.74.236.x, the previous Pi address192.168.11.29 times out, no matching Pi
-peer was found on Tailscale, and ADB has no phone attached. Browser control became
-disabled in Work settings before the live Rules could be exported. No Gateway
-restart, real Firebase write/Rules deployment, phone installation or relay action
-was performed in this repair. The Console displayed a public-Rules warning; the
-actual full Rules document must be backed up and reviewed before activation.
-No Firebase Admin credential/installer UID was invented or copied into the APK.
+DDF4 had an uncommitted factory enrollment for node 1 when re-inspected. No
+registered DDF4 entry existed in the Pi. A complete 16 MiB backup was assembled
+and compared against the physical flash with the ROM digest check:
+`558e3057bbdaabecee7f39e2b2edbd71056b0a96a7ef25ddad2579a7a43e5186`.
+Only its application partition was flashed. The model matched the stock build;
+factory calibration/UID and manufacturing credentials were verified unchanged.
+Enrollment, PHY calibration cache and boot metadata changed through their normal
+runtime paths. The application contains no per-device factory bundle.
 
-Resume with `Gateway/firebase/README.md`: back up current deployment, merge the
-protected namespaces preserving existing device data, provision credentials and
-the real installer UID privately, run the non-mutating preflight, enable the
-worker in the existing Gateway service and install the APK without clearing
-phone data. Then verify a compatible Box's physical setup, identify, claim,
-matching device ACK, terminal success and appearance in Firebase/app.
+## Physical commissioning acceptance
 
-Core-only OTA pilot devices still require their explicit legacy registry/control
-adapter; this repair does not claim their radio/app/voice controls work. DDF4
-remains unflashed because its full backup was interrupted by USB loss. Model
-training stays stopped. These changes preserve unrelated dirty app/OTA work.
+DDF4 completed the real Android/Firebase/Security1 flow. The successful claim is
+`CLAIM-de04d946689243b9e663522e`, logical node 3476309, parent 3476308 (SubBox 0B54).
+The registry contains both independently verified receipts, `REGISTERED` and
+`ONLINE`, and channels 1, 2, 3. The phone displayed step 5/5 and “Gateway đã xác minh
+đăng ký”. Screenshot: `/tmp/homecompetition-ddf4-registered.png`.
+After repository cleanup, the installed APK is retained at
+`releases/android/HomeCompetition.apk`; stock regression data and archived
+historical evidence are indexed by `archive/2026-10-28-cleanup/manifest.json`.
+
+The earlier mismatched-PMK claim expired without receipts and was not treated as
+successful. No registration, receipt, channel or relay telemetry was fabricated.
+The UI test driver encountered a timing race when its Check button disappeared
+after success; the captured success screen and independent registry evidence
+confirmed the result.
+
+## Verification and limits
+
+- Gateway: 449 tests passed with the official RTDB emulator 4.11.2, including real
+  Rules, UID boundaries, forged writes, immutable deadlines, empty RTDB values,
+  pending claims, encrypted PMK persistence, key non-disclosure and expiry.
+- Flutter: 164 passed; analysis found no issues. APK 1.2.3/code 18 retains the
+  existing application identity and signing key.
+- Firmware: 39 host tests ran successfully, including 5 opt-in skips, using the IDF Python runtime.
+  The updated HTTP-config regression also passed. ActionBox and SubBox builds
+  passed for 2.0.1-b1.
+- Actual radio receipts and the real phone success screen establish physical
+  commissioning, separately from host/emulator checks.
+
+On the continuation into 2026-10-28, both boards completed signed OTA 2.0.1-b1
+through the local Pi pilot:
+
+| Board | Job | Final status | Transferred bytes |
+| --- | --- | --- | ---: |
+| DDF4 | `OTA-44d28e8ee5c1c10e58003f59` | `SUCCEEDED` | 1,351,232 |
+| SubBox 0B54 | `OTA-72609e2afd20e5e9fc36219c` | `SUCCEEDED` | 1,189,632 |
+
+Each rebooted and reported the expected version and image digest. After an
+additional controlled reboot to capture final NVS backups, both remained
+`REGISTERED`, reported configuration revision 1, and sent fresh heartbeats.
+Firebase projected both online with firmware 2.0.1-b1 and three DDF4 channels.
+
+The post-OTA NVS checks confirmed committed enrollment, channel 11, matching
+parent/child PMKs and grant nonces, and release counter 3 / security epoch 0 on
+both boards. Manufacturing credentials, ActionBox `factory_data` and
+`user_config`, and SubBox hardware identity/user configuration were unchanged.
+Only expected enrollment, OTA confirmation, PHY cache and boot metadata changed.
+The updated NVS and a consistent Core SQLite snapshot were saved privately for
+recovery. No private keys or setup codes are included in this report.
+
+Core projections in this commissioning transport contain registered inventory
+and availability. Relay control/bindings and load confirmation are separate;
+missing reported states/current are not invented. No real loads are connected.
+DDE8 was not flashed. Internet fleet deployment/billing remains disabled by the
+user's choice to test internally first.

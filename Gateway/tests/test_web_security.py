@@ -3,6 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -65,6 +66,30 @@ class WebServerSecurityTests(unittest.IsolatedAsyncioTestCase):
                 parsed_headers[k.lower()] = v
 
         return status, parsed_headers, resp_body
+
+    async def test_downloads_use_current_homecompetition_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'Gateway/gateway').mkdir(parents=True)
+            apk = root / 'releases/android/HomeCompetition.apk'
+            apk.parent.mkdir(parents=True)
+            apk.write_bytes(b'current HomeCompetition APK')
+            with patch('web_server.__file__', str(root / 'Gateway/gateway/web_server.py')):
+                for method in ('GET', 'HEAD'):
+                    status, headers, body = await self._send_request(method, '/api/app/download')
+                    self.assertEqual(status, 200)
+                    self.assertEqual(int(headers['content-length']), apk.stat().st_size)
+                    self.assertIn('HomeCompetition.apk', headers['content-disposition'])
+                    self.assertEqual(body, apk.read_bytes() if method == 'GET' else b'')
+
+    async def test_test_speak_does_not_claim_success_when_only_synthesis_works(self):
+        self.gateway.audio_server = SimpleNamespace(speak_proactive=AsyncMock(return_value=False))
+        self.gateway.tts = SimpleNamespace(synthesize_pcm=AsyncMock(return_value=b'pcm'))
+        status, _, body = await self._send_request('POST', '/api/proactive/test_speak',
+                                                  headers={'Authorization': 'Bearer test-admin'}, body=b'{}')
+        self.assertEqual(status, 200)
+        self.assertFalse(json.loads(body)['success'])
+        self.gateway.tts.synthesize_pcm.assert_not_awaited()
 
     async def test_wifi_connect_unauthenticated_blocked_when_provisioned(self):
         """Unauthenticated requests to /api/wifi/connect are rejected with 401 when admin exists."""

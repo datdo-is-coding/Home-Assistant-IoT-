@@ -42,6 +42,8 @@ class FirebaseHomeClient extends GatewayClient {
       connected; // Existing UI uses this as stream health.
   @override
   bool get usesFirebase => true;
+  @override
+  bool get isAdmin => super.isAdmin || user['gateway_configure'] == true;
 
   @override
   Future<void> restoreLocalSession() async {
@@ -198,6 +200,45 @@ class FirebaseHomeClient extends GatewayClient {
           'Chưa có trạng thái thiết bị mới để điều khiển.');
     }
     final session = _session;
+    if (node['core_node_id'] is int) {
+      if (ch['logical_device_id'] == null) {
+        throw const GatewayException(
+            'Hãy gán thiết bị cho kênh này trước khi điều khiển.');
+      }
+      final key =
+          '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(0x7fffffff)}';
+      var command = await _commissioningRequest(
+          '/api/v1/channels/command',
+          'POST',
+          {
+            'node_id': node['core_node_id'],
+            'channel': int.parse(channel.substring(2)),
+            'on': on,
+            'idempotency_key': key,
+          },
+          const Duration(seconds: 10));
+      final deadline = DateTime.now().add(const Duration(seconds: 7));
+      while (
+          command['status'] == 'ACCEPTED' || command['status'] == 'RECEIVED') {
+        if (_session != session || DateTime.now().isAfter(deadline)) {
+          throw const GatewayException('Chưa nhận được xác nhận từ ActionBox.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        command = await _commissioningRequest(
+            '/api/v1/commands/${command['command_id']}',
+            'GET',
+            null,
+            const Duration(seconds: 5));
+      }
+      if (_session != session || command['status'] != 'APPLIED') {
+        throw const GatewayException('ActionBox chưa xác nhận thực hiện lệnh.');
+      }
+      return {
+        'success': true,
+        'status': 'relay_reported',
+        'load_confirmed': false
+      };
+    }
     // Existing firmware consumes this field; a successful write is not a relay ACK.
     await _writeCloud('devices/$nodeId/channels/$channel/state', on);
     if (session != _session)
@@ -217,6 +258,13 @@ class FirebaseHomeClient extends GatewayClient {
     if (path == '/api/nodes') return {'nodes': nodes, 'pending': pending};
     if (path == '/api/auth/me') return {'authenticated': true, 'user': user};
     final verb = (method ?? (body == null ? 'GET' : 'POST')).toUpperCase();
+    final coreRequest = (path == '/api/kws/config' &&
+            ((verb == 'GET' && body == null) ||
+                (verb == 'PUT' && body != null))) ||
+        (path == '/api/device/update' &&
+            body != null &&
+            _raw[body['device_id']] is Map &&
+            asMap(_raw[body['device_id']])['core_node_id'] is int);
     final commissioningRead = verb == 'GET' &&
         body == null &&
         (path == '/api/commissioning/candidates' ||
@@ -234,7 +282,7 @@ class FirebaseHomeClient extends GatewayClient {
             (RegExp(r'^/api/devices/[A-Za-z0-9_:-]+/operations$')
                     .hasMatch(path) &&
                 body['kind'] == 'identify'));
-    if (commissioningRead || commissioningWrite) {
+    if (commissioningRead || commissioningWrite || coreRequest) {
       return _commissioningRequest(
           path, verb, body, timeout ?? const Duration(seconds: 15));
     }
@@ -364,6 +412,17 @@ class FirebaseHomeClient extends GatewayClient {
             throw GatewayException(
                 '${result['message'] ?? result['error'] ?? 'Không thể ghép nối thiết bị.'}',
                 code);
+          }
+          if (result['profile'] == 'core-v1' &&
+              (path == '/api/kws/config' ||
+                  asMap(result['capabilities'])['configure'] == true)) {
+            if (path == '/api/kws/config') {
+              result['sources'] ??= <dynamic>[];
+              result['bindings'] ??= <dynamic>[];
+              result['sync'] ??= <String, dynamic>{};
+            }
+            user['gateway_configure'] = true;
+            notifyListeners();
           }
           return result;
         }

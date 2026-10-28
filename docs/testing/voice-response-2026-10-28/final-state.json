@@ -1,0 +1,25 @@
+{
+  "node": {
+    "node_id": 3476308,
+    "factory_id": "HC-288485350B54",
+    "registration": "REGISTERED",
+    "connectivity": "ONLINE",
+    "firmware": "2.0.2-b2",
+    "boot_id": "2434315757960391137",
+    "last_seen": 1793162531.9258873,
+    "config_rev": 1,
+    "reported_rev": 1
+  },
+  "ota": {
+    "status": "SUCCEEDED",
+    "offset": 1191280,
+    "reason": null
+  },
+  "checked_at": 1793162533.0590725,
+  "source_sha256": {
+    "audio_server.py": "d92e59a7d2c7e86799d0b642f5b9b929ccb4d42fdbdca5f1b6e40a9f8ccd40d4",
+    "web_server.py": "a573c44d419a6069fd8803425be58b9539fd2de2145591fa313e0d3cea06b1e0"
+  },
+  "gateway_pid": 2776,
+  "radio_pid": 864
+}

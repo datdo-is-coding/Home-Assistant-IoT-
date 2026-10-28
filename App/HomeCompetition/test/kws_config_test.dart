@@ -54,100 +54,111 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets(
-      'explicit CH3 mapping preserves other bindings, removes cleanly, waits for ACK',
-      (tester) async {
-    final writes = <Map<String, dynamic>>[];
-    var config = <String, dynamic>{
-      'revision': 7,
-      'bindings': [
-        {
-          'room': 'KITCHEN',
-          'device': 'FAN',
-          'node_id': 'AB2',
-          'channel': 2,
-          'hardware_uid': 'mac2',
-          'config_version': 4,
-          'subbox_id': 'SB1'
+  for (final core in [false, true]) {
+    testWidgets(
+        '${core ? 'Core' : 'Legacy'} CH3 mapping preserves bindings and waits for ACK',
+        (tester) async {
+      final writes = <Map<String, dynamic>>[];
+      var config = <String, dynamic>{
+        if (core) 'profile': 'core-v1',
+        'revision': 7,
+        'bindings': [
+          {
+            'room': 'KITCHEN',
+            'device': 'FAN',
+            'node_id': 'AB2',
+            'channel': 2,
+            'hardware_uid': 'mac2',
+            'config_version': 4,
+            'subbox_id': 'SB1'
+          },
+        ],
+        'sources': <dynamic>[],
+        'sync': {
+          'SB1': {'revision': 7, 'status': 'applied'}
         },
-      ],
-      'sources': <dynamic>[],
-      'sync': {
-        'SB1': {'revision': 7, 'status': 'applied'}
-      },
-    };
-    final client = GatewayClient(
-        persistSession: false,
-        client: MockClient((req) async {
-          if (req.url.path == '/api/auth/me') {
-            return http.Response(
-                '{"authenticated":true,"user":{"role":"admin"}}', 200);
-          }
-          if (req.url.path == '/api/kws/config') {
-            expect(req.headers['Authorization'], 'Bearer test');
-            if (req.method == 'PUT') {
-              final body = jsonDecode(req.body) as Map<String, dynamic>;
-              writes.add(body);
-              config = {
-                ...body,
-                'revision': (body['revision'] as int) + 1,
-                'sync': {
-                  'SB1': {
-                    'revision': (body['revision'] as int) + 1,
-                    'status': 'pending'
-                  }
-                }
-              };
-            } else {
-              expect(req.method, 'GET');
+      };
+      final client = GatewayClient(
+          persistSession: false,
+          client: MockClient((req) async {
+            if (req.url.path == '/api/auth/me') {
+              return http.Response(
+                  '{"authenticated":true,"user":{"role":"admin"}}', 200);
             }
-            return http.Response(jsonEncode(config), 200);
-          }
-          return http.Response('{"nodes":{},"pending":{}}', 200);
-        }));
-    addTearDown(client.dispose);
-    await client.loginWithKey(url: 'http://gateway:8000', key: 'test');
-    await openEditor(tester, client);
-    expect(writes, isEmpty);
-    expect(
-        tester
-            .widget<FilledButton>(find.byKey(const Key('kws_save')))
-            .onPressed,
-        isNull);
-    await select(tester, 'binding_BEDROOM_LIGHT', 'Bo một · CH3 · Tải ba');
-    await select(tester, 'source_AB1', 'Phòng ngủ');
-    await tester.ensureVisible(find.byKey(const Key('kws_save')));
-    await tester.tap(find.byKey(const Key('kws_save')));
-    await tester.pumpAndSettle();
-    expect(writes.single, {
-      'revision': 7,
-      'bindings': [
+            if (req.url.path == '/api/kws/config') {
+              expect(req.headers['Authorization'], 'Bearer test');
+              if (req.method == 'PUT') {
+                final body = jsonDecode(req.body) as Map<String, dynamic>;
+                writes.add(body);
+                config = {
+                  ...body,
+                  if (core) 'profile': 'core-v1',
+                  'revision': (body['revision'] as int) + 1,
+                  'sync': {
+                    'SB1': {
+                      'revision': (body['revision'] as int) + 1,
+                      'status': 'pending'
+                    }
+                  }
+                };
+              } else {
+                expect(req.method, 'GET');
+              }
+              return http.Response(jsonEncode(config), 200);
+            }
+            return http.Response('{"nodes":{},"pending":{}}', 200);
+          }));
+      addTearDown(client.dispose);
+      await client.loginWithKey(url: 'http://gateway:8000', key: 'test');
+      await openEditor(tester, client);
+      expect(writes, isEmpty);
+      expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('kws_save')))
+              .onPressed,
+          isNull);
+      await select(tester, 'binding_BEDROOM_LIGHT', 'Bo một · CH3 · Tải ba');
+      final source = core ? 'SB1' : 'AB1';
+      expect(find.byKey(Key('source_${core ? 'AB1' : 'SB1'}')), findsNothing);
+      await select(tester, 'source_$source', 'Phòng ngủ');
+      await tester.ensureVisible(find.byKey(const Key('kws_save')));
+      await tester.tap(find.byKey(const Key('kws_save')));
+      await tester.pumpAndSettle();
+      expect(writes.single, {
+        'revision': 7,
+        'bindings': [
+          {'room': 'KITCHEN', 'device': 'FAN', 'node_id': 'AB2', 'channel': 2},
+          {
+            'room': 'BEDROOM',
+            'device': 'LIGHT',
+            'node_id': 'AB1',
+            'channel': 3
+          },
+        ],
+        'sources': [
+          {'node_id': source, 'room': 'BEDROOM'}
+        ],
+      });
+      expect(find.text('SB1: Chờ SubBox xác nhận'), findsOneWidget);
+      expect(find.text('SB1: Đã áp dụng'), findsNothing);
+      config['sync'] = {
+        'SB1': {'revision': 8, 'status': 'applied'}
+      };
+      await tester.tap(find.byKey(const Key('kws_refresh')));
+      await tester.pumpAndSettle();
+      expect(find.text('SB1: Đã áp dụng'), findsOneWidget);
+      await select(tester, 'binding_BEDROOM_LIGHT', 'Chưa gán');
+      await select(tester, 'source_$source', 'Chưa gán');
+      await tester.ensureVisible(find.byKey(const Key('kws_save')));
+      await tester.tap(find.byKey(const Key('kws_save')));
+      await tester.pumpAndSettle();
+      expect(writes.last['revision'], 8);
+      expect(writes.last['bindings'], [
         {'room': 'KITCHEN', 'device': 'FAN', 'node_id': 'AB2', 'channel': 2},
-        {'room': 'BEDROOM', 'device': 'LIGHT', 'node_id': 'AB1', 'channel': 3},
-      ],
-      'sources': [
-        {'node_id': 'AB1', 'room': 'BEDROOM'}
-      ],
+      ]);
+      expect(writes.last['sources'], isEmpty);
     });
-    expect(find.text('SB1: Chờ SubBox xác nhận'), findsOneWidget);
-    expect(find.text('SB1: Đã áp dụng'), findsNothing);
-    config['sync'] = {
-      'SB1': {'revision': 8, 'status': 'applied'}
-    };
-    await tester.tap(find.byKey(const Key('kws_refresh')));
-    await tester.pumpAndSettle();
-    expect(find.text('SB1: Đã áp dụng'), findsOneWidget);
-    await select(tester, 'binding_BEDROOM_LIGHT', 'Chưa gán');
-    await select(tester, 'source_AB1', 'Chưa gán');
-    await tester.ensureVisible(find.byKey(const Key('kws_save')));
-    await tester.tap(find.byKey(const Key('kws_save')));
-    await tester.pumpAndSettle();
-    expect(writes.last['revision'], 8);
-    expect(writes.last['bindings'], [
-      {'room': 'KITCHEN', 'device': 'FAN', 'node_id': 'AB2', 'channel': 2},
-    ]);
-    expect(writes.last['sources'], isEmpty);
-  });
+  }
 
   testWidgets('stale snapshot keeps draft and offers explicit reload',
       (tester) async {

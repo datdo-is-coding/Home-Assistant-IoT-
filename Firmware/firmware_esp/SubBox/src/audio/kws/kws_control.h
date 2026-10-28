@@ -19,6 +19,11 @@ struct KwsBinding : KwsPeer {
     uint8_t channel=0;
 };
 struct KwsSource : KwsPeer { std::string room; };
+struct KwsPhrase {
+    std::string action, device, room;
+    bool explicit_room=false;
+};
+bool kwsParsePhrase(const std::string& phrase,KwsPhrase& command);
 
 // All methods run on the MQTT/command boundary; callbacks provide the device edge.
 class KwsControl {
@@ -38,16 +43,15 @@ public:
     void utterance(const std::string& origin,const std::string& phrase);
     void tick();
 private:
-    struct Command {
+    struct Command : KwsPhrase {
         uint32_t request=0, session=0;
-        std::string origin, action, device, room;
-        bool explicit_room=false, follow_up=false;
+        std::string origin;
+        bool follow_up=false;
         KwsBinding binding;
     };
     struct Pending { Command command; uint64_t deadline=0; std::string phase; };
     struct Seen { uint64_t deadline=0; std::string ack; };
     bool configure(const std::string& payload,bool persist);
-    bool parse(const std::string& phrase,Command& command);
     void resolve(Command command);
     void result(const Command&,const char* status,const char* reason,const std::string& state="");
     std::string execute(const Command&);

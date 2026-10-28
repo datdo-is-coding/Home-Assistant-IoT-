@@ -27,7 +27,7 @@ public:
 
     bool streamPcmChunk(const int16_t* pcm, size_t samples);
 
-    void finishPcmStream();
+    bool finishPcmStream();
 
     bool isPlaying() const;
 

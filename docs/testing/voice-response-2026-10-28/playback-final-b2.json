@@ -1,0 +1,28 @@
+{
+  "status": 200,
+  "body": {
+    "success": true,
+    "text": "Hệ thống nhà thông minh đang hoạt động ổn định.",
+    "type": "chao"
+  },
+  "elapsed_ms": 2726.6,
+  "at": 1793162510.6881754,
+  "health_during_playback": {
+    "requests": 14,
+    "all_http_200": true,
+    "median_ms": 1.93,
+    "max_ms": 46.11
+  },
+  "ota_job": "OTA-0453ade21bc890b367fda5a9",
+  "firmware": "2.0.2-b2",
+  "node": {
+    "node_id": 3476308,
+    "connectivity": "ONLINE",
+    "firmware": "2.0.2-b2",
+    "boot_id": "2434315757960391137",
+    "last_seen": 1793162506.9223833,
+    "config_rev": 1,
+    "reported_rev": 1
+  },
+  "acoustic_confirmation": "User confirmed clear complete sentence during prior 2.0.2-b1 test; same PCM used"
+}

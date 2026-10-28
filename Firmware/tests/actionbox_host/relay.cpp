@@ -52,12 +52,14 @@ int main() {
     for (int ch = 1; ch <= 3; ++ch) {
         assert(relay_on(ch) == ESP_OK);
         assert(pulses.back().pin == set_pins[ch - 1]);
-        assert(last_timer_duration == 50000);
+        assert(last_timer_duration == 30000);
         all_coils_low();
         auto count = pulses.size();
         assert(relay_on(ch) == ESP_OK && pulses.size() == count);
         assert(relay_off(ch) == ESP_OK);
         assert(pulses.back().pin == reset_pins[ch - 1]);
+        assert(last_timer_duration == 30000);
+        all_coils_low();
         count = pulses.size();
         assert(relay_off(ch) == ESP_OK && pulses.size() == count);
     }

@@ -63,6 +63,10 @@ memory.db
 
 # Local rollback images, serial captures and test failure output
 /Gateway/gateway/*.before-*
-/App/dtv_energy_flutter/test/failures/
+/App/HomeCompetition/test/failures/
 /docs/audit-evidence-*/**/*.bin
 /docs/audit-evidence-*/**/*serial*.jsonl
+
+# Local distribution artifacts; manifests and source stay in Git.
+/releases/android/*.apk
+/releases/firmware/**/*.bin

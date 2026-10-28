@@ -32,11 +32,15 @@ class FirebaseCoreCommissioningTests(unittest.TestCase):
             'room_id':self.room,'idempotency_key':key})
 
     def test_context_uses_existing_home_and_does_not_export_factory_credentials(self):
+        claim = self.claim('context-only')
+        self.c.provisioning.remember_radio_key(claim['node_id'], b'P' * 16)
         result = self.c.context('owner')
         self.assertEqual(result['profile'],'core-v1')
         self.assertEqual(result['snapshot']['home_id'],self.home)
         self.assertEqual(result['defaults']['channel'],11)
         self.assertNotIn('unique-setup-code',str(result))
+        self.assertNotIn((b'P' * 16).hex(),str(result))
+        self.assertNotIn('P' * 16,str(result))
 
     def test_claim_is_durable_and_only_device_receipt_registers(self):
         claim = self.claim()
@@ -61,6 +65,12 @@ class FirebaseCoreCommissioningTests(unittest.TestCase):
                 ('owner','GET','/api/v1/states/snapshot?home_id=another',{})]:
             with self.subTest(path=path),self.assertRaises(CoreError):
                 self.c.request(uid,method,path,body)
+
+    def test_expired_claim_is_reported_as_expired_not_waiting_forever(self):
+        claim=self.claim()
+        self.r.clock=lambda:claim['expires']+1
+        result=self.c.request('owner','GET','/api/v1/provisioning/'+claim['claim_id'],{})
+        self.assertEqual(result['status'],'EXPIRED')
 
     def test_changed_retry_and_forged_ota_key_are_denied(self):
         claim=self.claim()

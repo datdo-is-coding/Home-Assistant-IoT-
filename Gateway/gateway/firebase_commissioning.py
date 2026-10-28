@@ -123,6 +123,7 @@ class FirebaseCommissioningBridge:
         self.core = core
         self.dispatcher = dispatcher or CommissioningRpc(gateway, config['installer_uids'],core=core)
         self.task = None
+        self.voice_task = None
         self._granted = False
         self._rules_checked = False
         self._next_status = 0
@@ -186,6 +187,8 @@ class FirebaseCommissioningBridge:
                     await self.store.write(f'gateway_rpc/{gid}/responses/{uid}/{request_id}', None)
 
     async def run(self):
+        if self.core and hasattr(self.gateway,'audio_server'):
+            self.voice_task=asyncio.create_task(self.core.kws.feedback(self.gateway.audio_server))
         while True:
             try:
                 await self.tick()
@@ -203,6 +206,9 @@ class FirebaseCommissioningBridge:
             await asyncio.sleep(.5)
 
     async def close(self):
+        if self.voice_task:
+            self.voice_task.cancel()
+            await asyncio.gather(self.voice_task,return_exceptions=True)
         if self.task:
             self.task.cancel()
             try:

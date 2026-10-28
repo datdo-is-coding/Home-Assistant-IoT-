@@ -2,8 +2,8 @@
 
 App hợp nhất từ `dtv_energy_flutter` và `dtv_home_assistant`. Thư mục chuẩn:
 `App/HomeCompetition`; package Dart: `home_competition`; entrypoint: `lib/main.dart`;
-app shell: `lib/app/home_competition_app.dart`. `App/iot_dashboard` không nằm trong
-phạm vi gộp. Bản nguồn `dtv_home_assistant` được giữ ở
+app shell: `lib/app/home_competition_app.dart`. Dashboard cũ được lưu tại
+`archive/2026-10-28-cleanup/files/App/iot_dashboard`. Bản nguồn `dtv_home_assistant` được giữ ở
 `archive/Application/dtv_home_assistant` để đối chiếu/khôi phục.
 
 ## Chạy và build
@@ -16,7 +16,8 @@ flutter test
 flutter build apk --debug
 ```
 
-APK: `build/app/outputs/flutter-apk/app-debug.apk` (bản phát triển).
+APK mới build: `build/app/outputs/flutter-apk/app-debug.apk` (bản phát triển).
+Bản 1.2.3+18 đang cài được giữ tại `releases/android/HomeCompetition.apk`.
 Android applicationId giữ `com.dtv.homeassistant.dtv_home_assistant` để khớp app
 đã đăng ký Firebase; namespace mới `com.homecompetition.app`, tên hiển thị
 HomeCompetition. Không đổi applicationId khi chưa đăng ký lại Firebase/Google
@@ -80,7 +81,7 @@ Không dùng luật `.read/.write: true` trên dữ liệu nhà. Thay đổi nà
 Rules, tạo tài khoản, hoặc ghi vào database thật. Giữ nguồn cấu hình Firebase
 cũ; cần kiểm tra SHA signing key/Google provider trên project khi cài điện thoại.
 
-Firmware `firmware_actionbox_sim` có số đo mô phỏng; dữ liệu do nó gửi không phải
+Firmware `archive/2026-10-28-cleanup/files/Firmware/firmware_actionbox_sim` có số đo mô phỏng; dữ liệu do nó gửi không phải
 bằng chứng đo tải thật. Firmware ActionBox_V2/SubBox và Pi Gateway hiện không
 được thay bằng cầu nối Firebase trong lần gộp app này.
 

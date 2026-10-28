@@ -134,7 +134,7 @@ bool KwsControl::configure(const std::string& payload,bool persist) {
     cJSON_Delete(root);return valid;
 }
 
-bool KwsControl::parse(const std::string& phrase,Command& command) {
+bool kwsParsePhrase(const std::string& phrase,KwsPhrase& command) {
     std::string remaining=phrase;
     struct Token { const char* text; const char* value; unsigned kind; };
     static const Token tokens[]={{"phòng khách","LIVING_ROOM",2},{"phòng ngủ","BEDROOM",2},{"phòng bếp","KITCHEN",2},
@@ -190,7 +190,7 @@ void KwsControl::utterance(const std::string& origin,const std::string& phrase) 
     }
     if(phrase=="__KWS_EMPTY__") {result(command,"error","no_command");return;}
     if(phrase=="__KWS_AUDIO_ERROR__") {result(command,"error","audio_error");return;}
-    if(!parse(phrase,command)) {result(command,"error","invalid_command");return;}
+    if(!kwsParsePhrase(phrase,command)) {result(command,"error","invalid_command");return;}
     if(command.room.empty()&&!command.explicit_room)command.room=s->room;
     resolve(command);
 }

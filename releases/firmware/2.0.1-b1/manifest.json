@@ -1,0 +1,38 @@
+[
+  {
+    "factory_id": "HC-28848533DDF4",
+    "schema": 2,
+    "role": 2,
+    "artifact_type": 1,
+    "flags": 0,
+    "compatibility_id": "6c36a9d5675d2fcfbda14e6502aa314c06d05bc714806fbb389e2b06ec52aa99",
+    "version": "2.0.1-b1",
+    "size": 1351232,
+    "sha256": "8fffdc0009d052289573fa7f4d3ea5cc5ad647d927c4d4bb57beea2324039244",
+    "min_agent": 2,
+    "min_bootloader": 1,
+    "protocol_min": 1,
+    "protocol_max": 1,
+    "release_counter": 3,
+    "security_epoch": 0,
+    "key_id": 1721249707
+  },
+  {
+    "factory_id": "HC-288485350B54",
+    "schema": 2,
+    "role": 1,
+    "artifact_type": 1,
+    "flags": 0,
+    "compatibility_id": "642a9f3f5180c03795bcaac6662afe00d1db4fb8e62ff253fac58d0e4ebe3952",
+    "version": "2.0.1-b1",
+    "size": 1189632,
+    "sha256": "ba945b68a9238b402a052f1d851625515b2ab5d596ba37ec456dad3c1f5d42ae",
+    "min_agent": 2,
+    "min_bootloader": 1,
+    "protocol_min": 1,
+    "protocol_max": 1,
+    "release_counter": 3,
+    "security_epoch": 0,
+    "key_id": 1721249707
+  }
+]

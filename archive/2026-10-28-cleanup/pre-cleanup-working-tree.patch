@@ -1,0 +1,650 @@
+diff --git a/App/HomeCompetition/android/app/src/main/kotlin/com/homecompetition/app/CoreProvisioningBridge.kt b/App/HomeCompetition/android/app/src/main/kotlin/com/homecompetition/app/CoreProvisioningBridge.kt
+index 106bda3..1b7953f 100644
+--- a/App/HomeCompetition/android/app/src/main/kotlin/com/homecompetition/app/CoreProvisioningBridge.kt
++++ b/App/HomeCompetition/android/app/src/main/kotlin/com/homecompetition/app/CoreProvisioningBridge.kt
+@@ -179,9 +179,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
+         }
+ 
+         val connectivity = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+-        val network = boundNetwork ?: connectivity.allNetworks.firstOrNull {
+-            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+-        }
++        val network = setupNetwork(connectivity)
+ 
+         if (network == null) {
+             busy.set(false)
+@@ -265,7 +263,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
+                         session.sendDataToDevice("hc-config", configJson, object : ResponseListener {
+                             override fun onSuccess(returnData: ByteArray) {
+                                 if (finished.get()) return
+-                                session.sendDataToDevice("hc-status", ByteArray(0), object : ResponseListener {
++                                session.sendDataToDevice("hc-status", ByteArray(1), object : ResponseListener {
+                                     override fun onSuccess(statusData: ByteArray) {
+                                         main.removeCallbacks(timeoutRunnable)
+                                         val resultMap = mapOf(
+@@ -315,6 +313,14 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
+         }
+     }
+ 
++    private fun setupNetwork(connectivity: ConnectivityManager): Network? =
++        boundNetwork ?: connectivity.allNetworks.firstOrNull {
++            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true &&
++                connectivity.getLinkProperties(it)?.linkAddresses?.any { address ->
++                    address.address.hostAddress?.startsWith("192.168.4.") == true
++                } == true
++        }
++
+     private fun exchange(pop: String, endpoint: String, data: ByteArray, result: MethodChannel.Result) {
+         val finished = AtomicBoolean(false)
+         fun complete(bytes: ByteArray?) {
+@@ -327,9 +333,7 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
+         }
+         main.postDelayed({ complete(null) }, 18000)
+         val connectivity = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+-        val network = boundNetwork ?: connectivity.allNetworks.firstOrNull {
+-            connectivity.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+-        }
++        val network = setupNetwork(connectivity)
+         if (network == null) { complete(null); return }
+         var cookie: String? = null
+         val transport = object : Transport {
+@@ -373,7 +377,8 @@ class CoreProvisioningBridge(private val activity: Activity, messenger: BinaryMe
+                 override fun OnSessionEstablished() {
+                     if (finished.get()) return
+                     try {
+-                        session.sendDataToDevice(endpoint, data, object : ResponseListener {
++                        // ESP-IDF's HTTP transport rejects a zero-length encrypted request body.
++                        session.sendDataToDevice(endpoint, if (data.isEmpty()) ByteArray(1) else data, object : ResponseListener {
+                             override fun onSuccess(returnData: ByteArray) = complete(returnData)
+                             override fun onFailure(e: Exception) = complete(null)
+                         })
+diff --git a/App/HomeCompetition/lib/features/core_v1/core_app.dart b/App/HomeCompetition/lib/features/core_v1/core_app.dart
+index 0ed9e3a..653e496 100644
+--- a/App/HomeCompetition/lib/features/core_v1/core_app.dart
++++ b/App/HomeCompetition/lib/features/core_v1/core_app.dart
+@@ -1612,6 +1612,10 @@ class _CoreClaimState extends State<CoreClaim> {
+     final response = await widget.client.request(
+         '/provisioning/${Uri.encodeComponent(claim!['claim_id'] as String)}');
+     if (mounted) setState(() => status = response['status'] as String);
++    if (response['status'] == 'EXPIRED') {
++      throw const CoreException('claim_expired',
++          'Phiên ghép đã hết hạn. Quay lại và mở quy trình ghép mới.');
++    }
+     if (response['status'] == 'REGISTERED') {
+       await widget.client.refresh(widget.room.homeId);
+       if (mounted) setState(() => stage = 4);
+@@ -1635,7 +1639,7 @@ class _CoreClaimState extends State<CoreClaim> {
+               'Secure provisioning hiện chỉ có trên Android. Trên nền tảng này có thể quản lý Box đã đăng ký bằng công cụ commissioning.'),
+         if (stage == 0) ...[
+           const Text(
+-              'Giữ BOOT khoảng 3 giây rồi thả để mở ghép nối. Trong cài đặt Wi-Fi Android, kết nối siciot_sub_XXXXXX hoặc siciot_act_XXXXXX bằng mật khẩu riêng trên nhãn. Cửa sổ ghép nối kéo dài 180 giây. Giữ điện thoại kết nối AP dù không có Internet. Không giữ BOOT tới 10 giây vì đó là thao tác reset.'),
++              'Giữ BOOT khoảng 4 giây rồi thả để mở ghép nối. Trong cài đặt Wi-Fi Android, kết nối siciot_sub_XXXXXX hoặc siciot_act_XXXXXX bằng mật khẩu riêng trên nhãn. Cửa sổ ghép nối kéo dài 180 giây. Giữ điện thoại kết nối AP dù không có Internet. Không giữ BOOT tới 10 giây vì đó là thao tác reset.'),
+           const SizedBox(height: 16),
+           TextField(
+               controller: qr,
+@@ -1659,7 +1663,10 @@ class _CoreClaimState extends State<CoreClaim> {
+           TextField(
+               controller: factory,
+               readOnly: widget.transfer != null,
+-              decoration: const InputDecoration(labelText: 'Factory ID')),
++              keyboardType: TextInputType.visiblePassword,
++              autocorrect: false,
++              enableSuggestions: false,
++              decoration: const InputDecoration(labelText: 'Mã thiết bị')),
+           const SizedBox(height: 16),
+           TextField(
+               controller: setup,
+@@ -1667,7 +1674,7 @@ class _CoreClaimState extends State<CoreClaim> {
+               enableSuggestions: false,
+               autocorrect: false,
+               decoration: const InputDecoration(
+-                  labelText: 'Setup code / Proof of possession')),
++                  labelText: 'Mã thiết lập trên nhãn Box')),
+           const SizedBox(height: 16),
+           FilledButton(
+               onPressed: busy || !CoreProvisioning.supported
+diff --git a/App/HomeCompetition/pubspec.yaml b/App/HomeCompetition/pubspec.yaml
+index df7df08..35d07b9 100644
+--- a/App/HomeCompetition/pubspec.yaml
++++ b/App/HomeCompetition/pubspec.yaml
+@@ -1,7 +1,7 @@
+ name: home_competition
+ description: "HomeCompetition - Firebase smart home and energy dashboard"
+ publish_to: 'none'
+-version: 1.2.2+17
++version: 1.2.3+18
+ 
+ environment:
+   sdk: '>=3.0.0 <4.0.0'
+diff --git a/App/HomeCompetition/test/firebase_core_flow_test.dart b/App/HomeCompetition/test/firebase_core_flow_test.dart
+index f6825b2..b66c79f 100644
+--- a/App/HomeCompetition/test/firebase_core_flow_test.dart
++++ b/App/HomeCompetition/test/firebase_core_flow_test.dart
+@@ -79,8 +79,8 @@ void main() {
+     expect(find.text('Phòng ngủ'), findsOneWidget);
+     await tester.tap(find.text('Đăng ký ActionBox'));
+     await tester.pumpAndSettle();
+-    expect(find.text('Factory ID'), findsOneWidget);
+-    expect(find.text('Setup code / Proof of possession'), findsOneWidget);
++    expect(find.text('Mã thiết bị'), findsOneWidget);
++    expect(find.text('Mã thiết lập trên nhãn Box'), findsOneWidget);
+     expect(find.textContaining('Chức năng này chưa có'), findsNothing);
+     await tester.pumpWidget(const SizedBox.shrink());
+   });
+diff --git a/Firmware/firmware_esp/common/hc_core/hc_provisioning.c b/Firmware/firmware_esp/common/hc_core/hc_provisioning.c
+index cda5272..ca64514 100644
+--- a/Firmware/firmware_esp/common/hc_core/hc_provisioning.c
++++ b/Firmware/firmware_esp/common/hc_core/hc_provisioning.c
+@@ -6,6 +6,7 @@
+ #include "esp_timer.h"
+ #include "esp_wifi.h"
+ #include "esp_system.h"
++#include "esp_log.h"
+ #include "driver/gpio.h"
+ #include "esp_netif.h"
+ #include "protocomm.h"
+@@ -380,7 +381,10 @@ esp_err_t hc_provisioning_start(bool subbox) {
+     if(err==ESP_OK)err=esp_wifi_set_config(WIFI_IF_AP,&ap);
+     memset(&ap,0,sizeof(ap));if(err!=ESP_OK)return err;
+     server=protocomm_new();if(!server)return ESP_ERR_NO_MEM;
++    esp_log_level_set("security1", ESP_LOG_WARN);
+     protocomm_httpd_config_t cfg = {0};
++    const protocomm_http_server_config_t defaults = PROTOCOMM_HTTPD_DEFAULT_CONFIG();
++    cfg.data.config = defaults;
+     cfg.data.config.stack_size = 6144;
+     err=protocomm_httpd_start(server,&cfg);
+     security_params.data=(const uint8_t *)setup;security_params.len=strlen(setup);
+diff --git a/Firmware/tests/test_subbox_provisioning.py b/Firmware/tests/test_subbox_provisioning.py
+index a9f68b9..e84e610 100644
+--- a/Firmware/tests/test_subbox_provisioning.py
++++ b/Firmware/tests/test_subbox_provisioning.py
+@@ -38,6 +38,8 @@ constexpr int ESP_ERR_INVALID_RESPONSE = 0x108;
+ constexpr int ESP_ERR_INVALID_CRC = 0x109;
+ constexpr int ESP_ERR_INVALID_VERSION = 0x10A;
+ constexpr int ESP_ERR_INVALID_MAC = 0x10B;
++constexpr int ESP_LOG_WARN = 2;
++inline void esp_log_level_set(const char*, int) {}
+ 
+ using nvs_handle_t = uint32_t;
+ constexpr uint32_t NVS_READONLY = 0;
+@@ -91,14 +93,14 @@ using protocomm_security1_params_t = struct { const uint8_t* data; size_t len; }
+ using protocomm_security_t = void*;
+ extern protocomm_security_t protocomm_security1;
+ 
+-struct httpd_config_t { int stack_size; };
++struct protocomm_http_server_config_t { uint16_t port; size_t stack_size; unsigned task_priority; };
+ struct protocomm_httpd_config_t {
+     bool ext_handle_provided;
+     struct {
+-        httpd_config_t config;
++        protocomm_http_server_config_t config;
+     } data;
+ };
+-#define PROTOCOMM_HTTPD_DEFAULT_CONFIG() { 4096 }
++#define PROTOCOMM_HTTPD_DEFAULT_CONFIG() { 80, 4096, 5 }
+ 
+ protocomm_t* protocomm_new();
+ void protocomm_delete(protocomm_t* s);
+@@ -275,7 +277,12 @@ void* esp_netif_create_default_wifi_ap() { return (void*)1; }
+ 
+ protocomm_t* protocomm_new() { return (protocomm_t*)malloc(sizeof(void*)); }
+ void protocomm_delete(protocomm_t* s) { free(s); }
+-esp_err_t protocomm_httpd_start(protocomm_t*, protocomm_httpd_config_t*) { return ESP_OK; }
++esp_err_t protocomm_httpd_start(protocomm_t*, protocomm_httpd_config_t* config) {
++    assert(config->data.config.port == 80);
++    assert(config->data.config.task_priority > 0);
++    assert(config->data.config.stack_size >= 4096);
++    return ESP_OK;
++}
+ void protocomm_httpd_stop(protocomm_t*) {}
+ esp_err_t protocomm_set_security(protocomm_t*, const char*, const protocomm_security_t*, void*) { return ESP_OK; }
+ esp_err_t protocomm_add_endpoint(protocomm_t*, const char*, protocomm_req_handler_t, void*) { return ESP_OK; }
+diff --git a/Gateway/firebase/README.md b/Gateway/firebase/README.md
+index 41cc75f..3662fe8 100644
+--- a/Gateway/firebase/README.md
++++ b/Gateway/firebase/README.md
+@@ -1,4 +1,4 @@
+-# Legacy Gateway commissioning Rules
++# Gateway commissioning through Firebase
+ 
+ `commissioning.rules.json` is a **merge fragment**, not a replacement Rules
+ document. It contains only the root deny defaults and these commissioning
+@@ -43,7 +43,7 @@ intentional fragment change requires review and an updated digest.
+ 
+ Admin SDK credentials bypass client Rules, so the runner must validate inputs,
+ authorization, timestamp bounds, and its path/method allowlist itself. This
+-fragment has not been deployed. The namespace authorization and request/response
++fragment must be merged and checked in each deployment. The namespace authorization and request/response
+ flow have also been verified with the official RTDB emulator, separately from
+ the Python preflight checks. Physical device commissioning still requires HIL.
+ 
+@@ -81,7 +81,7 @@ dependency is pinned in `requirements.txt` in this directory.
+    when reachable. That worker grants only the configured installer UIDs to
+    its ID, publishes a heartbeat/broker metadata, and consumes allowlisted
+    requests. It must not be enabled against public root Rules.
+-5. Install HomeCompetition1.2.1 over the existing app, preserving its identity
++5. Install HomeCompetition1.2.3 over the existing app, preserving its identity
+    and login data. Open Add device, put the actual compatible Box into its
+    physical setup mode, scan/identify it, choose room/channels and confirm.
+    A claim accepted by Gateway remains pending until the original device ACK.
+@@ -95,9 +95,38 @@ never creates sample devices or exports pending proofs. It does not read cloud
+ state writes to turn relays on, and does not add maintenance/OTA/reset APIs.
+ Missing reported state/measurements remain unavailable.
+ 
+-This restores **legacy** commissioning. Core-only OTA pilot enrollment still
+-needs its explicit registry/transport integration; do not relabel a successful
+-unit/emulator test as radio acceptance on those boards. Remove a UID from the
++Without a `core` config section this uses **legacy** commissioning. With `core`
++configured, `/api/commissioning/context` selects the existing Core Security1
++workflow in the app. The worker opens the existing Core registry with recovery
++disabled; the running radio coordinator remains the sole radio bridge. Claims
++remain pending until independently authenticated device and parent receipts
++arrive. Registered Core nodes publish inventory and availability; relay control
++and binding management are separate from this commissioning transport.
++
++The private `core` section requires `data_dir` (the existing `core.db` and
++`master.key` directory), `home_id`, actual radio `channel`, TLS `mqtt_uri`,
++65-byte uncompressed P-256 `ota_pubkey` as hex, and `parents`. Each parent key is
++its decimal Core node ID and contains its actual `sta_mac` and current persisted
++`generation`. Read these from the enrolled hardware; do not invent identities,
++keys or generation counters. The worker preserves the greater stored generation
++and does not reset coordinator sessions. Configured Firebase installers receive
++only Installer membership in the configured Core home.
++
++Core provisioning stores each SubBox's radio PMK encrypted in
++`commissioning_radio_keys`; its ActionBoxes must share that PMK and have their
++own LMKs. A SubBox enrolled through this API creates its record automatically.
++An existing USB-enrolled SubBox needs an explicit import from its trusted
++manufacturing record, checked against physical NVS first. Do not add the PMK to
++the app context or `parents` config. A missing key is rejected with
++`parent_radio_key_missing`; a conflicting import is rejected rather than
++silently rotating an active network key.
++
++Run `flutter pub get` after a fresh checkout or branch switch before building
++the app. The ignored Android plugin registrant must be generated before using
++`flutter build ... --no-pub`; otherwise native Firebase initialization can fail
++even when Dart tests pass.
++
++Do not relabel a successful unit/emulator test as radio acceptance. Remove a UID from the
+ private config and its `gateway_access/<uid>/<gateway_id>` grant when revoking
+ an installer. To roll back the code, remove the service environment override
+ and restore the previous source; do not erase device NVS or registry data.
+@@ -115,6 +144,8 @@ This test refuses every other host/port, uses only namespace
+ checks real Rules compilation, own-UID access, forged response/access/status
+ denials, request immutability/expiry/unknown fields, RTDB normalization of empty
+ objects and the claim→device-ACK→inventory path with simulated radio input.
++It also checks the Core context and pending claim through the same protected
++mailbox, including empty arrays disappearing in RTDB.
+ 
+ Firebase references: [Rules inheritance](https://firebase.google.com/docs/database/security),
+ [conditions and validation](https://firebase.google.com/docs/database/security/rules-conditions),
+diff --git a/Gateway/gateway/core_v1/firebase_commissioning.py b/Gateway/gateway/core_v1/firebase_commissioning.py
+index a4cf5bb..2d24543 100644
+--- a/Gateway/gateway/core_v1/firebase_commissioning.py
++++ b/Gateway/gateway/core_v1/firebase_commissioning.py
+@@ -103,7 +103,10 @@ class CoreCommissioning:
+             claim=self.r.one('SELECT c.*,r.home_id FROM pairing_claims c JOIN rooms r USING(room_id) WHERE claim_id=?',
+                              (path.rsplit('/',1)[1],))
+             require(claim['user_id']==user and claim['home_id']==self.home,'forbidden',403)
+-            return {key:claim[key] for key in ('claim_id','node_id','status','expires')}
++            result={key:claim[key] for key in ('claim_id','node_id','status','expires')}
++            if result['status']=='PAIRING' and result['expires']<=self.r.clock():
++                result['status']='EXPIRED'
++            return result
+         require(False,'endpoint_denied',403)
+ 
+     def projections(self, uid):
+diff --git a/Gateway/gateway/core_v1/provisioning.py b/Gateway/gateway/core_v1/provisioning.py
+index 418d2fa..21326fd 100644
+--- a/Gateway/gateway/core_v1/provisioning.py
++++ b/Gateway/gateway/core_v1/provisioning.py
+@@ -51,8 +51,26 @@ class Provisioning:
+             device_receipt BLOB, parent_receipt BLOB);
+           CREATE TABLE IF NOT EXISTS commissioning_generations(
+             parent_id INTEGER PRIMARY KEY, generation INTEGER NOT NULL);
++          CREATE TABLE IF NOT EXISTS commissioning_radio_keys(
++            parent_id INTEGER PRIMARY KEY REFERENCES registered_nodes(node_id) ON DELETE CASCADE,
++            pmk_cipher BLOB NOT NULL);
+         ''')
+ 
++    def radio_key(self, parent):
++        row = self.r.db.execute('SELECT pmk_cipher FROM commissioning_radio_keys WHERE parent_id=?',
++                                (parent,)).fetchone()
++        return self.r.cipher.decrypt(row['pmk_cipher']) if row else None
++
++    def remember_radio_key(self, parent, pmk):
++        require(isinstance(pmk, bytes) and len(pmk) == 16 and any(pmk), 'invalid_radio_key')
++        node = self.r.one('SELECT f.product_type FROM registered_nodes n JOIN factory_devices f USING(factory_id) WHERE n.node_id=?', (parent,))
++        require(node['product_type'] == 'SUB_BOX', 'invalid_parent')
++        old = self.radio_key(parent)
++        require(old is None or hmac.compare_digest(old, pmk), 'radio_key_conflict')
++        if old is None:
++            self.r.db.execute('INSERT INTO commissioning_radio_keys VALUES(?,?)',
++                              (parent, self.r.cipher.encrypt(pmk)))
++
+     def prepare(self, user, claim_id, challenge, *, radio_mac, parent_mac=None,
+                 channel=1, wifi_ssid='', wifi_password='', mqtt_uri='', ota_pubkey=''):
+         """Build once per claim; changing any setting requires a fresh claim.
+@@ -86,7 +104,11 @@ class Provisioning:
+         parent_radio = bytes(6) if subbox else mac_bytes(parent_mac)
+         nonce = bytes.fromhex(c['nonce'])
+         secret = self.r.cipher.decrypt(f['secret'])
+-        lmk, pmk = secrets.token_bytes(16), secrets.token_bytes(16)
++        lmk = secrets.token_bytes(16)
++        pmk = self.radio_key(c['node_id'] if subbox else c['parent_id'])
++        if subbox and pmk is None:
++            pmk = secrets.token_bytes(16)
++        require(pmk is not None, 'parent_radio_key_missing')
+         n = self.r.one('SELECT config_rev,registration FROM registered_nodes WHERE node_id=?', (c['node_id'],))
+         revision = n['config_rev'] + (n['registration'] == 'TRANSFER_PENDING')
+         body = ENROLLMENT.pack(b'HCP1', 1 if subbox else 2, channel, 0,
+@@ -98,6 +120,8 @@ class Provisioning:
+         packet = tagged(secret, body)
+         grant = None
+         with self.r.transaction():
++            if subbox:
++                self.remember_radio_key(c['node_id'], pmk)
+             if not subbox:
+                 parent = self.r.get_node(user, c['parent_id'])
+                 require(parent['registration'] == 'REGISTERED' and parent['room_id'] == c['room_id'], 'invalid_parent')
+diff --git a/Gateway/gateway/fleet_ota/local.py b/Gateway/gateway/fleet_ota/local.py
+index 2697515..379625f 100644
+--- a/Gateway/gateway/fleet_ota/local.py
++++ b/Gateway/gateway/fleet_ota/local.py
+@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import serialization
+ from gateway.core_v1.registry import Registry,uid,canonical
+ from gateway.core_v1.ota import OtaManager
+ from gateway.core_v1.bridge import Bridge,run_mqtt
++from gateway.core_v1.provisioning import Provisioning
+ from gateway.core_v1.release import private_write,read_key
+ from .manifest import verify_target
+ 
+@@ -87,6 +88,12 @@ def initialize(data,config,*,recover=False):
+                     cid=f'{factory}:CH{channel}'
+                     registry.db.execute('INSERT INTO channels(channel_id,node_id,number) VALUES(?,?,?)',(cid,node,channel))
+                     registry.db.execute('INSERT INTO channel_states(channel_id) VALUES(?)',(cid,))
++    provisioning=Provisioning(registry)
++    for target in config['targets']:
++        if target['role']==1 and target.get('pmk'):
++            node=registry.one('SELECT factory_id FROM registered_nodes WHERE node_id=?',(target['node_id'],))
++            if node['factory_id']!=target['factory_id']:raise ValueError('parent identity mismatch')
++            provisioning.remember_radio_key(target['node_id'],bytes.fromhex(target['pmk']))
+     public=serialization.load_pem_public_key(Path(config['release_public_key']).read_bytes())
+     manager=LocalOtaManager(registry,data/'images',public,{t['factory_id']:t for t in config['targets']},recover=recover)
+     return registry,manager
+diff --git a/Gateway/tests/test_firebase_core_commissioning.py b/Gateway/tests/test_firebase_core_commissioning.py
+index 8c988d1..4fb7e38 100644
+--- a/Gateway/tests/test_firebase_core_commissioning.py
++++ b/Gateway/tests/test_firebase_core_commissioning.py
+@@ -32,11 +32,15 @@ class FirebaseCoreCommissioningTests(unittest.TestCase):
+             'room_id':self.room,'idempotency_key':key})
+ 
+     def test_context_uses_existing_home_and_does_not_export_factory_credentials(self):
++        claim = self.claim('context-only')
++        self.c.provisioning.remember_radio_key(claim['node_id'], b'P' * 16)
+         result = self.c.context('owner')
+         self.assertEqual(result['profile'],'core-v1')
+         self.assertEqual(result['snapshot']['home_id'],self.home)
+         self.assertEqual(result['defaults']['channel'],11)
+         self.assertNotIn('unique-setup-code',str(result))
++        self.assertNotIn((b'P' * 16).hex(),str(result))
++        self.assertNotIn('P' * 16,str(result))
+ 
+     def test_claim_is_durable_and_only_device_receipt_registers(self):
+         claim = self.claim()
+@@ -62,6 +66,12 @@ class FirebaseCoreCommissioningTests(unittest.TestCase):
+             with self.subTest(path=path),self.assertRaises(CoreError):
+                 self.c.request(uid,method,path,body)
+ 
++    def test_expired_claim_is_reported_as_expired_not_waiting_forever(self):
++        claim=self.claim()
++        self.r.clock=lambda:claim['expires']+1
++        result=self.c.request('owner','GET','/api/v1/provisioning/'+claim['claim_id'],{})
++        self.assertEqual(result['status'],'EXPIRED')
++
+     def test_changed_retry_and_forged_ota_key_are_denied(self):
+         claim=self.claim()
+         with self.assertRaises(CoreError):
+diff --git a/Gateway/tests/test_hc_provisioning.py b/Gateway/tests/test_hc_provisioning.py
+index 4bd2413..fbd34a7 100644
+--- a/Gateway/tests/test_hc_provisioning.py
++++ b/Gateway/tests/test_hc_provisioning.py
+@@ -84,6 +84,26 @@ class ProvisioningTest(unittest.TestCase):
+                 self.assertEqual(self.p.accept_receipt(receipt)['node_id'], node['node_id'])
+                 self.assertEqual(self.p.accept_receipt(peer)['node_id'], node['node_id'])
+ 
++    def test_parent_and_children_share_pmk_but_have_distinct_link_keys(self):
++        parent, envelope, _, receipt = self.prepare(1)
++        self.p.accept_receipt(receipt)
++        parent_packet = bytes.fromhex(envelope['packet'])
++        stored = self.r.one('SELECT pmk_cipher FROM commissioning_radio_keys')['pmk_cipher']
++        self.assertNotIn(parent_packet[160:176], stored)
++        restarted = Provisioning(self.r)
++        self.assertEqual(restarted.radio_key(parent['node_id']), parent_packet[160:176])
++        with self.assertRaises(CoreError):
++            restarted.remember_radio_key(parent['node_id'], b'x' * 16)
++        child_packets = [bytes.fromhex(self.prepare(number, parent['node_id'])[1]['packet'])
++                         for number in (2, 3)]
++        for packet in child_packets:
++            self.assertEqual(packet[160:176], parent_packet[160:176])
++        self.assertNotEqual(child_packets[0][176:192], child_packets[1][176:192])
++        self.r.db.execute('DELETE FROM commissioning_radio_keys')
++        with self.assertRaises(CoreError) as caught:
++            self.prepare(4, parent['node_id'])
++        self.assertEqual(caught.exception.code, 'parent_radio_key_missing')
++
+     def test_wrong_receipt_and_expiry_cannot_register_or_emit_grants(self):
+         parent, key = self.parent()
+         claim, _, _, receipt = self.prepare(2, parent)
+diff --git a/docs/implementation/2026-10-27-firebase-commissioning-repair.md b/docs/implementation/2026-10-27-firebase-commissioning-repair.md
+index f01cdea..b3877c1 100644
+--- a/docs/implementation/2026-10-27-firebase-commissioning-repair.md
++++ b/docs/implementation/2026-10-27-firebase-commissioning-repair.md
+@@ -1,79 +1,128 @@
+-# HomeCompetition1.2.1 — restore Add device through Firebase
+-
+-## Problem and resulting code
+-
+-The Firebase merge routed `/actionbox/add-device` to `_gatewayFeature`, which
+-returned a missing-service message instead of the existing wizard. Merely
+-removing that guard would still leave every lifecycle request unsupported by
+-`FirebaseHomeClient`, and would send the Firebase hostname as the SubBox broker.
+-
+-The original wizard now opens for Firebase accounts. Candidate discovery,
+-identify, claim and operation polling use authenticated HTTPS RTDB mailbox
+-records. No IP/port login or local HTTP fallback is introduced. Discovery errors
+-are visible and retryable. Broker settings come from the assigned Gateway's
+-trusted status, never from the Firebase database hostname.
+-
+-The optional worker runs inside the existing legacy `SmartHomeGateway`. It
+-calls that process's existing `DeviceLifecycleManager` on the same MQTT event
+-loop. Physical discovery/proof, room/SubBox capacity, revision/route checks and
+-the original device-apply acknowledgement remain in force. A stored Firebase
+-request or accepted claim never becomes a successful device registration by
+-itself. Registered entries are projected only after the original lifecycle
+-creates them; setup proofs and credentials are excluded.
+-
+-Explicit installer UIDs in a private Gateway config are mapped to its local
+-admin authority. The browser/app cannot self-assign that authority. The worker
+-requires the exact protected Rules before initialization and each request
+-batch, rejects expired/oversized/forged requests, persists responses before
+-removing requests, and uses the lifecycle's durable logical idempotency key
+-across transport retries. Reset/remove/OTA/relay endpoints are not exposed by
+-this commissioning transport. The worker is disabled by default, so existing
+-Gateway deployments do not need new credentials to keep running.
+-
+-## Verification completed
+-
+-- `flutter analyze --no-pub`: no issues.
+-- `flutter test --no-pub --concurrency=1 --reporter expanded`:162 passed.
+-- Gateway full suite with the RTDB emulator enabled:442 passed.
+-- Official Firebase RTDB emulator4.11.2: real Rules compiled; own-UID access,
+-  unauthorized UID/response/status/access forgery, immutable requests, deadline
+-  validation, empty-object normalization, and request→simulated device ACK→
+-  registry→Firebase projection passed. This is an actual local RTDB process;
+-  radio input is simulated and is not physical commissioning acceptance.
+-- APK debug build: passed. Package remains
+-  `com.dtv.homeassistant.dtv_home_assistant`; version1.2.1/code16. Signing SHA1
+-  remains `69:52:90:33:FA:F8:FF:A5:9B:BD:BE:53:37:EF:85:11:6A:14:9A:E5`.
+-- `git diff --check`, Python compilation and APK signature verification passed.
+-
+-APK: `App/HomeCompetition/build/app/outputs/flutter-apk/HomeCompetition-1.2.1.apk`
+-
+-SHA256: `91adb26deabe19d28628349041f8371f271aa10cf1413234b68ab703d28de5ca`.
+-
+-The initial parallel Flutter run had an intermittent voice-alias test failure.
+-The isolated rerun and two full sequential runs passed. The first Gateway
+-integration run found four missing-optional-attribute errors in legacy test
+-fixtures; startup now handles the optional worker with `getattr`, and the full
+-rerun passed. No failing check is treated as acceptance.
+-
+-## Deployment and physical acceptance pending
+-
+-The user confirmed the Pi/phone cannot be reconnected at present. The workstation
+-is on10.74.236.x, the previous Pi address192.168.11.29 times out, no matching Pi
+-peer was found on Tailscale, and ADB has no phone attached. Browser control became
+-disabled in Work settings before the live Rules could be exported. No Gateway
+-restart, real Firebase write/Rules deployment, phone installation or relay action
+-was performed in this repair. The Console displayed a public-Rules warning; the
+-actual full Rules document must be backed up and reviewed before activation.
+-No Firebase Admin credential/installer UID was invented or copied into the APK.
+-
+-Resume with `Gateway/firebase/README.md`: back up current deployment, merge the
+-protected namespaces preserving existing device data, provision credentials and
+-the real installer UID privately, run the non-mutating preflight, enable the
+-worker in the existing Gateway service and install the APK without clearing
+-phone data. Then verify a compatible Box's physical setup, identify, claim,
+-matching device ACK, terminal success and appearance in Firebase/app.
+-
+-Core-only OTA pilot devices still require their explicit legacy registry/control
+-adapter; this repair does not claim their radio/app/voice controls work. DDF4
+-remains unflashed because its full backup was interrupted by USB loss. Model
+-training stays stopped. These changes preserve unrelated dirty app/OTA work.
++# HomeCompetition 1.2.3 — Firebase device commissioning
++
++## Implemented behavior
++
++Add device now uses an authenticated, UID-scoped Firebase RTDB mailbox in the
++existing Gateway process. It selects the legacy wizard or the existing Core
++Security1 workflow from the Gateway's trusted commissioning context. Broker,
++room, parent, channel and OTA key checks remain on the Gateway. There is no
++fallback to a Gateway HTTP port.
++
++Core claims remain pending until independently authenticated device and parent
++receipts arrive. Logical claim/prepare retries are idempotent; expired claims
++are reported as expired. Configured Firebase users receive Installer membership
++only in the configured Core home. The existing radio coordinator remains the
++only radio bridge; the Firebase worker opens its registry with `recover=False`.
++
++Physical testing exposed and corrected these integration defects:
++
++- Vietnamese input changed `DD` in a device ID to `Đ`. The ID field now uses a
++  password-style keyboard with correction/suggestions disabled, and Vietnamese
++  labels. Exact input was verified on the real phone.
++- Android could select a different Wi-Fi network on a phone with multiple
++  active Wi-Fi connections. Both native provisioning paths now select the
++  Box's `192.168.4.x` network unless a setup network was explicitly requested.
++- ESP-IDF rejects empty HTTP bodies. Security1 info/status reads now carry a
++  byte before encryption.
++- A zeroed protocomm config selected port zero and task priority zero. The
++  firmware now uses the SDK defaults with its larger existing stack; the host
++  fixture checks port 80 and nonzero priority.
++- ActionBox was given a random PMK that differed from its SubBox. The Gateway
++  now retains the parent's PMK in an encrypted registry table and uses it for
++  that parent's children, while generating distinct per-link LMKs. Missing or
++  conflicting imported radio keys are rejected. The private pilot importer
++  checks parent identity before importing its key. No radio key is exposed by
++  commissioning context. See the [Espressif network example](https://github.com/espressif/arduino-esp32/blob/master/libraries/ESP_NOW/examples/ESP_NOW_Network/ESP_NOW_Network.ino).
++- SDK Security1 informational key dumps are suppressed in the new firmware;
++  warnings and errors remain enabled.
++
++The physical window remains 180 seconds; BOOT instructions recommend four
++seconds to exceed the three-second threshold. Ten seconds still means reset.
++Model training remains stopped, and the stock model partition was retained.
++
++## Deployment and backups
++
++The dedicated `homecompetition-gateway` service account has Firebase Realtime
++Database Admin in `home-companion-fed2e`. Its RSA key was generated and retained
++on the Pi; only the public certificate was uploaded. The unused earlier key was
++removed. The uploaded certificate expires on 2027-10-27.
++
++Live Rules were backed up, then the reviewed commissioning namespaces were
++published with root grants disabled. Existing public `/devices` Rules were
++preserved for existing clients. This remains an internal pilot; that public
++legacy branch is not production tenant isolation.
++
++The existing Pi main service was updated after code, environment and consistent
++SQLite backups. Credentials and deployed Rules passed the real preflight. The
++phone account's grant and fresh Firebase heartbeat were verified. PMK import
++matched a fingerprint read from the actual SubBox NVS and stored the key under
++the registry master key. The radio service was not restarted for this change.
++
++The source work is on `codex/commercial-ota`; the commit on `main` was preserved.
++After a branch switch, run `flutter pub get` before a no-pub build so the ignored
++Android plugin registrant is regenerated. Dart tests alone cannot establish
++that native Firebase plugins are packaged. The final APK was installed without
++clearing app data; Firebase startup and login retention were checked on-device.
++
++DDF4 had an uncommitted factory enrollment for node 1 when re-inspected. No
++registered DDF4 entry existed in the Pi. A complete 16 MiB backup was assembled
++and compared against the physical flash with the ROM digest check:
++`558e3057bbdaabecee7f39e2b2edbd71056b0a96a7ef25ddad2579a7a43e5186`.
++Only its application partition was flashed. The model matched the stock build;
++factory calibration/UID and manufacturing credentials were verified unchanged.
++Enrollment, PHY calibration cache and boot metadata changed through their normal
++runtime paths. The application contains no per-device factory bundle.
++
++## Physical commissioning acceptance
++
++DDF4 completed the real Android/Firebase/Security1 flow. The successful claim is
++`CLAIM-de04d946689243b9e663522e`, logical node 3476309, parent 3476308 (SubBox 0B54).
++The registry contains both independently verified receipts, `REGISTERED` and
++`ONLINE`, and channels 1, 2, 3. The phone displayed step 5/5 and “Gateway đã xác minh
++đăng ký”. Screenshot: `/tmp/homecompetition-ddf4-registered.png`.
++
++The earlier mismatched-PMK claim expired without receipts and was not treated as
++successful. No registration, receipt, channel or relay telemetry was fabricated.
++The UI test driver encountered a timing race when its Check button disappeared
++after success; the captured success screen and independent registry evidence
++confirmed the result.
++
++## Verification and limits
++
++- Gateway: 449 tests passed with the official RTDB emulator 4.11.2, including real
++  Rules, UID boundaries, forged writes, immutable deadlines, empty RTDB values,
++  pending claims, encrypted PMK persistence, key non-disclosure and expiry.
++- Flutter: 164 passed; analysis found no issues. APK 1.2.3/code 18 retains the
++  existing application identity and signing key.
++- Firmware: 39 host tests ran successfully, including 5 opt-in skips, using the IDF Python runtime.
++  The updated HTTP-config regression also passed. ActionBox and SubBox builds
++  passed for 2.0.1-b1.
++- Actual radio receipts and the real phone success screen establish physical
++  commissioning, separately from host/emulator checks.
++
++On the continuation into 2026-10-28, both boards completed signed OTA 2.0.1-b1
++through the local Pi pilot:
++
++| Board | Job | Final status | Transferred bytes |
++| --- | --- | --- | ---: |
++| DDF4 | `OTA-44d28e8ee5c1c10e58003f59` | `SUCCEEDED` | 1,351,232 |
++| SubBox 0B54 | `OTA-72609e2afd20e5e9fc36219c` | `SUCCEEDED` | 1,189,632 |
++
++Each rebooted and reported the expected version and image digest. After an
++additional controlled reboot to capture final NVS backups, both remained
++`REGISTERED`, reported configuration revision 1, and sent fresh heartbeats.
++Firebase projected both online with firmware 2.0.1-b1 and three DDF4 channels.
++
++The post-OTA NVS checks confirmed committed enrollment, channel 11, matching
++parent/child PMKs and grant nonces, and release counter 3 / security epoch 0 on
++both boards. Manufacturing credentials, ActionBox `factory_data` and
++`user_config`, and SubBox hardware identity/user configuration were unchanged.
++Only expected enrollment, OTA confirmation, PHY cache and boot metadata changed.
++The updated NVS and a consistent Core SQLite snapshot were saved privately for
++recovery. No private keys or setup codes are included in this report.
++
++Core projections in this commissioning transport contain registered inventory
++and availability. Relay control/bindings and load confirmation are separate;
++missing reported states/current are not invented. No real loads are connected.
++DDE8 was not flashed. Internet fleet deployment/billing remains disabled by the
++user's choice to test internally first.

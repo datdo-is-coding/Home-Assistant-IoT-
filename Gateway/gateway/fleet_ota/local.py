@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from gateway.core_v1.registry import Registry,uid,canonical
 from gateway.core_v1.ota import OtaManager
 from gateway.core_v1.bridge import Bridge,run_mqtt
+from gateway.core_v1.provisioning import Provisioning
 from gateway.core_v1.release import private_write,read_key
 from .manifest import verify_target
 
@@ -87,6 +88,12 @@ def initialize(data,config,*,recover=False):
                     cid=f'{factory}:CH{channel}'
                     registry.db.execute('INSERT INTO channels(channel_id,node_id,number) VALUES(?,?,?)',(cid,node,channel))
                     registry.db.execute('INSERT INTO channel_states(channel_id) VALUES(?)',(cid,))
+    provisioning=Provisioning(registry)
+    for target in config['targets']:
+        if target['role']==1 and target.get('pmk'):
+            node=registry.one('SELECT factory_id FROM registered_nodes WHERE node_id=?',(target['node_id'],))
+            if node['factory_id']!=target['factory_id']:raise ValueError('parent identity mismatch')
+            provisioning.remember_radio_key(target['node_id'],bytes.fromhex(target['pmk']))
     public=serialization.load_pem_public_key(Path(config['release_public_key']).read_bytes())
     manager=LocalOtaManager(registry,data/'images',public,{t['factory_id']:t for t in config['targets']},recover=recover)
     return registry,manager

@@ -41,6 +41,7 @@ static unsigned next_ack;
 static uint64_t channel_generation[3];
 static atomic_int_fast64_t last_gateway;
 static bool handshake_pending=true;
+static hc_application_fn application_handler;
 
 static uint32_t u32(const uint8_t *p) { return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
 static void p32(uint8_t *p,uint32_t v) { for(unsigned i=0;i<4;++i) p[i]=(uint8_t)(v>>(8*i)); }
@@ -198,6 +199,13 @@ static void process(rx_item *item) {
             revision=next; memset(acks,0,sizeof(acks));
         }
         send_frame(HC_CONFIG_ACK,f.payload,4,0); report();
+    } else if(f.type==HC_ROOM_SNAPSHOT && is_subbox && replay==HC_NEW && f.config_rev==revision && application_handler) {
+        if(application_handler(f.type,f.payload,f.payload_len)) {
+            uint8_t digest[32],ack[17]={2};size_t actual=0;
+            if(psa_hash_compute(PSA_ALG_SHA_256,f.payload,f.payload_len,digest,sizeof(digest),&actual)==PSA_SUCCESS && actual==32) {
+                memcpy(ack+1,digest,16);send_frame(HC_EVENT_REPORT,ack,sizeof(ack),0);
+            }
+        }
     } else if(f.type==HC_STATE_SYNC_REQUEST) report();
     else if(f.type==HC_OTA_START || f.type==HC_OTA_CHUNK || f.type==HC_OTA_OFFER || f.type==HC_OTA_ABORT || f.type==HC_OTA_RESULT)
         hc_ota_receive(f.type,f.payload,f.payload_len);
@@ -206,6 +214,10 @@ static bool ota_emit(uint8_t type,const uint8_t *data,size_t len) {
     if(!tx_queue || len>HC_MAX_PAYLOAD)return false;
     tx_item item={.type=type,.len=(uint8_t)len};if(len)memcpy(item.data,data,len);
     return xQueueSend(tx_queue,&item,0)==pdTRUE;
+}
+void hc_runtime_set_application_handler(hc_application_fn handler) { application_handler=handler; }
+bool hc_runtime_emit(uint8_t type,const uint8_t *data,size_t size) {
+    return enabled && registered && is_subbox && hc_runtime_online() && type==HC_EVENT_REPORT && ota_emit(type,data,size);
 }
 static void worker(void *arg) {
     (void)arg;

@@ -1,0 +1,554 @@
+{
+  "test_speak": {
+    "status": 200,
+    "response": {
+      "success": true,
+      "text": "Hệ thống nhà thông minh đang hoạt động ổn định.",
+      "type": "chao"
+    },
+    "complete_ms": 5537.22,
+    "speaker_sockets_before": 1,
+    "speaker_sockets_after": 1
+  },
+  "provider": "vieneu",
+  "model": "v3nano",
+  "voice": "Trúc Ly",
+  "pid": 3308,
+  "wall_s": 28.103,
+  "resource_before": {
+    "cpu_s": 232.54,
+    "rss_kib": 667108
+  },
+  "resource_after": {
+    "cpu_s": 284.29,
+    "rss_kib": 733724
+  },
+  "peak_rss_kib": 733724,
+  "health_samples": [
+    {
+      "ok": true,
+      "ms": 54.75
+    },
+    {
+      "ok": true,
+      "ms": 4.71
+    },
+    {
+      "ok": true,
+      "ms": 4.96
+    },
+    {
+      "ok": true,
+      "ms": 3.24
+    },
+    {
+      "ok": true,
+      "ms": 3.24
+    },
+    {
+      "ok": true,
+      "ms": 3.28
+    },
+    {
+      "ok": true,
+      "ms": 3.17
+    },
+    {
+      "ok": true,
+      "ms": 3.33
+    },
+    {
+      "ok": true,
+      "ms": 3.17
+    },
+    {
+      "ok": true,
+      "ms": 3.59
+    },
+    {
+      "ok": true,
+      "ms": 3.58
+    },
+    {
+      "ok": true,
+      "ms": 3.29
+    },
+    {
+      "ok": true,
+      "ms": 3.43
+    },
+    {
+      "ok": true,
+      "ms": 4.41
+    },
+    {
+      "ok": true,
+      "ms": 4.79
+    },
+    {
+      "ok": true,
+      "ms": 6.91
+    },
+    {
+      "ok": true,
+      "ms": 3.36
+    },
+    {
+      "ok": true,
+      "ms": 4.06
+    },
+    {
+      "ok": true,
+      "ms": 3.09
+    },
+    {
+      "ok": true,
+      "ms": 2.99
+    },
+    {
+      "ok": true,
+      "ms": 3.38
+    },
+    {
+      "ok": true,
+      "ms": 3.03
+    },
+    {
+      "ok": true,
+      "ms": 3.1
+    },
+    {
+      "ok": true,
+      "ms": 2.97
+    },
+    {
+      "ok": true,
+      "ms": 3.19
+    },
+    {
+      "ok": true,
+      "ms": 3.32
+    },
+    {
+      "ok": true,
+      "ms": 3.23
+    },
+    {
+      "ok": true,
+      "ms": 3.16
+    },
+    {
+      "ok": true,
+      "ms": 3.23
+    },
+    {
+      "ok": true,
+      "ms": 3.2
+    },
+    {
+      "ok": true,
+      "ms": 3.08
+    },
+    {
+      "ok": true,
+      "ms": 3.35
+    },
+    {
+      "ok": true,
+      "ms": 3.13
+    },
+    {
+      "ok": true,
+      "ms": 3.37
+    },
+    {
+      "ok": true,
+      "ms": 3.0
+    },
+    {
+      "ok": true,
+      "ms": 3.34
+    },
+    {
+      "ok": true,
+      "ms": 2.85
+    },
+    {
+      "ok": true,
+      "ms": 3.12
+    },
+    {
+      "ok": true,
+      "ms": 3.82
+    },
+    {
+      "ok": true,
+      "ms": 3.63
+    },
+    {
+      "ok": true,
+      "ms": 3.3
+    },
+    {
+      "ok": true,
+      "ms": 2.99
+    },
+    {
+      "ok": true,
+      "ms": 3.09
+    },
+    {
+      "ok": true,
+      "ms": 3.07
+    },
+    {
+      "ok": true,
+      "ms": 3.03
+    },
+    {
+      "ok": true,
+      "ms": 3.35
+    },
+    {
+      "ok": true,
+      "ms": 3.63
+    },
+    {
+      "ok": true,
+      "ms": 2.99
+    },
+    {
+      "ok": true,
+      "ms": 3.02
+    },
+    {
+      "ok": true,
+      "ms": 2.92
+    },
+    {
+      "ok": true,
+      "ms": 3.47
+    },
+    {
+      "ok": true,
+      "ms": 4.06
+    },
+    {
+      "ok": true,
+      "ms": 3.21
+    },
+    {
+      "ok": true,
+      "ms": 3.14
+    },
+    {
+      "ok": true,
+      "ms": 5.3
+    },
+    {
+      "ok": true,
+      "ms": 3.12
+    },
+    {
+      "ok": true,
+      "ms": 5.04
+    },
+    {
+      "ok": true,
+      "ms": 2.95
+    },
+    {
+      "ok": true,
+      "ms": 2.88
+    },
+    {
+      "ok": true,
+      "ms": 3.29
+    },
+    {
+      "ok": true,
+      "ms": 3.12
+    },
+    {
+      "ok": true,
+      "ms": 2.98
+    },
+    {
+      "ok": true,
+      "ms": 3.01
+    },
+    {
+      "ok": true,
+      "ms": 3.4
+    },
+    {
+      "ok": true,
+      "ms": 3.96
+    },
+    {
+      "ok": true,
+      "ms": 2.93
+    },
+    {
+      "ok": true,
+      "ms": 3.17
+    },
+    {
+      "ok": true,
+      "ms": 3.55
+    },
+    {
+      "ok": true,
+      "ms": 2.8
+    },
+    {
+      "ok": true,
+      "ms": 2.86
+    },
+    {
+      "ok": true,
+      "ms": 2.95
+    },
+    {
+      "ok": true,
+      "ms": 2.77
+    },
+    {
+      "ok": true,
+      "ms": 3.06
+    },
+    {
+      "ok": true,
+      "ms": 18.86
+    },
+    {
+      "ok": true,
+      "ms": 3.07
+    },
+    {
+      "ok": true,
+      "ms": 3.21
+    },
+    {
+      "ok": true,
+      "ms": 3.25
+    },
+    {
+      "ok": true,
+      "ms": 3.32
+    },
+    {
+      "ok": true,
+      "ms": 3.4
+    },
+    {
+      "ok": true,
+      "ms": 3.25
+    },
+    {
+      "ok": true,
+      "ms": 3.08
+    },
+    {
+      "ok": true,
+      "ms": 3.69
+    },
+    {
+      "ok": true,
+      "ms": 3.2
+    },
+    {
+      "ok": true,
+      "ms": 3.2
+    },
+    {
+      "ok": true,
+      "ms": 3.21
+    },
+    {
+      "ok": true,
+      "ms": 3.58
+    },
+    {
+      "ok": true,
+      "ms": 3.27
+    },
+    {
+      "ok": true,
+      "ms": 2.89
+    },
+    {
+      "ok": true,
+      "ms": 2.79
+    },
+    {
+      "ok": true,
+      "ms": 909.74
+    }
+  ],
+  "trials": [
+    {
+      "case": "short",
+      "text": "Đây là kiểm tra giọng nói của Gateway.",
+      "round": 0,
+      "phase": "first_text_request",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 106124,
+      "first_byte_ms": 4610.13,
+      "complete_ms": 4610.43,
+      "duration_s": 2.21,
+      "rtf": 2.0862,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4502.3,
+      "peak": 24506,
+      "sha256": "76bb1f3f117a9586ba3c1257054b03c811f5a2885a2b3975cd9a60de9d71cd82"
+    },
+    {
+      "case": "medium",
+      "text": "Tôi chưa nhận được trạng thái thiết bị. Bạn vui lòng kiểm tra kết nối.",
+      "round": 0,
+      "phase": "first_text_request",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 195404,
+      "first_byte_ms": 6859.11,
+      "complete_ms": 6859.88,
+      "duration_s": 4.07,
+      "rtf": 1.6855,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4219.7,
+      "peak": 21904,
+      "sha256": "a642de303297c29036638b5dc63aa5a5782ed7b0cffc31ce782651d4bc8c91f0"
+    },
+    {
+      "case": "long",
+      "text": "Bạn có thể gán từng kênh cho đèn hoặc quạt trong ứng dụng, sau đó chọn phòng khách, phòng ngủ hoặc phòng bếp.",
+      "round": 0,
+      "phase": "first_text_request",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 322124,
+      "first_byte_ms": 10682.27,
+      "complete_ms": 10683.08,
+      "duration_s": 6.71,
+      "rtf": 1.5921,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4288.9,
+      "peak": 26431,
+      "sha256": "546470f4352772afffb0ba785422cb54a8192d669bf494983bbde3d927604e9e"
+    },
+    {
+      "case": "short",
+      "text": "Đây là kiểm tra giọng nói của Gateway.",
+      "round": 1,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 106124,
+      "first_byte_ms": 6.28,
+      "complete_ms": 6.58,
+      "duration_s": 2.21,
+      "rtf": 0.003,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4502.3,
+      "peak": 24506,
+      "sha256": "76bb1f3f117a9586ba3c1257054b03c811f5a2885a2b3975cd9a60de9d71cd82"
+    },
+    {
+      "case": "medium",
+      "text": "Tôi chưa nhận được trạng thái thiết bị. Bạn vui lòng kiểm tra kết nối.",
+      "round": 1,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 195404,
+      "first_byte_ms": 4.21,
+      "complete_ms": 4.9,
+      "duration_s": 4.07,
+      "rtf": 0.0012,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4219.7,
+      "peak": 21904,
+      "sha256": "a642de303297c29036638b5dc63aa5a5782ed7b0cffc31ce782651d4bc8c91f0"
+    },
+    {
+      "case": "long",
+      "text": "Bạn có thể gán từng kênh cho đèn hoặc quạt trong ứng dụng, sau đó chọn phòng khách, phòng ngủ hoặc phòng bếp.",
+      "round": 1,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 322124,
+      "first_byte_ms": 4.39,
+      "complete_ms": 5.21,
+      "duration_s": 6.71,
+      "rtf": 0.0008,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4288.9,
+      "peak": 26431,
+      "sha256": "546470f4352772afffb0ba785422cb54a8192d669bf494983bbde3d927604e9e"
+    },
+    {
+      "case": "short",
+      "text": "Đây là kiểm tra giọng nói của Gateway.",
+      "round": 2,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 106124,
+      "first_byte_ms": 4.2,
+      "complete_ms": 4.47,
+      "duration_s": 2.21,
+      "rtf": 0.002,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4502.3,
+      "peak": 24506,
+      "sha256": "76bb1f3f117a9586ba3c1257054b03c811f5a2885a2b3975cd9a60de9d71cd82"
+    },
+    {
+      "case": "medium",
+      "text": "Tôi chưa nhận được trạng thái thiết bị. Bạn vui lòng kiểm tra kết nối.",
+      "round": 2,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 195404,
+      "first_byte_ms": 4.46,
+      "complete_ms": 4.9,
+      "duration_s": 4.07,
+      "rtf": 0.0012,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4219.7,
+      "peak": 21904,
+      "sha256": "a642de303297c29036638b5dc63aa5a5782ed7b0cffc31ce782651d4bc8c91f0"
+    },
+    {
+      "case": "long",
+      "text": "Bạn có thể gán từng kênh cho đèn hoặc quạt trong ứng dụng, sau đó chọn phòng khách, phòng ngủ hoặc phòng bếp.",
+      "round": 2,
+      "phase": "cache_repeat",
+      "status": 200,
+      "mime": "audio/wav",
+      "bytes": 322124,
+      "first_byte_ms": 4.44,
+      "complete_ms": 5.28,
+      "duration_s": 6.71,
+      "rtf": 0.0008,
+      "sample_rate": 24000,
+      "channels": 1,
+      "rms": 4288.9,
+      "peak": 26431,
+      "sha256": "546470f4352772afffb0ba785422cb54a8192d669bf494983bbde3d927604e9e"
+    }
+  ],
+  "scope": "Actual live Gateway HTTP text-to-audio API; no microphone input or relay commands; preview timing starts with request, not model startup; playback needs a real connected speaker."
+}

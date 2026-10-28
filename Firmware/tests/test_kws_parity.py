@@ -15,8 +15,8 @@ PROJECT_ROOT = HERE.parent.parent
 ACTIONBOX_V2_SRC = HERE.parent / "firmware_esp/ActionBox_V2/src"
 SUBBOX_SRC = HERE.parent / "firmware_esp/SubBox/src"
 COMMON_KWS = HERE.parent / "firmware_esp/common/kws"
-KWS_DATA = HERE.parent / "firmware_kws/data"
-KWS_DATASET = HERE.parent / "firmware_kws/dataset"
+KWS_DATA = HERE / "fixtures/kws/data"
+KWS_DATASET = HERE / "fixtures/kws/dataset"
 
 SAMPLE_RATE = 16000
 FRAME_LEN = 320

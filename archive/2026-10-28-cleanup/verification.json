@@ -1,0 +1,23 @@
+{
+  "scanned_files_before": 32319,
+  "archived_files": 28247,
+  "archived_bytes": 7692969961,
+  "verified_move_records": 152,
+  "verified_relocated_files": 8,
+  "git_visible_archived_files": 4828,
+  "unchanged_preexisting_source_patches": 12,
+  "gateway_tests": 450,
+  "flutter_tests": 164,
+  "firmware_host_tests": 34,
+  "flutter_analyze": "No issues",
+  "subbox_build": "passed",
+  "actionbox_v2_build": "passed",
+  "relay_operations_this_cleanup": 0,
+  "device_flashes_this_cleanup": 0,
+  "remote_deployments_this_cleanup": 0,
+  "gateway_main_pid": 3308,
+  "radio_ota_pid": 871,
+  "live_readback": "SubBox fresh heartbeat; DDF4 heartbeat stale, no USB serial devices attached at final check",
+  "archive_roots": 144,
+  "cleanup_moved_links_repaired": 0
+}

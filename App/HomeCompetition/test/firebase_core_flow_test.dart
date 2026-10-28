@@ -79,8 +79,8 @@ void main() {
     expect(find.text('Phòng ngủ'), findsOneWidget);
     await tester.tap(find.text('Đăng ký ActionBox'));
     await tester.pumpAndSettle();
-    expect(find.text('Factory ID'), findsOneWidget);
-    expect(find.text('Setup code / Proof of possession'), findsOneWidget);
+    expect(find.text('Mã thiết bị'), findsOneWidget);
+    expect(find.text('Mã thiết lập trên nhãn Box'), findsOneWidget);
     expect(find.textContaining('Chức năng này chưa có'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });

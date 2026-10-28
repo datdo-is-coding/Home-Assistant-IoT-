@@ -75,7 +75,7 @@ class CommissioningRpc:
                 try:
                     if method == 'GET' and path == '/api/commissioning/context' and not body:
                         result = response(200, self.core.context(uid) if self.core else {'profile':'legacy'})
-                    elif path.startswith('/api/v1/') and self.core:
+                    elif self.core and (path.startswith('/api/v1/') or path in ('/api/kws/config','/api/device/update')):
                         result = response(200, self.core.request(uid,method,path,body))
                     elif method == 'GET' and path == '/api/commissioning/candidates' and not body:
                         result = response(200, {'success': True, 'candidates': [

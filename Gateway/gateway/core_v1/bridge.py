@@ -4,6 +4,7 @@ The SubBox forwards them unchanged. Broker ACLs restrict each SubBox to its own
 hc/v1/subbox/<node>/up and down topics; the tag is additionally verified here.
 """
 import asyncio
+import hashlib
 import hmac
 import logging
 import re
@@ -18,6 +19,7 @@ except ImportError:
 from .protocol import Frame, MessageType, ReplayWindow
 from .registry import CoreError, canonical, require
 from .provisioning import Provisioning
+from .kws import CoreKws
 
 CHANNEL = struct.Struct('<BBfH')
 COMMAND = struct.Struct('<BBQQ')
@@ -37,6 +39,8 @@ class Bridge:
         self.last_heartbeat=0
         self.provisioning=Provisioning(registry)
         self.last_grant=0
+        self.kws=CoreKws(registry)
+        self.last_kws=0
 
     def key(self,node,typ):
         n=self.registry.one('SELECT registration FROM registered_nodes WHERE node_id=?',(node,))
@@ -125,6 +129,8 @@ class Bridge:
             require(len(f.payload)==8)
             self.uptimes[node]=(struct.unpack('<Q',f.payload)[0],self.registry.clock())
             self.registry.db.execute("UPDATE registered_nodes SET last_seen=?,connectivity='ONLINE' WHERE node_id=?",(self.registry.clock(),node))
+        elif f.type==MessageType.EVENT_REPORT:
+            self.kws.receive(f)
         elif f.type in (MessageType.OTA_PROGRESS,MessageType.OTA_CHUNK_ACK,MessageType.OTA_RESULT) and self.ota:
             if f.type==MessageType.OTA_RESULT:
                 require(len(f.payload)==49 and f.payload[48] in (1,2),'invalid_ota_result')
@@ -165,6 +171,18 @@ class Bridge:
                 try: result.append((self.route(node),self.frame(node,MessageType.HEARTBEAT)))
                 except CoreError: pass
         if self.ota: result.extend(self.ota.outgoing(self))
+        if self.registry.clock()-self.last_kws>=2:
+            self.last_kws=self.registry.clock()
+            for node in self.windows:
+                try:
+                    scope=self.kws.scope(node)
+                    if scope['product_type']!='SUB_BOX':continue
+                    packet=self.kws.snapshot(node)
+                    if not packet:continue
+                    ack=self.registry.db.execute('SELECT * FROM core_kws_sync WHERE node_id=?',(node,)).fetchone()
+                    if not ack or ack['boot_id']!=scope['boot_id'] or bytes(ack['digest'])!=hashlib.sha256(packet).digest()[:16]:
+                        result.append((node,self.frame(node,MessageType.ROOM_SNAPSHOT,packet)))
+                except CoreError:continue
         if self.registry.clock()-self.last_grant>=2:
             self.last_grant=self.registry.clock()
             for parent,grant in self.provisioning.outgoing_grants():

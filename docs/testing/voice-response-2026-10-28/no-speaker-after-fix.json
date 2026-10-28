@@ -1,0 +1,11 @@
+{
+  "status": 200,
+  "body": {
+    "success": false,
+    "text": "Hệ thống nhà thông minh đang hoạt động ổn định.",
+    "type": "chao",
+    "error": "Không có loa sẵn sàng hoặc chưa xác nhận phát âm thanh."
+  },
+  "elapsed_ms": 40.11,
+  "at": 1793161686.2534997
+}

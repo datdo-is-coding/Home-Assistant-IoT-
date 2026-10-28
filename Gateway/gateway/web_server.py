@@ -877,10 +877,9 @@ class WebServer:
                     ok = False
                     if hasattr(self.gateway, "audio_server") and self.gateway.audio_server:
                         ok = await self.gateway.audio_server.speak_proactive(text)
-                    if not ok and hasattr(self.gateway, "tts") and self.gateway.tts:
-                        pcm = await self.gateway.tts.synthesize_pcm(text)
-                        if pcm: ok = True
                     resp_data = {"success": ok, "text": text, "type": t}
+                    if not ok:
+                        resp_data["error"] = "Không có loa sẵn sàng hoặc chưa xác nhận phát âm thanh."
                 except Exception as e:
                     resp_data = {"success": False, "error": str(e)}
                 body = json.dumps(resp_data, ensure_ascii=False).encode()
@@ -1052,6 +1051,7 @@ class WebServer:
 
             if method in ("GET", "HEAD") and path in ("/downloads/app-release.apk", "/api/app/download", "/downloads/aetheria_home_assistant.apk"):
                 apk_paths = [
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "releases", "android", "HomeCompetition.apk"),
                     "/home/pi4/smarthome/apk/app-release.apk",
                     "/home/pi4/apk/app-release.apk",
                     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "apk", "app-release.apk"),
@@ -1064,7 +1064,7 @@ class WebServer:
                     fsize = os.path.getsize(apk_path)
                     writer.write((f"HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Type: application/vnd.android.package-archive\r\n"
                                   f"Content-Length: {fsize}\r\n"
-                                  f"Content-Disposition: attachment; filename=\"aetheria_home_assistant.apk\"\r\n"
+                                  f"Content-Disposition: attachment; filename=\"HomeCompetition.apk\"\r\n"
                                   f"Connection: close\r\n\r\n").encode())
                     if method == "GET":
                         with open(apk_path, "rb") as af:

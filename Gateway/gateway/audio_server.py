@@ -21,8 +21,10 @@ Protocol (Pi → ESP32):
 import asyncio
 import collections
 import contextlib
+import hmac
 import json
 import logging
+import re
 import secrets
 import time
 from typing import Optional, Tuple, Any
@@ -181,6 +183,7 @@ class AudioServer:
         self._ws_nodes: dict = {}
 
         self._active_speakers: set = set()
+        self._playback_receipts = {}
         self._playback_locks: dict = collections.defaultdict(asyncio.Lock)
         self._default_playback_lock = asyncio.Lock()
 
@@ -261,10 +264,35 @@ class AudioServer:
 
         return None
 
+    def _core_speaker(self, node_id):
+        if not isinstance(node_id, str) or not re.fullmatch(r'SB[0-9A-F]{12}', node_id):
+            return None
+        core = getattr(getattr(self.gateway, 'firebase_commissioning', None), 'core', None)
+        if core is None:
+            return None
+        try:
+            row = core.r.one("SELECT n.* FROM registered_nodes n JOIN factory_devices f USING(factory_id) "
+                             "WHERE n.factory_id=? AND f.product_type='SUB_BOX'", ('HC-'+node_id[2:],))
+        except Exception as exc:
+            if getattr(exc, 'code', None) == 'not_found':
+                return None
+            logger.error('Core speaker registry unavailable')
+            return {'token':None}
+        row['token'] = None
+        if row['registration'] == 'REGISTERED' and row['home_id'] == core.home:
+            try:
+                row['token'] = hmac.digest(core.r.node_key(row['node_id']), b'HC-SPEAKER-V1\0', 'sha256').hex()
+            except Exception:
+                pass
+        return row
+
     def _is_token_valid(self, token: Optional[str], node_id: Optional[str] = None) -> bool:
         """Kiểm tra token có khớp với WS_AUDIO_TOKEN hoặc WS_AUDIO_TOKENS."""
         if not token:
             return False
+        core = self._core_speaker(node_id)
+        if core is not None:
+            return bool(core['token'] and hmac.compare_digest(core['token'], token))
 
         global_tok = getattr(config, "WS_AUDIO_TOKEN", "")
         if global_tok and token == global_tok:
@@ -339,17 +367,13 @@ class AudioServer:
         ssl_context = None
         cert_file = getattr(config, "WS_AUDIO_TLS_CERT", "")
         key_file = getattr(config, "WS_AUDIO_TLS_KEY", "")
-        if cert_file and key_file:
+        if cert_file or key_file:
             import os, ssl
-            if os.path.isfile(cert_file) and os.path.isfile(key_file):
-                try:
-                    ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                    ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
-                    logger.info(f"Enabled TLS for Audio WebSocket server using {cert_file}")
-                except Exception as e:
-                    logger.error(f"Failed to load TLS certificates: {e}")
-            else:
-                logger.warning(f"WS_AUDIO_TLS_CERT or KEY file not found: {cert_file}, {key_file}")
+            if not cert_file or not key_file or not os.path.isfile(cert_file) or not os.path.isfile(key_file):
+                raise ValueError('Audio TLS certificate/key missing')
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+            logger.info("Enabled TLS for Audio WebSocket server")
 
         serve_kwargs = {
             "ping_interval": 20,
@@ -398,10 +422,24 @@ class AudioServer:
             or getattr(config, "WS_AUDIO_AUTH_REQUIRED", False)
         )
         extracted_token = self._extract_token(websocket, path)
+        request_headers = getattr(websocket, 'request_headers', None)
+        if request_headers is None:
+            request_headers = getattr(getattr(websocket, 'request', None), 'headers', {})
+        header_node = request_headers.get('X-Device-ID') if request_headers else None
+        core_speaker = self._core_speaker(header_node)
         is_authenticated = False
         authenticated_token = None
 
-        if not auth_required:
+        if core_speaker is not None:
+            transport = getattr(websocket, 'transport', None)
+            if (not transport or not transport.get_extra_info('ssl_object') or
+                    not self._is_token_valid(extracted_token, header_node)):
+                await websocket.close(1008, 'Core speaker authentication required')
+                return
+            is_authenticated = True
+            authenticated_token = extracted_token
+            auth_required = True
+        elif not auth_required:
             is_authenticated = True
         elif extracted_token and self._is_token_valid(extracted_token):
             is_authenticated = True
@@ -415,6 +453,8 @@ class AudioServer:
         websocket.authenticated = is_authenticated
         websocket.client_node_id = None
         websocket.owner_epoch = None
+        websocket.playback_only = core_speaker is not None
+        websocket.requires_playback_ack = core_speaker is not None
 
         codec = "pcm"
         sample_rate = config.AUDIO_SAMPLE_RATE
@@ -429,6 +469,9 @@ class AudioServer:
         async def _bind_client_node(target_node_id: str, owner_epoch: Optional[int] = None) -> bool:
             nonlocal client_node_id, client_owner_epoch
             if not target_node_id:
+                return False
+            if core_speaker is None and self._core_speaker(target_node_id) is not None:
+                await websocket.close(1008, 'Core speaker identity cannot use legacy registration')
                 return False
             if client_node_id and client_node_id != target_node_id:
                 logger.warning(f"Socket already bound to '{client_node_id}', cannot re-bind to '{target_node_id}' from {client_addr}")
@@ -462,6 +505,40 @@ class AudioServer:
                         msg_type = cmd.get("type", "")
 
                         compact_type = cmd.get("t")
+
+                        if core_speaker is None:
+                            claimed = cmd.get('id') or cmd.get('node_id') or cmd.get('device_id')
+                            mac = str(cmd.get('mac', '')).replace(':', '').upper()
+                            if self._core_speaker(claimed) is not None or (re.fullmatch(r'[0-9A-F]{12}', mac) and self._core_speaker('SB'+mac) is not None):
+                                await websocket.close(1008, 'Core speaker must use authenticated WSS identity')
+                                return
+
+                        if core_speaker is not None:
+                            if not self._is_token_valid(authenticated_token, header_node):
+                                await websocket.close(1008, 'Core speaker revoked')
+                                return
+                            if compact_type == 'hello':
+                                if cmd.get('id') != header_node or cmd.get('speaker') is not True or cmd.get('playback_only') is not True:
+                                    await websocket.close(1008, 'Core speaker identity mismatch')
+                                    return
+                                if not await _bind_client_node(header_node):
+                                    return
+                                self._active_speakers.add(websocket)
+                                logger.info('Core playback speaker registered: %s', header_node)
+                                await websocket.send(json.dumps({'t':'hello_ok','id':header_node}))
+                            elif msg_type == 'playback_complete' and client_node_id:
+                                pending = self._playback_receipts.get(cmd.get('playback_id'))
+                                if pending and pending[0] is websocket and not pending[1].done():
+                                    complete = (cmd.get('success') is True and
+                                                type(cmd.get('received_bytes')) is int and
+                                                cmd['received_bytes'] == pending[2])
+                                    if not complete:
+                                        logger.warning('Speaker playback incomplete: %s, received=%r expected=%d, output_ok=%r',
+                                                       header_node, cmd.get('received_bytes'), pending[2], cmd.get('success'))
+                                    pending[1].set_result(complete)
+                            else:
+                                logger.debug('Ignoring non-playback message from Core speaker')
+                            continue
 
                         if compact_type == "hello":
                             hello_token = cmd.get("token") or cmd.get("auth_token")
@@ -907,6 +984,8 @@ class AudioServer:
             logger.warning(f"Refusing to send relay control command to broadcast/all ({node_id}) via WebSocket")
             return False
         ws = self._ws_nodes.get(node_id)
+        if getattr(ws, 'playback_only', False):
+            return False
         if not self.has_ws(node_id):
             return False
         ch = {"ch1": 1, "ch2": 2, "ch3": 3, 1: 1, 2: 2, 3: 3}.get(channel, 0)
@@ -1059,10 +1138,6 @@ class AudioServer:
             ws = self._ws_nodes.get(node_id)
             if ws and self._is_ws_alive(ws):
                 targets = [ws]
-            elif self._ws_nodes:
-                alive = [w for w in self._ws_nodes.values() if self._is_ws_alive(w)]
-                if alive:
-                    targets = [alive[0]]
         else:
 
             targets = [ws for ws in self._active_speakers if self._is_ws_alive(ws)]
@@ -1079,9 +1154,10 @@ class AudioServer:
             )
             if pcm_audio:
                 is_bcast = not node_id or str(node_id).lower() in ("all", "broadcast", "*")
-                await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=False, broadcast=is_bcast)
-                return True
+                return bool(await self._broadcast_pcm_stream(targets, pcm_audio, follow_up=False, broadcast=is_bcast))
             else:
+                if any(getattr(ws, 'playback_only', False) for ws in targets):
+                    return False
                 mp3_audio = await self.gateway.tts.synthesize(text)
                 if mp3_audio:
                     for ws in targets:
@@ -1160,6 +1236,10 @@ class AudioServer:
         so ESP32 512KB PSRAM DMA buffer never underflows.
         """
         targets = [ws for ws in targets if (getattr(ws, "has_speaker", False) or (getattr(ws, "has_speaker", True) and not getattr(ws, "audio_relay", False))) and self._is_ws_alive(ws)]
+        targets = [ws for ws in targets if not getattr(ws, 'playback_only', False) or
+                   self._is_token_valid(self._extract_token(ws), getattr(ws, 'node_id', None))]
+        if any(getattr(ws, 'requires_playback_ack', False) for ws in targets) and len(pcm_bytes) > 256000:
+            return False
         if not targets:
             return
 
@@ -1192,6 +1272,8 @@ class AudioServer:
                 await stack.enter_async_context(lock)
 
             valid_targets = [ws for ws in targets if self._is_ws_alive(ws)]
+            valid_targets = [ws for ws in valid_targets if not getattr(ws, 'playback_only', False) or
+                             self._is_token_valid(self._extract_token(ws), getattr(ws, 'node_id', None))]
             if not valid_targets:
                 return
 
@@ -1223,6 +1305,13 @@ class AudioServer:
             if notify_nodes:
                 await asyncio.gather(*[ws.send(busy_msg) for ws in notify_nodes], return_exceptions=True)
 
+            receipts = {}
+            for ws in valid_targets:
+                if getattr(ws, 'requires_playback_ack', False):
+                    playback_id = secrets.token_hex(16)
+                    future = asyncio.get_running_loop().create_future()
+                    receipts[ws] = (playback_id, future)
+                    self._playback_receipts[playback_id] = (ws, future, total_len)
             try:
                 start_msg = json.dumps({
                     "type": "audio_start",
@@ -1232,7 +1321,8 @@ class AudioServer:
                     "sample_width": config.AUDIO_SAMPLE_WIDTH,
                     "size": total_len,
                 })
-                results = await asyncio.gather(*[ws.send(start_msg) for ws in valid_targets], return_exceptions=True)
+                results = await asyncio.gather(*[ws.send(json.dumps({**json.loads(start_msg), 'playback_id':receipts[ws][0]})
+                                                        if ws in receipts else start_msg) for ws in valid_targets], return_exceptions=True)
                 dead = [ws for ws, res in zip(valid_targets, results) if isinstance(res, Exception)]
                 if dead:
                     for d in dead:
@@ -1272,6 +1362,8 @@ class AudioServer:
                         "type": "audio_end", "follow_up": ws_follow_up,
                         "timeout_ms": 6000 if ws_follow_up else 0
                     }
+                    if ws in receipts:
+                        end_payload['playback_id'] = receipts[ws][0]
                     parent = getattr(ws, "node_id", "")
                     mqtt = getattr(self.gateway, "mqtt", None)
                     identity = getattr(mqtt, "node_identities", {}).get(follow_up_node_id)
@@ -1295,10 +1387,28 @@ class AudioServer:
                     end_results = await asyncio.gather(*tasks, return_exceptions=True)
                     valid_targets = [ws for ws, res in zip(valid_targets, end_results) if not isinstance(res, Exception)]
 
+                confirmed = []
+                for ws in valid_targets:
+                    if ws in receipts:
+                        try:
+                            ok = await asyncio.wait_for(asyncio.shield(receipts[ws][1]), 3)
+                        except asyncio.TimeoutError:
+                            ok = False
+                        if not ok:
+                            logger.warning('Speaker did not confirm complete playback: %s', getattr(ws, 'node_id', '?'))
+                            continue
+                        logger.info('Speaker confirmed playback: %s (%d bytes)', getattr(ws, 'node_id', '?'), total_len)
+                    confirmed.append(ws)
+                valid_targets = confirmed
+
                 logger.info(
                     f"✅ Streamed {total_len} bytes in {chunks_sent} chunks to {len(valid_targets)} ESP32(s)"
                 )
             finally:
+                for playback_id, future in receipts.values():
+                    self._playback_receipts.pop(playback_id, None)
+                    if not future.done():
+                        future.cancel()
                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
                     self.gateway.broadcast_event("audio_state", {"state": "IDLE"})
 
@@ -1316,6 +1426,8 @@ class AudioServer:
         Fallback: Stream MP3 audio data back to ESP32.
         ESP32 would need an MP3 decoder for this path.
         """
+        if getattr(websocket, 'playback_only', False):
+            return False
         if not getattr(websocket, "has_speaker", False) and (not getattr(websocket, "has_speaker", True) or getattr(websocket, "audio_relay", False)):
             return
         total_len = len(audio_bytes)

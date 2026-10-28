@@ -153,13 +153,16 @@ class _KwsConfigScreenState extends ConsumerState<KwsConfigScreen> {
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (error, _) =>
                   Center(child: Text('Không thể tải thiết bị: $error')),
-              data: (allBoxes) =>
-                  _editor(allBoxes.where((box) => !box.isSubBox).toList()),
+              data: (allBoxes) => _editor(allBoxes),
             ),
     );
   }
 
-  Widget _editor(List<ActionBox> boxes) {
+  Widget _editor(List<ActionBox> allBoxes) {
+    final boxes = allBoxes.where((box) => !box.isSubBox).toList();
+    final core = _config?['profile'] == 'core-v1';
+    final sources =
+        core ? allBoxes.where((box) => box.isSubBox).toList() : boxes;
     final targets = <String, String>{
       for (final box in boxes)
         for (final channel in box.channels)
@@ -212,11 +215,13 @@ class _KwsConfigScreenState extends ConsumerState<KwsConfigScreen> {
               _bindingField(
                   room.key, room.value, role.key, role.value, targets),
           const SizedBox(height: 12),
-          Text('Phòng của micro ActionBox',
+          Text(core ? 'Phòng của SubBox' : 'Phòng của micro ActionBox',
               style: Theme.of(context).textTheme.titleMedium),
-          const Text('Dùng phòng này khi câu nói không nêu phòng.'),
+          Text(core
+              ? 'Các ActionBox ghép với SubBox dùng chung phòng này. ActionBox chỉ gán thiết bị cho từng kênh.'
+              : 'Dùng phòng này khi câu nói không nêu phòng.'),
           const SizedBox(height: 12),
-          for (final box in boxes) _sourceField(box),
+          for (final box in sources) _sourceField(box),
           if (boxes.isEmpty) const Text('Chưa có ActionBox đã đăng ký.'),
           const SizedBox(height: 16),
           FilledButton(

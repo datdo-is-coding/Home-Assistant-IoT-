@@ -51,7 +51,25 @@ class Provisioning:
             device_receipt BLOB, parent_receipt BLOB);
           CREATE TABLE IF NOT EXISTS commissioning_generations(
             parent_id INTEGER PRIMARY KEY, generation INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS commissioning_radio_keys(
+            parent_id INTEGER PRIMARY KEY REFERENCES registered_nodes(node_id) ON DELETE CASCADE,
+            pmk_cipher BLOB NOT NULL);
         ''')
+
+    def radio_key(self, parent):
+        row = self.r.db.execute('SELECT pmk_cipher FROM commissioning_radio_keys WHERE parent_id=?',
+                                (parent,)).fetchone()
+        return self.r.cipher.decrypt(row['pmk_cipher']) if row else None
+
+    def remember_radio_key(self, parent, pmk):
+        require(isinstance(pmk, bytes) and len(pmk) == 16 and any(pmk), 'invalid_radio_key')
+        node = self.r.one('SELECT f.product_type FROM registered_nodes n JOIN factory_devices f USING(factory_id) WHERE n.node_id=?', (parent,))
+        require(node['product_type'] == 'SUB_BOX', 'invalid_parent')
+        old = self.radio_key(parent)
+        require(old is None or hmac.compare_digest(old, pmk), 'radio_key_conflict')
+        if old is None:
+            self.r.db.execute('INSERT INTO commissioning_radio_keys VALUES(?,?)',
+                              (parent, self.r.cipher.encrypt(pmk)))
 
     def prepare(self, user, claim_id, challenge, *, radio_mac, parent_mac=None,
                 channel=1, wifi_ssid='', wifi_password='', mqtt_uri='', ota_pubkey=''):
@@ -86,7 +104,11 @@ class Provisioning:
         parent_radio = bytes(6) if subbox else mac_bytes(parent_mac)
         nonce = bytes.fromhex(c['nonce'])
         secret = self.r.cipher.decrypt(f['secret'])
-        lmk, pmk = secrets.token_bytes(16), secrets.token_bytes(16)
+        lmk = secrets.token_bytes(16)
+        pmk = self.radio_key(c['node_id'] if subbox else c['parent_id'])
+        if subbox and pmk is None:
+            pmk = secrets.token_bytes(16)
+        require(pmk is not None, 'parent_radio_key_missing')
         n = self.r.one('SELECT config_rev,registration FROM registered_nodes WHERE node_id=?', (c['node_id'],))
         revision = n['config_rev'] + (n['registration'] == 'TRANSFER_PENDING')
         body = ENROLLMENT.pack(b'HCP1', 1 if subbox else 2, channel, 0,
@@ -98,6 +120,8 @@ class Provisioning:
         packet = tagged(secret, body)
         grant = None
         with self.r.transaction():
+            if subbox:
+                self.remember_radio_key(c['node_id'], pmk)
             if not subbox:
                 parent = self.r.get_node(user, c['parent_id'])
                 require(parent['registration'] == 'REGISTERED' and parent['room_id'] == c['room_id'], 'invalid_parent')
