@@ -48,6 +48,8 @@ memory.db
 *-save.kicad_pcb
 *-save.kicad_sch
 *.kicad_prl.bak
+*.step
+*.STEP
 
 # Home Competition credentials and locally initialized state
 /hc-data/

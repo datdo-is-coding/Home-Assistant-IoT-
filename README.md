@@ -6,6 +6,7 @@
 | Thành phần | Nguồn duy trì | Điểm vào |
 | --- | --- | --- |
 | App duy nhất | `App/HomeCompetition/` | `lib/main.dart` → `FirebaseHomeClient` |
+| Web Dashboard | `Web/iot_dashboard/` | `app.py` / `lib/main.dart` |
 | Gateway chính | `Gateway/gateway/` | `main.py`, cầu nối `firebase_commissioning.py` |
 | Đăng ký/quyền/kênh/lệnh Core | `Gateway/gateway/core_v1/` | Registry SQLite, provisioning, command queue |
 | OTA đã ký | `Gateway/gateway/fleet_ota/` | `python -m gateway.fleet_ota.local` cho pilot Pi |
@@ -35,6 +36,17 @@ flutter build apk --release
 Giữ Android application ID đã đăng ký Firebase. Sau khi đổi nhánh hoặc khôi phục
 cache, chạy `flutter pub get` để tạo lại phần đăng ký native plugin. Xem
 [hướng dẫn app](App/HomeCompetition/README.md).
+
+## Web Dashboard
+
+Ứng dụng web dashboard và server Flask phục vụ giao diện:
+
+```sh
+cd Web/iot_dashboard
+python3 app.py
+# Hoặc chạy trực tiếp Flutter Web:
+# flutter run -d chrome
+```
 
 ## Firmware
 
