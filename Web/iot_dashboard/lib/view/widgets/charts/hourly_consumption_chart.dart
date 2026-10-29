@@ -97,10 +97,34 @@ class _HourlyConsumptionChartState extends State<HourlyConsumptionChart> {
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Stack(
             children: [
-              // 1. Header Row 1: Tiêu đề bên trái, Tổng kWh bên phải
+              // Ray Specular Glint on Chart Header
+              if (isDark)
+                Positioned(
+                  top: 0,
+                  left: 20,
+                  right: 20,
+                  height: 1.5,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.transparent,
+                          const Color(0xFF10B981).withValues(alpha: 0.55),
+                          const Color(0xFF6EE7B7).withValues(alpha: 0.75),
+                          const Color(0xFF10B981).withValues(alpha: 0.55),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 1. Header Row 1: Tiêu đề bên trái, Tổng kWh bên phải
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -300,7 +324,7 @@ class _HourlyConsumptionChartState extends State<HourlyConsumptionChart> {
                                         ),
                                       ),
 
-                                      // Thân Cột Biểu Đồ
+                                      // Thân Cột Biểu Đồ với Neon Top Cap
                                       AnimatedContainer(
                                         duration: const Duration(milliseconds: 250),
                                         width: isHovered
@@ -334,11 +358,34 @@ class _HourlyConsumptionChartState extends State<HourlyConsumptionChart> {
                                                     color: (item.isPeak
                                                             ? const Color(0xFFF59E0B)
                                                             : const Color(0xFF10B981))
-                                                        .withValues(alpha: 0.45),
-                                                    blurRadius: 8,
+                                                        .withValues(alpha: 0.55),
+                                                    blurRadius: 10,
+                                                    spreadRadius: 1,
                                                   ),
                                                 ]
                                               : [],
+                                        ),
+                                        child: Align(
+                                          alignment: Alignment.topCenter,
+                                          child: Container(
+                                            height: 2,
+                                            decoration: BoxDecoration(
+                                              color: item.isPeak
+                                                  ? const Color(0xFFFEF3C7)
+                                                  : const Color(0xFFD1FAE5),
+                                              borderRadius: const BorderRadius.vertical(
+                                                top: Radius.circular(4),
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: item.isPeak
+                                                      ? const Color(0xFFF59E0B)
+                                                      : const Color(0xFF34D399),
+                                                  blurRadius: 4,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
                                         ),
                                       ),
 
@@ -375,6 +422,8 @@ class _HourlyConsumptionChartState extends State<HourlyConsumptionChart> {
               ),
             ],
           ),
+        ],
+      ),
         ),
       ),
     );

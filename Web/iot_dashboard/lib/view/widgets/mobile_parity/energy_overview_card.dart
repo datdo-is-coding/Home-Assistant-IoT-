@@ -26,7 +26,7 @@ class ParityEnergyOverviewCard extends StatelessWidget {
         theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
     return ProgressiveBlurCard(
-      blurAmount: 20,
+      blurAmount: 22,
       accentColor: colors.lightAccent,
       hasLightRay: true,
       hasGlow: totalPower > 0,
@@ -44,15 +44,21 @@ class ParityEnergyOverviewCard extends StatelessWidget {
                 Row(
                   children: [
                     Container(
-                      width: 42,
-                      height: 42,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: colors.fanWash,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: colors.fanAccent.withValues(alpha: 0.3),
+                          color: colors.fanAccent.withValues(alpha: 0.35),
                           width: 1,
                         ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: colors.fanAccent.withValues(alpha: isDark ? 0.25 : 0.1),
+                            blurRadius: 12,
+                          ),
+                        ],
                       ),
                       child: Icon(
                         Icons.bolt_rounded,
@@ -92,22 +98,33 @@ class ParityEnergyOverviewCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
-            // Power readout with glowing text
-            Text(
-              '${totalPower.toStringAsFixed(1)} W',
-              style: TextStyle(
-                fontSize: 34,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -1.0,
-                color: isDark ? const Color(0xFFF0FDF4) : theme.colorScheme.onSurface,
-                shadows: isDark && totalPower > 0
-                    ? [
-                        Shadow(
-                          color: colors.lightAccent.withValues(alpha: 0.45),
-                          blurRadius: 20,
-                        ),
-                      ]
-                    : null,
+
+            // Power readout with Holographic Gradient Text
+            ShaderMask(
+              shaderCallback: (bounds) {
+                return LinearGradient(
+                  colors: isDark
+                      ? [
+                          const Color(0xFFFFFFFF),
+                          const Color(0xFF6EE7B7),
+                          const Color(0xFF34D399),
+                        ]
+                      : [
+                          const Color(0xFF0F172A),
+                          const Color(0xFF059669),
+                        ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ).createShader(bounds);
+              },
+              child: Text(
+                '${totalPower.toStringAsFixed(1)} W',
+                style: const TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.0,
+                  color: Colors.white,
+                ),
               ),
             ),
             const SizedBox(height: 4),
@@ -159,20 +176,37 @@ class ParityEnergyOverviewCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: colors.lightAccent,
-                          boxShadow: [
-                            BoxShadow(
-                              color: colors.lightAccent.withValues(alpha: 0.6),
-                              blurRadius: 6,
+                        width: 14,
+                        height: 14,
+                        margin: const EdgeInsets.only(right: 6),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Container(
+                              width: 14,
+                              height: 14,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: colors.lightAccent.withValues(alpha: 0.25),
+                              ),
+                            ),
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: colors.lightAccent,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: colors.lightAccent.withValues(alpha: 0.8),
+                                    blurRadius: 6,
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 6),
                       Text(
                         'Thời gian thực',
                         style: TextStyle(

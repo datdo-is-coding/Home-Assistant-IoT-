@@ -195,14 +195,14 @@ class SidebarWidget extends StatelessWidget {
             height: 44,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                colors: [Color(0xFF10B981), Color(0xFF047857)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF2563EB).withValues(alpha: 0.4),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.4),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

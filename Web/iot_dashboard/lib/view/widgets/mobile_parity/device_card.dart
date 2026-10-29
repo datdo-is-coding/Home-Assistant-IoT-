@@ -55,8 +55,8 @@ class ParityDeviceCard extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 240),
                   curve: Curves.easeOutCubic,
-                  width: 42,
-                  height: 42,
+                  width: 44,
+                  height: 44,
                   decoration: BoxDecoration(
                     color: isActive
                         ? accentColor.withValues(alpha: isDark ? 0.28 : 0.16)
@@ -66,28 +66,53 @@ class ParityDeviceCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppTheme.iconRadius),
                     border: Border.all(
                       color: isActive
-                          ? accentColor.withValues(alpha: 0.6)
+                          ? accentColor.withValues(alpha: 0.65)
                           : (isDark ? const Color(0xFF1C3426) : colors.cardBorder),
                       width: 1,
                     ),
                     boxShadow: isActive && isDark
                         ? [
                             BoxShadow(
-                              color: accentColor.withValues(alpha: 0.35),
-                              blurRadius: 10,
+                              color: accentColor.withValues(alpha: 0.40),
+                              blurRadius: 14,
+                              spreadRadius: 1,
                               offset: const Offset(0, 2),
                             ),
                           ]
                         : null,
                   ),
-                  child: Icon(
-                    device.iconData,
-                    size: 20,
-                    color: isActive
-                        ? accentColor
-                        : (isDark
-                            ? const Color(0xFF8BAA97)
-                            : const Color(0xFF64748B)),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Subtile ray glint on top of active icon
+                      if (isActive && isDark)
+                        Positioned(
+                          top: 0,
+                          left: 6,
+                          right: 6,
+                          height: 1.5,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Colors.transparent,
+                                  accentColor.withValues(alpha: 0.8),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      Icon(
+                        device.iconData,
+                        size: 21,
+                        color: isActive
+                            ? accentColor
+                            : (isDark
+                                ? const Color(0xFF8BAA97)
+                                : const Color(0xFF64748B)),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -140,7 +165,7 @@ class ParityDeviceCard extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
+                  letterSpacing: -0.3,
                   color: isDark ? const Color(0xFFF0FDF4) : theme.colorScheme.onSurface,
                 ),
               ),
@@ -181,29 +206,47 @@ class ParityDeviceCard extends StatelessWidget {
                 child: Row(
                   children: [
                     Container(
-                      width: 7,
-                      height: 7,
+                      width: 14,
+                      height: 14,
                       margin: const EdgeInsets.only(right: 6),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: !device.online
-                            ? (isDark
-                                ? const Color(0xFF4A6855)
-                                : const Color(0xFF94A3B8))
-                            : (isActive
-                                ? accentColor
-                                : (isDark
-                                    ? const Color(0xFF4A6855)
-                                    : const Color(0xFF94A3B8))),
-                        boxShadow: isActive
-                            ? [
-                                BoxShadow(
-                                  color: accentColor.withValues(alpha: 0.9),
-                                  blurRadius: 8,
-                                  spreadRadius: 1.5,
-                                )
-                              ]
-                            : null,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          if (isActive)
+                            Container(
+                              width: 14,
+                              height: 14,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: accentColor.withValues(alpha: 0.25),
+                              ),
+                            ),
+                          Container(
+                            width: 7,
+                            height: 7,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: !device.online
+                                  ? (isDark
+                                      ? const Color(0xFF4A6855)
+                                      : const Color(0xFF94A3B8))
+                                  : (isActive
+                                      ? accentColor
+                                      : (isDark
+                                          ? const Color(0xFF4A6855)
+                                          : const Color(0xFF94A3B8))),
+                              boxShadow: isActive
+                                  ? [
+                                      BoxShadow(
+                                        color: accentColor.withValues(alpha: 0.95),
+                                        blurRadius: 8,
+                                        spreadRadius: 1.5,
+                                      )
+                                    ]
+                                  : null,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     Expanded(

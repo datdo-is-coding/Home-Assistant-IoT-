@@ -18,7 +18,7 @@ class TopbarWidget extends StatelessWidget {
 
     return ClipRect(
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
         child: Container(
           height: 64,
           padding: const EdgeInsets.symmetric(horizontal: 18),
@@ -33,167 +33,214 @@ class TopbarWidget extends StatelessWidget {
               ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Stack(
             children: [
-              // 1. Bên trái: Search Bar
-              const Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(width: 8),
-                    CustomSearchAutocomplete(),
-                  ],
-                ),
-              ),
-
-          const SizedBox(width: 16),
-
-          // 2. Bên phải: Status pills + Dark mode toggle + Notifications + Avatar
-          Row(
-            children: [
-              // Pill 1: Trạng thái Firebase Cloud RTDB
-              ValueListenableBuilder<bool>(
-                valueListenable: FirebaseRealtimeService().isConnectedNotifier,
-                builder: (context, isConnected, child) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+              // Bottom Specular Ray Edge
+              if (isDark)
+                Positioned(
+                  bottom: 0,
+                  left: 60,
+                  right: 60,
+                  height: 1,
+                  child: Container(
                     decoration: BoxDecoration(
-                      color: isConnected
-                          ? colors.online.withValues(alpha: isDark ? 0.16 : 0.10)
-                          : colors.offline.withValues(alpha: isDark ? 0.16 : 0.10),
-                      borderRadius: BorderRadius.circular(100),
-                      border: Border.all(
-                        color: (isConnected ? colors.online : colors.offline)
-                            .withValues(alpha: 0.35),
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.transparent,
+                          const Color(0xFF10B981).withValues(alpha: 0.45),
+                          const Color(0xFF34D399).withValues(alpha: 0.55),
+                          const Color(0xFF10B981).withValues(alpha: 0.45),
+                          Colors.transparent,
+                        ],
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 7,
-                          height: 7,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isConnected ? colors.online : colors.offline,
-                            boxShadow: isConnected
-                                ? [
-                                    BoxShadow(
-                                      color: colors.online.withValues(alpha: 0.7),
-                                      blurRadius: 5,
-                                      spreadRadius: 1,
-                                    )
-                                  ]
-                                : null,
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          isConnected ? 'Cloud RTDB: Trực tuyến' : 'Cloud RTDB: Ngoại tuyến',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: isConnected ? colors.online : colors.offline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(width: 10),
-
-              // Pill 2: Công suất tiêu thụ tức thời
-              ValueListenableBuilder<double>(
-                valueListenable: FirebaseRealtimeService().totalPowerNotifier,
-                builder: (context, totalPower, child) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colors.fanWash,
-                      borderRadius: BorderRadius.circular(100),
-                      border: Border.all(
-                        color: colors.fanAccent.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.bolt_rounded,
-                          size: 15,
-                          color: colors.fanAccent,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${totalPower.toStringAsFixed(1)} W',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: colors.fanAccent,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(width: 10),
-
-              // Dark / Light Mode Toggle
-              IconButton(
-                tooltip: isDark ? 'Chế độ Sáng' : 'Chế độ Tối',
-                icon: Icon(
-                  isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                  size: 20,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                onPressed: () {
-                  isDarkModeNotifier.value = !isDarkModeNotifier.value;
-                },
-              ),
-
-              // Notifications
-              Stack(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_none_rounded),
-                    color: theme.colorScheme.onSurfaceVariant,
-                    iconSize: 21,
-                    onPressed: () {
-                      selectedPageNotifier.value = 5;
-                    },
                   ),
-                  Positioned(
-                    right: 10,
-                    top: 10,
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: colors.lightAccent,
-                        shape: BoxShape.circle,
-                      ),
+                ),
+
+              // Main Row Content
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // 1. Bên trái: Search Bar
+                  const Expanded(
+                    child: Row(
+                      children: [
+                        SizedBox(width: 8),
+                        CustomSearchAutocomplete(),
+                      ],
                     ),
+                  ),
+
+                  const SizedBox(width: 16),
+
+                  // 2. Bên phải: Status pills + Dark mode toggle + Notifications + Avatar
+                  Row(
+                    children: [
+                      // Pill 1: Trạng thái Firebase Cloud RTDB với Radar Ping Dot
+                      ValueListenableBuilder<bool>(
+                        valueListenable: FirebaseRealtimeService().isConnectedNotifier,
+                        builder: (context, isConnected, child) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isConnected
+                                  ? colors.online.withValues(alpha: isDark ? 0.16 : 0.10)
+                                  : colors.offline.withValues(alpha: isDark ? 0.16 : 0.10),
+                              borderRadius: BorderRadius.circular(100),
+                              border: Border.all(
+                                color: (isConnected ? colors.online : colors.offline)
+                                    .withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 14,
+                                  height: 14,
+                                  margin: const EdgeInsets.only(right: 6),
+                                  child: Stack(
+                                    alignment: Alignment.center,
+                                    children: [
+                                      if (isConnected)
+                                        Container(
+                                          width: 14,
+                                          height: 14,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: colors.online.withValues(alpha: 0.25),
+                                          ),
+                                        ),
+                                      Container(
+                                        width: 7,
+                                        height: 7,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: isConnected ? colors.online : colors.offline,
+                                          boxShadow: isConnected
+                                              ? [
+                                                  BoxShadow(
+                                                    color: colors.online.withValues(alpha: 0.8),
+                                                    blurRadius: 6,
+                                                  )
+                                                ]
+                                              : null,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  isConnected ? 'Cloud RTDB: Trực tuyến' : 'Cloud RTDB: Ngoại tuyến',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: isConnected ? colors.online : colors.offline,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(width: 10),
+
+                      // Pill 2: Công suất tiêu thụ tức thời
+                      ValueListenableBuilder<double>(
+                        valueListenable: FirebaseRealtimeService().totalPowerNotifier,
+                        builder: (context, totalPower, child) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: colors.fanWash,
+                              borderRadius: BorderRadius.circular(100),
+                              border: Border.all(
+                                color: colors.fanAccent.withValues(alpha: 0.35),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.bolt_rounded,
+                                  size: 15,
+                                  color: colors.fanAccent,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  '${totalPower.toStringAsFixed(1)} W',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: colors.fanAccent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(width: 12),
+
+                      // Nút Chuyển đổi Dark/Light mode
+                      ValueListenableBuilder<bool>(
+                        valueListenable: isDarkModeNotifier,
+                        builder: (context, isDarkValue, child) {
+                          return Tooltip(
+                            message: isDarkValue ? 'Chế độ Sáng' : 'Chế độ Tối',
+                            child: IconButton(
+                              onPressed: () {
+                                isDarkModeNotifier.value = !isDarkValue;
+                              },
+                              icon: Icon(
+                                isDarkValue
+                                    ? Icons.light_mode_rounded
+                                    : Icons.dark_mode_rounded,
+                                size: 20,
+                                color: isDark ? const Color(0xFF34D399) : const Color(0xFF64748B),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+
+                      const SizedBox(width: 4),
+
+                      // Nút Chuông Thông Báo
+                      Tooltip(
+                        message: 'Thông báo',
+                        child: IconButton(
+                          onPressed: () {
+                            selectedPageNotifier.value = 5;
+                          },
+                          icon: Icon(
+                            Icons.notifications_none_rounded,
+                            size: 21,
+                            color: isDark ? const Color(0xFF8BAA97) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      // User Profile Menu
+                      const UserAvatarMenu(),
+                    ],
                   ),
                 ],
               ),
-
-              const SizedBox(width: 6),
-
-              const UserAvatarMenu(),
             ],
           ),
-        ],
+        ),
       ),
-    ),),);
+    );
   }
 }
