@@ -19,45 +19,49 @@ class ParityRoomChip extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final Color bgColor = isSelected
-        ? (isDark ? Colors.white : const Color(0xFF0F172A))
-        : (isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9));
-
     final Color textColor = isSelected
-        ? (isDark ? const Color(0xFF0F172A) : Colors.white)
+        ? (isDark ? const Color(0xFF040705) : Colors.white)
         : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155));
 
     final Color countBg = isSelected
-        ? (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155))
-        : (isDark ? const Color(0xFF283142) : const Color(0xFFE2E8F0));
+        ? (isDark ? const Color(0x26000000) : const Color(0x33000000))
+        : (isDark ? const Color(0x2B10B981) : const Color(0xFFE2E8F0));
 
     final Color countText = isSelected
-        ? (isDark ? const Color(0xFF0F172A) : Colors.white)
-        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B));
+        ? (isDark ? const Color(0xFF040705) : Colors.white)
+        : (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF64748B));
 
     return GestureDetector(
       onTap: onSelected,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8.5),
         decoration: BoxDecoration(
-          color: bgColor,
+          gradient: isSelected
+              ? const LinearGradient(
+                  colors: [Color(0xFF10B981), Color(0xFF059669)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isSelected
+              ? null
+              : (isDark ? const Color(0xCC0C1610) : const Color(0xFFF1F5F9)),
           borderRadius: BorderRadius.circular(100),
           border: Border.all(
             color: isSelected
-                ? Colors.transparent
-                : (isDark ? const Color(0xFF2A3446) : const Color(0xFFE2E8F0)),
+                ? const Color(0xFF34D399)
+                : (isDark ? const Color(0xFF1A2F22) : const Color(0xFFE2E8F0)),
             width: 1,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: (isDark ? Colors.white : Colors.black)
-                        .withValues(alpha: 0.12),
-                    blurRadius: 8,
+                    color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.35 : 0.25),
+                    blurRadius: 10,
                     offset: const Offset(0, 2),
-                  )
+                  ),
                 ]
               : null,
         ),
@@ -68,13 +72,13 @@ class ParityRoomChip extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                 color: textColor,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 7),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
                 color: countBg,
                 borderRadius: BorderRadius.circular(10),

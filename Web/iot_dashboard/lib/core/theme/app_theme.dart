@@ -108,17 +108,17 @@ class AppColors extends ThemeExtension<AppColors> {
   );
 
   static const dark = AppColors(
-    canvas: Color(0xFF0E1117),
-    cardSurface: Color(0xFF161B26),
-    cardBorder: Color(0xFF232B3B),
-    lightAccent: Color(0xFFF59E0B),
-    lightWash: Color(0xFF261E14),
-    fanAccent: Color(0xFF38BDF8),
-    fanWash: Color(0xFF102232),
-    socketAccent: Color(0xFFA78BFA),
-    socketWash: Color(0xFF1E1730),
-    climateAccent: Color(0xFF2DD4BF),
-    climateWash: Color(0xFF112926),
+    canvas: Color(0xFF060907),
+    cardSurface: Color(0xFF0D1410),
+    cardBorder: Color(0xFF18281F),
+    lightAccent: Color(0xFF10B981),
+    lightWash: Color(0xFF0F261B),
+    fanAccent: Color(0xFF2DD4BF),
+    fanWash: Color(0xFF0E2722),
+    socketAccent: Color(0xFF34D399),
+    socketWash: Color(0xFF11291F),
+    climateAccent: Color(0xFF6EE7B7),
+    climateWash: Color(0xFF132B20),
     online: Color(0xFF34D399),
     offline: Color(0xFFF87171),
     warning: Color(0xFFFBBF24),
@@ -131,17 +131,17 @@ class AppTheme {
 
   static ThemeData light() {
     const scheme = ColorScheme.light(
-      primary: Color(0xFF0F172A),
+      primary: Color(0xFF059669),
       onPrimary: Colors.white,
-      primaryContainer: Color(0xFFE2E8F0),
-      onPrimaryContainer: Color(0xFF0F172A),
-      secondary: Color(0xFF475569),
+      primaryContainer: Color(0xFFD1FAE5),
+      onPrimaryContainer: Color(0xFF064E3B),
+      secondary: Color(0xFF10B981),
       onSecondary: Colors.white,
       surface: Color(0xFFFFFFFF),
-      onSurface: Color(0xFF0F172A),
-      onSurfaceVariant: Color(0xFF64748B),
-      outline: Color(0xFFD1D5DB),
-      outlineVariant: Color(0xFFE5E7EB),
+      onSurface: Color(0xFF061A10),
+      onSurfaceVariant: Color(0xFF4B6B59),
+      outline: Color(0xFFD1E0D7),
+      outlineVariant: Color(0xFFE2EBE5),
       error: Color(0xFFDC2626),
     );
 
@@ -169,13 +169,13 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: Colors.white.withValues(alpha: 0.92),
         elevation: 0,
-        indicatorColor: const Color(0xFFE2E8F0),
+        indicatorColor: const Color(0xFFD1FAE5),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+            color: selected ? const Color(0xFF065F46) : const Color(0xFF64748B),
           );
         }),
       ),
@@ -184,35 +184,35 @@ class AppTheme {
           fontSize: 26,
           fontWeight: FontWeight.w800,
           letterSpacing: -0.5,
-          color: Color(0xFF0F172A),
+          color: Color(0xFF061A10),
         ),
         titleLarge: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.3,
-          color: Color(0xFF0F172A),
+          color: Color(0xFF061A10),
         ),
         titleMedium: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.2,
-          color: Color(0xFF0F172A),
+          color: Color(0xFF061A10),
         ),
         bodyMedium: TextStyle(
           fontSize: 14,
           height: 1.4,
-          color: Color(0xFF0F172A),
+          color: Color(0xFF061A10),
         ),
         bodySmall: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
-          color: Color(0xFF64748B),
+          color: Color(0xFF4B6B59),
         ),
         labelLarge: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.1,
-          color: Color(0xFF0F172A),
+          color: Color(0xFF061A10),
         ),
       ),
     );
@@ -220,17 +220,17 @@ class AppTheme {
 
   static ThemeData dark() {
     const scheme = ColorScheme.dark(
-      primary: Colors.white,
-      onPrimary: Color(0xFF07090C),
-      primaryContainer: Color(0xFF1E2532),
-      onPrimaryContainer: Color(0xFFF8FAFC),
-      secondary: Color(0xFF94A3B8),
-      onSecondary: Color(0xFF07090C),
-      surface: Color(0xFF161B26),
-      onSurface: Color(0xFFF8FAFC),
-      onSurfaceVariant: Color(0xFF94A3B8),
-      outline: Color(0xFF334155),
-      outlineVariant: Color(0xFF232B3B),
+      primary: Color(0xFF10B981),
+      onPrimary: Color(0xFF02170D),
+      primaryContainer: Color(0xFF122C1F),
+      onPrimaryContainer: Color(0xFFD1FAE5),
+      secondary: Color(0xFF34D399),
+      onSecondary: Color(0xFF02170D),
+      surface: Color(0xFF0D1410),
+      onSurface: Color(0xFFF0FDF4),
+      onSurfaceVariant: Color(0xFF8BAA97),
+      outline: Color(0xFF1E382A),
+      outlineVariant: Color(0xFF14241B),
       error: Color(0xFFF87171),
     );
 
@@ -245,26 +245,26 @@ class AppTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(cardRadius),
-          side: const BorderSide(color: Color(0xFF232B3B), width: 1.0),
+          side: const BorderSide(color: Color(0xFF18281F), width: 1.0),
         ),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Color(0xFF161B26),
+        backgroundColor: Color(0xFF0D1410),
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: const Color(0xFF10131A).withValues(alpha: 0.95),
+        backgroundColor: const Color(0xFF080D0A).withValues(alpha: 0.95),
         elevation: 0,
-        indicatorColor: const Color(0xFF232B3B),
+        indicatorColor: const Color(0xFF122C1F),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 12,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: selected ? Colors.white : const Color(0xFF94A3B8),
+            color: selected ? const Color(0xFF34D399) : const Color(0xFF8BAA97),
           );
         }),
       ),
@@ -273,35 +273,35 @@ class AppTheme {
           fontSize: 26,
           fontWeight: FontWeight.w800,
           letterSpacing: -0.5,
-          color: Color(0xFFF8FAFC),
+          color: Color(0xFFF0FDF4),
         ),
         titleLarge: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.3,
-          color: Color(0xFFF8FAFC),
+          color: Color(0xFFF0FDF4),
         ),
         titleMedium: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.2,
-          color: Color(0xFFF8FAFC),
+          color: Color(0xFFF0FDF4),
         ),
         bodyMedium: TextStyle(
           fontSize: 14,
           height: 1.4,
-          color: Color(0xFFF8FAFC),
+          color: Color(0xFFF0FDF4),
         ),
         bodySmall: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w500,
-          color: Color(0xFF94A3B8),
+          color: Color(0xFF8BAA97),
         ),
         labelLarge: TextStyle(
           fontSize: 14,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.1,
-          color: Color(0xFFF8FAFC),
+          color: Color(0xFFF0FDF4),
         ),
       ),
     );

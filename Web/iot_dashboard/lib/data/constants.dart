@@ -147,16 +147,16 @@ abstract class AppTextStyles {
 /// APP COLOR PALETTE CONSTANTS (BẢNG MÀU CHUẨN)
 /// -------------------------------------------------------------------
 abstract class AppColors {
-  // Màu thương hiệu chủ đạo (Primary Accent)
-  static const Color primary = Color(0xFF4F46E5); // Indigo
-  static const Color primaryDark = Color(0xFF3730A3);
-  static const Color primaryLight = Color(0xFF818CF8);
+  // Màu thương hiệu chủ đạo (Primary Accent - Emerald Noir Theme)
+  static const Color primary = Color(0xFF10B981); // Emerald
+  static const Color primaryDark = Color(0xFF059669);
+  static const Color primaryLight = Color(0xFF34D399); // Mint
 
-  // Màu Dark Mode (Nền trang, Nền Card, Viền)
-  static const Color darkBackground = Color(0xFF0F172A); // Slate 900
-  static const Color darkCard = Color(0xFF1E293B); // Slate 800
-  static const Color darkBorder = Color(0xFF334155); // Slate 700
-  static const Color darkInputBg = Color(0xFF0F172A);
+  // Màu Dark Mode (Nền trang, Nền Card, Viền - Obsidian Jade Emerald)
+  static const Color darkBackground = Color(0xFF060907); // Obsidian Emerald Canvas
+  static const Color darkCard = Color(0xFF0D1410); // Frosted Obsidian Jade
+  static const Color darkBorder = Color(0xFF18281F); // Dark Emerald Bezel
+  static const Color darkInputBg = Color(0xFF09100C);
 
   // Màu Light Mode (Nền trang, Nền Card, Viền)
   static const Color lightBackground = Color(0xFFF8FAFC); // Slate 50
@@ -168,7 +168,7 @@ abstract class AppColors {
   static const Color success = Color(0xFF10B981); // Emerald Green
   static const Color warning = Color(0xFFF59E0B); // Amber
   static const Color danger = Color(0xFFEF4444); // Red
-  static const Color info = Color(0xFF3B82F6); // Blue
+  static const Color info = Color(0xFF2DD4BF); // Teal Cyan Mint
 
   // -------------------------------------------------------------------
   // HELPER METHODS: Tự động chọn màu Thẻ, Viền, Nền theo Theme

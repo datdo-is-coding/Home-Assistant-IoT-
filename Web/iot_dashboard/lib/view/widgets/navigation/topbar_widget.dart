@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:iot_dashboard/core/theme/app_theme.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
@@ -15,27 +16,35 @@ class TopbarWidget extends StatelessWidget {
     final colors =
         theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
-    return Container(
-      height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      decoration: BoxDecoration(
-        color: colors.cardSurface,
-        border: Border(
-          bottom: BorderSide(color: colors.cardBorder, width: 1),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // 1. Bên trái: Search Bar
-          const Expanded(
-            child: Row(
-              children: [
-                SizedBox(width: 8),
-                CustomSearchAutocomplete(),
-              ],
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          height: 64,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xD90A120E)
+                : Colors.white.withValues(alpha: 0.92),
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF18281F) : const Color(0xFFE2E8F0),
+                width: 1,
+              ),
             ),
           ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // 1. Bên trái: Search Bar
+              const Expanded(
+                child: Row(
+                  children: [
+                    SizedBox(width: 8),
+                    CustomSearchAutocomplete(),
+                  ],
+                ),
+              ),
 
           const SizedBox(width: 16),
 
@@ -185,6 +194,6 @@ class TopbarWidget extends StatelessWidget {
           ),
         ],
       ),
-    );
+    ),),);
   }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/model/scene_model.dart';
+import '../cinematic/progressive_blur_card.dart';
 
 class ParitySceneCard extends StatelessWidget {
   final SceneModel scene;
@@ -19,97 +20,82 @@ class ParitySceneCard extends StatelessWidget {
     final colors =
         theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.cardSurface,
-        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        border: Border.all(
-          color: scene.isActive
-              ? scene.color.withValues(alpha: 0.5)
-              : colors.cardBorder,
-          width: scene.isActive ? 1.5 : 1.0,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: scene.isActive
-                ? scene.color.withValues(alpha: isDark ? 0.2 : 0.1)
-                : Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
-            blurRadius: scene.isActive ? 14 : 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onActivate,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: scene.color.withValues(alpha: isDark ? 0.2 : 0.12),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(scene.icon, color: scene.color, size: 22),
-                      ),
-                      Container(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF1E2532)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '${scene.actions.length} hành động',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                    ],
+    return ProgressiveBlurCard(
+      blurAmount: 16,
+      accentColor: scene.isActive ? scene.color : null,
+      hasLightRay: scene.isActive,
+      hasGlow: scene.isActive,
+      padding: EdgeInsets.zero,
+      onTap: onActivate,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: scene.color.withValues(alpha: isDark ? 0.22 : 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: scene.color.withValues(alpha: 0.35),
+                      width: 1,
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    scene.name,
+                  child: Icon(scene.icon, color: scene.color, size: 22),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0x990A140F)
+                        : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDark ? colors.cardBorder : const Color(0xFFE2E8F0),
+                    ),
+                  ),
+                  child: Text(
+                    '${scene.actions.length} hành động',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.2,
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    scene.description,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFF94A3B8) : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              scene.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
               ),
             ),
-          ),
+            const SizedBox(height: 3),
+            Text(
+              scene.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ),
       ),
     );

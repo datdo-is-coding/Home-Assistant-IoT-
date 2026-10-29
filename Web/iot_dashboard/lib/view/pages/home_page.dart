@@ -30,7 +30,7 @@ class _HomePageState extends State<HomePage> {
     final rtdb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: ValueListenableBuilder<List<RoomModel>>(
         valueListenable: rtdb.roomsNotifier,
         builder: (context, rooms, _) {
@@ -253,9 +253,9 @@ class _HomePageState extends State<HomePage> {
           height: 38,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9),
+            color: isDark ? const Color(0xCC0C1610) : const Color(0xFFF1F5F9),
             border: Border.all(
-              color: isDark ? const Color(0xFF2B3545) : const Color(0xFFE2E8F0),
+              color: isDark ? const Color(0xFF18281F) : const Color(0xFFE2E8F0),
             ),
           ),
           child: Icon(icon, size: 19, color: theme.colorScheme.primary),
@@ -338,10 +338,10 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.all(32),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF161B26) : Colors.white,
+              color: isDark ? const Color(0xCC0D1410) : Colors.white,
               borderRadius: BorderRadius.circular(AppTheme.cardRadius),
               border: Border.all(
-                color: isDark ? const Color(0xFF232B3B) : const Color(0xFFE5E7EB),
+                color: isDark ? const Color(0xFF18281F) : const Color(0xFFE5E7EB),
               ),
             ),
             child: Column(
@@ -433,20 +433,10 @@ class _HomePageState extends State<HomePage> {
 
         const SizedBox(height: 18),
 
-        // Biểu đồ tiêu thụ điện năng tương tác
-        Container(
+        // Biểu đồ tiêu thụ điện năng tương tác (với Progressive Blur & Light Rays)
+        const SizedBox(
           height: 290,
-          decoration: BoxDecoration(
-            color: Theme.of(context).cardTheme.color,
-            borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-            border: Border.all(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? const Color(0xFF232B3B)
-                  : const Color(0xFFE5E7EB),
-            ),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: const HourlyConsumptionChart(),
+          child: HourlyConsumptionChart(),
         ),
 
         const SizedBox(height: 18),

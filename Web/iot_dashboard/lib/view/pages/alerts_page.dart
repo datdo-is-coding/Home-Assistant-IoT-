@@ -6,9 +6,9 @@ class AlertsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      body: const Padding(
+    return const Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Padding(
         padding: EdgeInsets.all(20.0),
         child: AlertCenterCard(),
       ),

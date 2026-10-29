@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:iot_dashboard/view/widgets/cinematic/light_rays_background.dart';
 
 import 'package:iot_dashboard/view/pages/alerts_page.dart';
 import 'package:iot_dashboard/view/pages/contact_page.dart';
@@ -31,32 +32,35 @@ class WidgetsTree extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
-        children: [
-          // 1. Sidebar bên trái (Luôn hiển thị và co giãn mượt theo isSidebarOpenNotifier)
-          const SidebarWidget(),
+      backgroundColor: Colors.transparent,
+      body: LightRaysBackground(
+        child: Row(
+          children: [
+            // 1. Sidebar bên trái (Luôn hiển thị và co giãn mượt theo isSidebarOpenNotifier)
+            const SidebarWidget(),
 
-          // 2. Khu vực chính bên phải (Topbar + Nội dung trang)
-          Expanded(
-            child: Column(
-              children: [
-                // TopBar nằm cố định phía trên
-                const TopbarWidget(),
+            // 2. Khu vực chính bên phải (Topbar + Nội dung trang)
+            Expanded(
+              child: Column(
+                children: [
+                  // TopBar nằm cố định phía trên
+                  const TopbarWidget(),
 
-                // Màn hình trang được chọn bên dưới
-                Expanded(
-                  child: ValueListenableBuilder<int>(
-                    valueListenable: selectedPageNotifier,
-                    builder: (context, selectedPage, child) {
-                      final validIndex = selectedPage.clamp(0, pages.length - 1);
-                      return pages[validIndex];
-                    },
+                  // Màn hình trang được chọn bên dưới
+                  Expanded(
+                    child: ValueListenableBuilder<int>(
+                      valueListenable: selectedPageNotifier,
+                      builder: (context, selectedPage, child) {
+                        final validIndex = selectedPage.clamp(0, pages.length - 1);
+                        return pages[validIndex];
+                      },
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

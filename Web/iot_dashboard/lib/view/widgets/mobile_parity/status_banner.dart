@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
@@ -25,7 +26,7 @@ class ParityStatusBanner extends StatelessWidget {
           final isBolt = status.contains('W') || status.contains('kWh');
 
           final bg = isWarning
-              ? colors.offline.withValues(alpha: isDark ? 0.16 : 0.10)
+              ? colors.offline.withValues(alpha: isDark ? 0.18 : 0.10)
               : isBolt
                   ? colors.fanWash
                   : colors.lightWash;
@@ -44,30 +45,41 @@ class ParityStatusBanner extends StatelessWidget {
 
           return Container(
             margin: const EdgeInsets.only(right: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: bg,
+            child: ClipRRect(
               borderRadius: BorderRadius.circular(100),
-              border: Border.all(color: fg.withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  size: 15,
-                  color: fg,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  status,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: fg,
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: bg,
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(
+                      color: fg.withValues(alpha: isDark ? 0.4 : 0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icon,
+                        size: 15,
+                        color: fg,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: fg,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           );
         }).toList(),

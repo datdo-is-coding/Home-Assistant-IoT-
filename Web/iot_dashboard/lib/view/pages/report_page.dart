@@ -25,7 +25,7 @@ class _ReportPageState extends State<ReportPage> {
     final rtdb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(

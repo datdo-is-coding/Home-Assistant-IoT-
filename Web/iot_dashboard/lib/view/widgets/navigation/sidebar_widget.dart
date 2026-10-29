@@ -13,9 +13,9 @@ class SidebarWidget extends StatelessWidget {
     final colors =
         theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
-    // Glassmorphic surface aligned with AppColors
+    // Progressive Blur Glassmorphic surface aligned with Obsidian Emerald palette
     final sidebarBg = isDark
-        ? const Color(0xE6161B26) // rgba(22, 27, 38, 0.9)
+        ? const Color(0xD90A120E) // rgba(10, 18, 14, 0.85)
         : Colors.white.withValues(alpha: 0.92);
 
     final borderColor = colors.cardBorder;
@@ -33,7 +33,7 @@ class SidebarWidget extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(24),
                 child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                  filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 350),
                     curve: const Cubic(0.4, 0.0, 0.2, 1.0),
@@ -50,11 +50,16 @@ class SidebarWidget extends StatelessWidget {
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withValues(
-                            alpha: isDark ? 0.4 : 0.08,
+                            alpha: isDark ? 0.5 : 0.08,
                           ),
                           blurRadius: 30,
                           offset: const Offset(0, 10),
                         ),
+                        if (isDark)
+                          BoxShadow(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.05),
+                            blurRadius: 15,
+                          ),
                       ],
                     ),
                     child: Column(
@@ -222,16 +227,16 @@ class SidebarWidget extends StatelessWidget {
             height: 38,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF0F172A), Color(0xFF334155)],
+                colors: [Color(0xFF10B981), Color(0xFF047857)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
+                  color: const Color(0xFF10B981).withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  offset: const Offset(0, 3),
                 ),
               ],
             ),
@@ -250,7 +255,7 @@ class SidebarWidget extends StatelessWidget {
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -0.3,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                color: isDark ? const Color(0xFFF0FDF4) : const Color(0xFF064E3B),
               ),
             ),
           ),
@@ -308,19 +313,19 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
   @override
   Widget build(BuildContext context) {
     final activeBg = widget.isDark
-        ? const Color(0xFFF8FAFC)
-        : const Color(0xFF0F172A);
+        ? const Color(0xFF10B981)
+        : const Color(0xFF059669);
 
     final activeTextColor = widget.isDark
-        ? const Color(0xFF0F172A)
+        ? const Color(0xFF02170D)
         : Colors.white;
 
     final inactiveTextColor = widget.isDark
-        ? Colors.white.withValues(alpha: 0.7)
+        ? const Color(0xFF8BAA97)
         : const Color(0xFF475569);
 
     final hoverBg = widget.isDark
-        ? Colors.white.withValues(alpha: 0.1)
+        ? const Color(0x1F10B981)
         : Colors.black.withValues(alpha: 0.05);
 
     return MouseRegion(
@@ -340,10 +345,10 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
             boxShadow: widget.isSelected
                 ? [
                     BoxShadow(
-                      color: widget.isDark
-                          ? Colors.white.withValues(alpha: 0.15)
-                          : Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 15,
+                      color: const Color(0xFF10B981).withValues(
+                        alpha: widget.isDark ? 0.35 : 0.20,
+                      ),
+                      blurRadius: 18,
                       offset: const Offset(0, 4),
                     ),
                   ]

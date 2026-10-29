@@ -13,7 +13,7 @@ class DevicesPage extends StatelessWidget {
     final fb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(

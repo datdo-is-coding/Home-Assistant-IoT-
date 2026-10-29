@@ -26,7 +26,7 @@ class _VoicePageState extends State<VoicePage> {
     final fb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
