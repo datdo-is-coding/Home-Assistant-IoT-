@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-29",
+  "status": "published_bootstrap_phone_install_pending",
+  "branch": "main",
+  "code_commit": "158fc4322311d75d77ed664f4ca557fb205474d4",
+  "release_tag": "app-v1.7.0",
+  "release_url": "https://github.com/datdo-is-coding/Home-Assistant-IoT-/releases/tag/app-v1.7.0",
+  "manifest": {
+    "schema": 1,
+    "package": "com.dtv.homeassistant.dtv_home_assistant",
+    "version": "1.7.0",
+    "version_code": 43,
+    "size": 36681531,
+    "sha256": "d543d65993fbc13c69e9faf551d7342adb90e98729492dcb144524fceaf12aad",
+    "url": "https://github.com/datdo-is-coding/Home-Assistant-IoT-/releases/download/app-v1.7.0/HomeCompetition.apk"
+  },
+  "github_release_published": true,
+  "github_asset_digest_matches": true,
+  "pi_verified_public_download_size_and_hash": true,
+  "firebase_catalog_published_and_read_back": true,
+  "firebase_plan": "Spark",
+  "billing_changed": false,
+  "rules": {
+    "catalog_read": "auth != null",
+    "client_write": false,
+    "other_namespaces_unchanged": true
+  },
+  "checks": {
+    "flutter_tests_passed": 33,
+    "publisher_tests_passed": 3,
+    "ota_signer_coordinator_tests_passed": 7,
+    "flutter_analyze": "No issues found",
+    "android_release_build": true,
+    "same_apk_certificate": true
+  },
+  "phone_adb_available": false,
+  "phone_bootstrap_installed": false,
+  "phone_self_update_install_verified": false,
+  "screenshot": "release-published.jpg",
+  "unrelated_discovery_work_preserved": true,
+  "anonymous_catalog_read_status": 401,
+  "anonymous_catalog_read_denied": true,
+  "final_box_status": {
+    "SB288485350B54": {
+      "online": true,
+      "firmware": "2.3.0-control1"
+    },
+    "AB28848533DDF8": {
+      "online": true,
+      "firmware": "2.3.0-control1"
+    }
+  }
+}

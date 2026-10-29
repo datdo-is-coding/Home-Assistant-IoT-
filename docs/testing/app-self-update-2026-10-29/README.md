@@ -56,3 +56,19 @@ tải/xác nhận cài thực tế trên điện thoại; hiện ADB không có 
 
 Nguồn nền tảng: [Firebase Spark và APK](https://firebase.google.com/docs/hosting/faq-and-troubleshooting?hl=en),
 [Android cài từ nguồn ngoài](https://developer.android.com/studio/publish).
+
+## Phát hành đã xác minh
+
+Release [app-v1.7.0](https://github.com/datdo-is-coding/Home-Assistant-IoT-/releases/tag/app-v1.7.0)
+đã công khai từ commit `158fc4322311d75d77ed664f4ca557fb205474d4` trên `main`.
+GitHub hiển thị APK và release.json; digest APK khớp catalog. Publisher trên Pi
+đã tải APK từ URL công khai, xác minh đủ 36681531 byte/SHA-256 rồi ghi catalog
+Firebase và đọc lại khớp. Không thay billing hoặc tạo nhánh Git mới.
+
+APK SHA-256: `d543d65993fbc13c69e9faf551d7342adb90e98729492dcb144524fceaf12aad`.
+Đây là bằng chứng phát hành và transport; chưa phải xác nhận cài OTA app trên
+điện thoại. Người dùng tải APK và cài đè một lần để có updater.
+
+![Release đã công bố](release-published.jpg)
+
+[Bằng chứng không chứa bí mật](evidence.json).

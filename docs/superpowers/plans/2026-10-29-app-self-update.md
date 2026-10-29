@@ -13,8 +13,8 @@
   thư mục này. Cài đặt dùng trình cài Android và giữ dữ liệu; không uninstall.
 - Cài đặt → Cập nhật ứng dụng có kiểm tra lại, tiến trình tải, lỗi và cài APK.
   Khi tải xong chỉ nhắc gọn; không chặn điều khiển thiết bị bằng hộp thoại bắt buộc.
-- Project Spark chặn APK trên Hosting/Storage. Đang chờ người dùng chọn giữ
-  Firebase catalog + GitHub Releases, hoặc chuyển Blaze để lưu toàn bộ Firebase.
+- Project Spark chặn APK trên Hosting/Storage. Người dùng đã chọn giữ
+  Firebase catalog + GitHub Releases để tiếp tục dùng Spark miễn phí.
   Không đổi đuôi file để vượt hạn chế và không tự gắn billing.
 - Bản app cũ chưa có updater cần cài bản bootstrap một lần; sau đó các bản mới
   dùng catalog. Chỉ báo hoàn thành đầu-cuối sau kiểm tra trên điện thoại thật.

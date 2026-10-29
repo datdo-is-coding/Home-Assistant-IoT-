@@ -9,6 +9,8 @@
   Catalog công khai nằm trong `android/release.json`. App cũ cần cài bản này
   một lần; các bản tiếp theo được kiểm tra khi mở/trở lại app và tự tải trên
   mạng không tính phí. Android yêu cầu xác nhận cài, chỉ nhận đúng chữ ký cũ.
+  [Tải APK công khai](https://github.com/datdo-is-coding/Home-Assistant-IoT-/releases/download/app-v1.7.0/HomeCompetition.apk),
+  [kết quả phát hành](../docs/testing/app-self-update-2026-10-29/README.md).
 - `firmware/2.3.0-control1/SubBox.bin` và `ActionBox_V2.bin`: đúng hai image
   app-only đã nạp USB cho SubBox 0B54 (0x20000) và ActionBox DDF4 (0x310000),
   hash nạp đã kiểm tra; giữ NVS/bootloader/otadata/model. Thêm IR RX có khai báo
