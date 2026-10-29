@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../model/action_box_model.dart';
 import '../model/device_model.dart';
@@ -17,6 +18,7 @@ class FirebaseRealtimeService {
   FirebaseDatabase? _database;
   StreamSubscription<DatabaseEvent>? _devicesSubscription;
   StreamSubscription<DatabaseEvent>? _connectedSubscription;
+  StreamSubscription<User?>? _authSubscription;
   Timer? _freshnessTimer;
 
   // Notifiers phục vụ Reactive UI trên Web
@@ -67,21 +69,17 @@ class FirebaseRealtimeService {
       });
 
       // 2. Lắng nghe cây "devices"
-      isSyncingNotifier.value = true;
-      _devicesSubscription =
-          _database!.ref('devices').onValue.listen((event) {
-        isSyncingNotifier.value = false;
-        errorNotifier.value = null;
-        final data = event.snapshot.value;
-        if (data is Map) {
-          _processDevicesSnapshot(Map<String, dynamic>.from(data));
+      _resubscribeDevices();
+
+      // 3. Lắng nghe thay đổi trạng thái xác thực để tự động refresh kết nối RTDB
+      _authSubscription =
+          FirebaseAuth.instance.authStateChanges().listen((user) {
+        if (user != null) {
+          _resubscribeDevices();
         }
-      }, onError: (e) {
-        isSyncingNotifier.value = false;
-        errorNotifier.value = 'Không tải được danh sách thiết bị: $e';
       });
 
-      // 3. Timer kiểm tra độ tươi (Freshness Guard: 15s)
+      // 4. Timer kiểm tra độ tươi (Freshness Guard: 15s)
       _freshnessTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         _checkFreshness();
       });
@@ -89,6 +87,23 @@ class FirebaseRealtimeService {
       debugPrint('FirebaseRealtimeService init notice: $e');
       errorNotifier.value = 'Khởi tạo Firebase thất bại: $e';
     }
+  }
+
+  void _resubscribeDevices() {
+    if (_database == null) return;
+    _devicesSubscription?.cancel();
+    isSyncingNotifier.value = true;
+    _devicesSubscription = _database!.ref('devices').onValue.listen((event) {
+      isSyncingNotifier.value = false;
+      errorNotifier.value = null;
+      final data = event.snapshot.value;
+      if (data is Map) {
+        _processDevicesSnapshot(Map<String, dynamic>.from(data));
+      }
+    }, onError: (e) {
+      isSyncingNotifier.value = false;
+      errorNotifier.value = 'Không tải được danh sách thiết bị: $e';
+    });
   }
 
   /// Bật / Tắt trạng thái kênh Relay thật trên Firebase RTDB
@@ -609,6 +624,7 @@ class FirebaseRealtimeService {
   }
 
   void dispose() {
+    _authSubscription?.cancel();
     _devicesSubscription?.cancel();
     _connectedSubscription?.cancel();
     _freshnessTimer?.cancel();

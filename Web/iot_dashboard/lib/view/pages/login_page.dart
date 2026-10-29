@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../data/notifiers.dart';
 import '../../data/services/auth_service.dart';
 
 class LoginPage extends StatefulWidget {
@@ -316,7 +317,24 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 12),
+
+                      // Guest / Demo Access Button
+                      TextButton.icon(
+                        onPressed: () {
+                          isGuestModeNotifier.value = true;
+                        },
+                        icon: const Icon(Icons.remove_red_eye_outlined, size: 18),
+                        label: const Text(
+                          'Truy cập nhanh (Chế độ Khách / Xem thử)',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blueGrey,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
 
                       // Switch between Login / Register
                       Row(

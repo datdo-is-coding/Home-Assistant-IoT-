@@ -7,6 +7,7 @@ ValueNotifier<bool> isLampOnNotifier = ValueNotifier(false);
 ValueNotifier<bool> isFanOnNotifier = ValueNotifier(false);
 ValueNotifier<bool> isAwayModeNotifier = ValueNotifier(false);
 ValueNotifier<bool> isDarkModeNotifier = ValueNotifier(false);
+ValueNotifier<bool> isGuestModeNotifier = ValueNotifier(false);
 ValueNotifier<UserModel> currentUserNotifier = ValueNotifier<UserModel>(
   UserModel(
     id: 'usr_001',
