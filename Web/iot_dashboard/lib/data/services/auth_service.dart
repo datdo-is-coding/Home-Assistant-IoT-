@@ -103,7 +103,12 @@ class AuthService {
         return 'Lỗi kết nối mạng, vui lòng kiểm tra lại Internet.';
       case 'too-many-requests':
         return 'Quá nhiều yêu cầu thất bại. Vui lòng thử lại sau.';
+      case 'operation-not-allowed':
+        return 'Phương thức đăng nhập này chưa được bật trên Firebase Console (tab Authentication > Sign-in method). Bạn có thể bấm "Truy cập nhanh (Chế độ Khách / Xem thử)" ở bên dưới để vào ngay!';
       default:
+        if (e.message != null && e.message!.contains('sign-in provider is disabled')) {
+          return 'Phương thức đăng nhập này chưa được kích hoạt trên Firebase Console. Hãy bật Email/Password hoặc Google trong Auth > Sign-in method, hoặc nhấn "Truy cập nhanh (Chế độ Khách)" bên dưới để vào ngay.';
+        }
         return 'Lỗi xác thực: ${e.message ?? e.code}';
     }
   }

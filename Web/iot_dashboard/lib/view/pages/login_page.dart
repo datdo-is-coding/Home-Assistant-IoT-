@@ -99,6 +99,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       body: Center(
@@ -319,18 +320,28 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Guest / Demo Access Button
-                      TextButton.icon(
-                        onPressed: () {
-                          isGuestModeNotifier.value = true;
-                        },
-                        icon: const Icon(Icons.remove_red_eye_outlined, size: 18),
-                        label: const Text(
-                          'Truy cập nhanh (Chế độ Khách / Xem thử)',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.blueGrey,
+                      // Guest / Demo Access Button (Truy cập nhanh không cần tài khoản)
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: (isDark ? const Color(0xFF1E2532) : const Color(0xFFF0FDF4)),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: (isDark ? const Color(0xFF2B3545) : const Color(0xFFBBF7D0)),
+                          ),
+                        ),
+                        child: TextButton.icon(
+                          onPressed: () {
+                            isGuestModeNotifier.value = true;
+                          },
+                          icon: const Icon(Icons.rocket_launch_rounded, size: 18, color: Color(0xFF16A34A)),
+                          label: const Text(
+                            'Truy cập nhanh (Chế độ Khách / Xem thử ngay)',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF16A34A),
+                            ),
                           ),
                         ),
                       ),
