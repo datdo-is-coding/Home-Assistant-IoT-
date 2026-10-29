@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
 import 'package:iot_dashboard/view/widgets/charts/device_hourly_consumption_chart.dart';
 import 'package:iot_dashboard/view/widgets/charts/monthly_tariff_card.dart';
 import 'package:iot_dashboard/view/widgets/charts/quarterly_consumption_chart.dart';
 import 'package:iot_dashboard/view/widgets/charts/weekly_consumption_chart.dart';
+import 'package:iot_dashboard/view/widgets/mobile_parity/energy_overview_card.dart';
 
 class ReportPage extends StatefulWidget {
   const ReportPage({super.key});
@@ -20,6 +22,8 @@ class _ReportPageState extends State<ReportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final rtdb = FirebaseRealtimeService();
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SingleChildScrollView(
@@ -27,6 +31,36 @@ class _ReportPageState extends State<ReportPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 0. TỔNG QUAN CÔNG SUẤT VÀ NĂNG LƯỢNG THẬT TỪ BL0942 (ĐỒNG BỘ MOBILE ENERGY SCREEN)
+            ValueListenableBuilder<double>(
+              valueListenable: rtdb.totalPowerNotifier,
+              builder: (context, totalPower, _) {
+                return ValueListenableBuilder<double>(
+                  valueListenable: rtdb.totalEnergyNotifier,
+                  builder: (context, totalEnergy, _) {
+                    return ValueListenableBuilder<int>(
+                      valueListenable: rtdb.onlineCountNotifier,
+                      builder: (context, onlineCount, _) {
+                        return ValueListenableBuilder<int>(
+                          valueListenable: rtdb.totalDeviceCountNotifier,
+                          builder: (context, totalCount, _) {
+                            return ParityEnergyOverviewCard(
+                              totalPower: totalPower,
+                              totalEnergy: totalEnergy,
+                              measuredCount: onlineCount,
+                              totalCount: totalCount > 0 ? totalCount : 4,
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            ),
+
+            const SizedBox(height: 20),
+
             // 1. BIỂU ĐỒ TIÊU THỤ THIẾT BỊ THEO GIỜ HÔM NAY
             const DeviceHourlyConsumptionChart(),
 

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:iot_dashboard/core/theme/app_theme.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
 
 class SidebarWidget extends StatelessWidget {
@@ -9,15 +10,15 @@ class SidebarWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
+    final colors =
+        theme.extension<AppColors>() ?? (isDark ? AppColors.dark : AppColors.light);
 
-    // Palette & Glassmorphism styles matching HTML template
+    // Glassmorphic surface aligned with AppColors
     final sidebarBg = isDark
-        ? const Color(0xB31E293B) // rgba(30, 41, 59, 0.7)
-        : Colors.white.withValues(alpha: 0.85);
+        ? const Color(0xE6161B26) // rgba(22, 27, 38, 0.9)
+        : Colors.white.withValues(alpha: 0.92);
 
-    final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.1)
-        : Colors.black.withValues(alpha: 0.08);
+    final borderColor = colors.cardBorder;
 
     return ValueListenableBuilder<bool>(
       valueListenable: isSidebarOpenNotifier,
@@ -221,21 +222,21 @@ class SidebarWidget extends StatelessWidget {
             height: 38,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                colors: [Color(0xFF0F172A), Color(0xFF334155)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF2563EB).withValues(alpha: 0.4),
+                  color: Colors.black.withValues(alpha: 0.2),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
               ],
             ),
             child: const Icon(
-              Icons.bolt_rounded,
+              Icons.home_rounded,
               color: Colors.white,
               size: 22,
             ),
@@ -243,12 +244,12 @@ class SidebarWidget extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              "IoT Assistant",
+              "Home Companion",
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.3,
                 color: isDark ? Colors.white : const Color(0xFF0F172A),
               ),
             ),

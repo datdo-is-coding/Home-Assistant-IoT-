@@ -47,6 +47,52 @@ class DeviceModel {
         .fold(0.0, (sum, val) => sum + val);
   }
 
+  IconData get iconData {
+    switch (deviceType?.toLowerCase()) {
+      case 'light':
+      case 'lamp':
+        return Icons.lightbulb_rounded;
+      case 'fan':
+        return Icons.air_rounded;
+      case 'socket':
+      case 'outlet':
+        return Icons.power_rounded;
+      case 'airconditioner':
+      case 'ac':
+        return Icons.ac_unit_rounded;
+      case 'curtain':
+        return Icons.curtains_rounded;
+      case 'sensor':
+        return Icons.sensors_rounded;
+      case 'tv':
+        return Icons.tv_rounded;
+      default:
+        if (icon == 'mode_fan_off' || icon == 'air') return Icons.air_rounded;
+        if (icon == 'lightbulb') return Icons.lightbulb_rounded;
+        if (icon == 'ac_unit') return Icons.ac_unit_rounded;
+        if (icon == 'tv') return Icons.tv_rounded;
+        return Icons.devices_other_rounded;
+    }
+  }
+
+  String get currentText {
+    if (!online) return 'Dòng điện: mất kết nối';
+    if (current <= 0) return 'Dòng điện: 0.00 A';
+    return 'Dòng điện: ${current.toStringAsFixed(2)} A';
+  }
+
+  String get measurementText {
+    if (!online) return 'Thiết bị ngoại tuyến';
+    return '${voltage.toStringAsFixed(0)}V · ${current.toStringAsFixed(2)}A · ${powerWatts.toStringAsFixed(1)}W';
+  }
+
+  String get stateText {
+    if (!online) return 'Ngoại tuyến';
+    if (!isOn) return 'Đã tắt';
+    if (powerWatts > 0) return 'Bật · ${powerWatts.toStringAsFixed(1)} W';
+    return 'Đang bật';
+  }
+
   DeviceModel copyWith({
     String? id,
     String? name,

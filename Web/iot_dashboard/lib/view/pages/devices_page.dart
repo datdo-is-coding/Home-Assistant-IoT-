@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import '../../data/model/action_box_model.dart';
 import '../../data/services/firebase_realtime_service.dart';
+import '../widgets/mobile_parity/action_box_card.dart';
 
 class DevicesPage extends StatelessWidget {
   const DevicesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final fb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -27,9 +29,9 @@ class DevicesPage extends StatelessWidget {
                     Text(
                       'Quản Lý Thiết Bị & Bo Mạch',
                       style: TextStyle(
-                        fontSize: 24,
+                        fontSize: 26,
                         fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        color: theme.colorScheme.onSurface,
                         letterSpacing: -0.5,
                       ),
                     ),
@@ -38,7 +40,8 @@ class DevicesPage extends StatelessWidget {
                       'Giám sát phần cứng ActionBox 3 Relay + BL0942 và SubBox điều phối KWS',
                       style: TextStyle(
                         fontSize: 13,
-                        color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -165,7 +168,13 @@ class DevicesPage extends StatelessWidget {
                   separatorBuilder: (_, _) => const SizedBox(height: 20),
                   itemBuilder: (context, index) {
                     final box = boxes[index];
-                    return _buildActionBoxCard(context, box, isDark, fb);
+                    return ParityActionBoxCard(
+                      actionBox: box,
+                      onTap: () {},
+                      onToggleChannel: (chKey, newState) {
+                        fb.toggleChannel(box.id, chKey, newState);
+                      },
+                    );
                   },
                 );
               },
@@ -189,10 +198,10 @@ class DevicesPage extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? const Color(0xFF161B26) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+          color: isDark ? const Color(0xFF232B3B) : const Color(0xFFE5E7EB),
         ),
       ),
       child: Row(
@@ -255,296 +264,6 @@ class DevicesPage extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildActionBoxCard(
-    BuildContext context,
-    ActionBoxModel box,
-    bool isDark,
-    FirebaseRealtimeService fb,
-  ) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : Colors.grey.shade200;
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // HEADER BO MẠCH
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: (box.isSubBox ? const Color(0xFF8B5CF6) : const Color(0xFF3B82F6))
-                          .withValues(alpha: isDark ? 0.25 : 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      box.isSubBox ? Icons.record_voice_over_rounded : Icons.developer_board_rounded,
-                      color: box.isSubBox ? const Color(0xFF8B5CF6) : const Color(0xFF3B82F6),
-                      size: 26,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            box.name,
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF1E293B),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              box.id,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Vị trí: ${box.room}  ·  IP: ${box.ip}  ·  FW: ${box.firmwareVersion}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              // TRẠNG THÁI ONLINE / OFFLINE
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: box.online
-                      ? const Color(0xFF10B981).withValues(alpha: isDark ? 0.2 : 0.1)
-                      : Colors.red.withValues(alpha: isDark ? 0.2 : 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: box.online ? const Color(0xFF10B981) : Colors.red,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 7,
-                      height: 7,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: box.online ? const Color(0xFF10B981) : Colors.red,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      box.online ? 'Trực tuyến' : 'Ngoại tuyến (15s)',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: box.online ? const Color(0xFF10B981) : Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          if (box.channels.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
-            Text(
-              'CÁC KÊNH RELAY & ĐO CÔNG SUẤT BL0942',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
-                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-              ),
-            ),
-            const SizedBox(height: 12),
-            // LƯỚI KÊNH RELAY
-            Row(
-              children: box.channels.map((ch) {
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 12),
-                    child: _buildChannelCard(context, box.id, ch, isDark, fb),
-                  ),
-                );
-              }).toList(),
-            ),
-          ] else if (box.isSubBox) ...[
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.mic_rounded, color: Color(0xFF8B5CF6), size: 22),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'SubBox tiếp nhận từ khóa giọng nói đánh thức (KWS offline) và điều phối phát âm thanh phản hồi.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChannelCard(
-    BuildContext context,
-    String boxId,
-    ActionBoxChannelModel ch,
-    bool isDark,
-    FirebaseRealtimeService fb,
-  ) {
-    final bgColor = isDark
-        ? (ch.state ? ch.accentColor.withValues(alpha: 0.15) : const Color(0xFF0F172A))
-        : (ch.state ? ch.accentColor.withValues(alpha: 0.08) : const Color(0xFFF8FAFC));
-
-    final borderColor = ch.state
-        ? ch.accentColor.withValues(alpha: 0.5)
-        : (isDark ? const Color(0xFF334155) : Colors.grey.shade200);
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: borderColor, width: 1.2),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Icon(ch.iconData, color: ch.accentColor, size: 20),
-                  const SizedBox(width: 8),
-                  Text(
-                    ch.channelKey.toUpperCase(),
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                    ),
-                  ),
-                ],
-              ),
-              Transform.scale(
-                scale: 0.8,
-                child: Switch(
-                  value: ch.state,
-                  activeThumbColor: ch.accentColor,
-                  onChanged: (val) {
-                    fb.toggleChannel(boxId, ch.channelKey, val);
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            ch.name,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white : const Color(0xFF1E293B),
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 12),
-          // THỐNG SỐ BL0942
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _buildMetricItem('Công suất', '${ch.power.toStringAsFixed(1)}W', isDark),
-              _buildMetricItem('Điện áp', '${ch.voltage.toStringAsFixed(0)}V', isDark),
-              _buildMetricItem('Dòng', '${(ch.current * 1000).toStringAsFixed(0)}mA', isDark),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricItem(String label, String value, bool isDark) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 9,
-            color: isDark ? Colors.grey.shade400 : Colors.grey.shade500,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            color: isDark ? Colors.white : const Color(0xFF1E293B),
-          ),
-        ),
-      ],
     );
   }
 }

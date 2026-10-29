@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import '../../data/model/scene_model.dart';
 import '../../data/services/firebase_realtime_service.dart';
+import '../widgets/mobile_parity/scene_card.dart';
 
 class ScenesPage extends StatelessWidget {
   const ScenesPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final fb = FirebaseRealtimeService();
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -27,9 +29,9 @@ class ScenesPage extends StatelessWidget {
                     Text(
                       'Kịch Bản & Tự Động Hóa',
                       style: TextStyle(
-                        fontSize: 24,
+                        fontSize: 26,
                         fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        color: theme.colorScheme.onSurface,
                         letterSpacing: -0.5,
                       ),
                     ),
@@ -38,7 +40,8 @@ class ScenesPage extends StatelessWidget {
                       'Kích hoạt ngữ cảnh 1-chạm đồng loạt trên các ActionBox và thiết lập lịch tự động',
                       style: TextStyle(
                         fontSize: 13,
-                        color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -46,16 +49,16 @@ class ScenesPage extends StatelessWidget {
                 ElevatedButton.icon(
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Tính năng thêm kịch bản mới đang sẵn sàng.')),
+                      const SnackBar(content: Text('Tính năng tạo kịch bản mới đang sẵn sàng.')),
                     );
                   },
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('Thêm Kịch Bản'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3B82F6),
-                    foregroundColor: Colors.white,
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: theme.colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                 ),
               ],
@@ -67,10 +70,10 @@ class ScenesPage extends StatelessWidget {
             Text(
               'KỊCH BẢN NGỮ CẢNH (SCENES)',
               style: TextStyle(
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.8,
-                color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 14),
@@ -93,7 +96,19 @@ class ScenesPage extends StatelessWidget {
                       itemCount: scenes.length,
                       itemBuilder: (context, index) {
                         final scene = scenes[index];
-                        return _buildSceneCard(context, scene, isDark, fb);
+                        return ParitySceneCard(
+                          scene: scene,
+                          onActivate: () {
+                            fb.triggerScene(scene);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Đã kích hoạt kịch bản: "${scene.name}"'),
+                                duration: const Duration(seconds: 2),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                        );
                       },
                     );
                   },
@@ -140,111 +155,6 @@ class ScenesPage extends StatelessWidget {
               description: 'Mở đèn ngủ, bật quạt và gửi thông báo sẵn sàng',
               isEnabled: true,
               isDark: isDark,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSceneCard(
-    BuildContext context,
-    SceneModel scene,
-    bool isDark,
-    FirebaseRealtimeService fb,
-  ) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = scene.isActive
-        ? scene.color
-        : (isDark ? const Color(0xFF334155) : Colors.grey.shade200);
-
-    return InkWell(
-      onTap: () {
-        fb.triggerScene(scene);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Đã kích hoạt kịch bản: "${scene.name}"'),
-            duration: const Duration(seconds: 2),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(20),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: borderColor, width: scene.isActive ? 2.0 : 1.0),
-          boxShadow: [
-            BoxShadow(
-              color: scene.isActive
-                  ? scene.color.withValues(alpha: 0.25)
-                  : Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
-              blurRadius: scene.isActive ? 16 : 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: scene.color.withValues(alpha: isDark ? 0.25 : 0.12),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(scene.icon, color: scene.color, size: 24),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: scene.isActive
-                        ? scene.color
-                        : (isDark ? const Color(0xFF334155) : Colors.grey.shade100),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    scene.isActive ? 'ĐANG CHẠY' : 'KÍCH HOẠT',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: scene.isActive
-                          ? Colors.white
-                          : (isDark ? Colors.grey.shade300 : Colors.grey.shade700),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  scene.name,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : const Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  scene.description,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
             ),
           ],
         ),

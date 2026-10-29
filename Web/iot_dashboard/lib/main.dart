@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:iot_dashboard/core/theme/app_theme.dart';
 import 'package:iot_dashboard/firebase_options.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
 import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
@@ -29,32 +30,10 @@ class MyApp extends StatelessWidget {
       builder: (context, isDarkMode, child) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: 'IoT Smart Home Dashboard',
+          title: 'Home Companion - Smart IoT Dashboard',
           themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
-          theme: ThemeData(
-            useMaterial3: true,
-            brightness: Brightness.light,
-            colorScheme: ColorScheme.fromSeed(
-              brightness: Brightness.light,
-              seedColor: Colors.blue,
-              surface: Colors.white,
-            ),
-            scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-            cardColor: Colors.white,
-            dividerColor: const Color(0xFFE2E8F0),
-          ),
-          darkTheme: ThemeData(
-            useMaterial3: true,
-            brightness: Brightness.dark,
-            colorScheme: ColorScheme.fromSeed(
-              brightness: Brightness.dark,
-              seedColor: Colors.blue,
-              surface: const Color(0xFF1E293B),
-            ),
-            scaffoldBackgroundColor: const Color(0xFF0F172A),
-            cardColor: const Color(0xFF1E293B),
-            dividerColor: const Color(0xFF334155),
-          ),
+          theme: AppTheme.light(),
+          darkTheme: AppTheme.dark(),
           home: const AuthWrapper(),
         );
       },
