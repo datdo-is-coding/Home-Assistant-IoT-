@@ -1,15 +1,22 @@
 # Bản phát hành được giữ sau dọn repo
 
-- `android/HomeCompetition.apk`: APK release 1.6.0+41 với Progressive Blur,
+- `android/HomeCompetition.apk`: APK release 1.7.0+43 với tự cập nhật từ
+  catalog Firebase và APK trên GitHub Releases; giữ Progressive Blur,
   nền Light Rays và dock nổi; giữ học IR, nhiệt độ/giọng nói và Quản trị nhà.
   Xem [kiểm tra giao diện](../docs/testing/progressive-blur-2026-10-29/README.md);
   giữ application ID, chữ ký và dữ liệu đăng nhập. Đây không phải bản release
   Play Store. SHA-256 nằm trong `SHA256SUMS`.
+  Catalog công khai nằm trong `android/release.json`. App cũ cần cài bản này
+  một lần; các bản tiếp theo được kiểm tra khi mở/trở lại app và tự tải trên
+  mạng không tính phí. Android yêu cầu xác nhận cài, chỉ nhận đúng chữ ký cũ.
 - `firmware/2.3.0-control1/SubBox.bin` và `ActionBox_V2.bin`: đúng hai image
   app-only đã nạp USB cho SubBox 0B54 (0x20000) và ActionBox DDF4 (0x310000),
   hash nạp đã kiểm tra; giữ NVS/bootloader/otadata/model. Thêm IR RX có khai báo
   phần cứng và lệnh quản trị Core có deadline/ACK. DDF4 đã reboot qua Firebase
-  và giữ đăng ký. Đây chưa phải gói OTA ký; DDF8 hoãn cập nhật OTA theo yêu cầu.
+  và giữ đăng ký. DDF8 đã cập nhật qua OTA với `HC-28848533DDF8.target` và
+  manifest cùng thư mục, counter 3; xác nhận hash/health/boot mới và reboot qua
+  Firebase thành công. Target này dành riêng compatibility DDF8, không dùng
+  cho DDF4 hoặc SubBox. Xem [kết quả DDF8](../docs/testing/ddf8-maintenance-2026-10-29/README.md).
   Học IR/nhiệt độ điều hòa thật chờ lắp mắt thu và người dùng kiểm thử sau.
   Xem [bằng chứng và cách dùng](../docs/testing/ir-climate-admin-2026-10-29/README.md).
 - `firmware/2.2.0-ir1/HC-288485350B54.bin`: app SubBox đã nạp USB vào ota_0

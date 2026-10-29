@@ -43,6 +43,17 @@ class _PendingRemoveClient extends GatewayClient {
   }
 }
 
+class _RejectedMaintenanceClient extends _PendingRemoveClient {
+  _RejectedMaintenanceClient(this.failure);
+  final GatewayException failure;
+
+  @override
+  Future<Map<String, dynamic>> request(String path,
+      {Map<String, dynamic>? body, String? method, Duration? timeout}) async {
+    throw failure;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -145,6 +156,43 @@ void main() {
   }
 
   group('ActionBox & SubBox Maintenance Tests (Task T11)', () {
+    for (final statusCode in <int?>[409, null]) {
+      testWidgets(
+          'maintenance rejection $statusCode is distinguished from a connection failure',
+          (tester) async {
+        tester.view.physicalSize = const Size(1200, 1800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final message = statusCode == null
+            ? 'Không kết nối được Gateway'
+            : 'Bo cần firmware mới để nhận lệnh quản trị.';
+        final client =
+            _RejectedMaintenanceClient(GatewayException(message, statusCode));
+        addTearDown(client.dispose);
+        await tester.pumpWidget(
+            createTestWidget(client: client, actionBox: sampleActionBoxV2));
+        await tester.pumpAndSettle();
+        final remove = find.byKey(const Key('remove_device_tile'));
+        await tester.ensureVisible(remove);
+        await tester.tap(remove);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('confirm_remove_button')));
+        await tester.pumpAndSettle();
+        expect(find.text(message), findsOneWidget);
+        expect(
+            find.text(statusCode == null
+                ? 'Lỗi kết nối'
+                : 'Yêu cầu chưa được thực hiện'),
+            findsOneWidget);
+        if (statusCode != null) {
+          expect(find.text('Lỗi kết nối'), findsNothing);
+        }
+        expect(find.text('Đã gỡ thiết bị thành công!'), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
+
     testWidgets(
         'an accepted remove request cannot report success before the device result',
         (tester) async {

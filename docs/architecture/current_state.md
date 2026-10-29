@@ -2,14 +2,21 @@
 
 ## Nguồn và dịch vụ đang duy trì
 
-Cập nhật giao diện: App 1.6.0+41 dùng Progressive Blur + Light Rays, dock nổi,
+Cập nhật 1.7.0+43 bổ sung kiểm tra catalog Firebase và tải APK GitHub Releases,
+kiểm tra hash/chữ ký/package/version code, cài qua Android mà không uninstall.
+Rules mới chỉ cho tài khoản đăng nhập đọc catalog, client không được ghi.
+Spark được giữ nguyên; chưa coi luồng cài trên điện thoại là đã kiểm chứng.
+
+Cập nhật giao diện 1.6.0+41 dùng Progressive Blur + Light Rays, dock nổi,
 bề mặt kính nhẹ, giữ dữ liệu/quyền và các luồng điều khiển. Xem
 [ảnh, kiểm tra và giới hạn](../testing/progressive-blur-2026-10-29/README.md).
 
 Bản tích hợp IR/quản trị 1.5.0+26: SubBox 0B54 và ActionBox DDF4 chạy
 2.3.0-control1; main/radio Pi đã đồng bộ. Tài khoản Google đang liên kết có
 vai trò Owner của nhà. Đã kiểm tra reboot DDF4 qua Firebase, boot mới được
-xác thực và enrollment giữ nguyên. DDF8 hoãn OTA theo yêu cầu.
+xác thực và enrollment giữ nguyên. DDF8 đã cập nhật OTA 2.3.0-control1 ở lượt
+sau, kiểm tra hash/health, giữ cấu hình và reboot qua Firebase thành công.
+Xem [kết quả DDF8](../testing/ddf8-maintenance-2026-10-29/README.md).
 Xem [bằng chứng 1.5.0](../testing/ir-climate-admin-2026-10-29/README.md).
 
 App duy nhất là `App/HomeCompetition`, đọc dữ liệu và gửi yêu cầu ghép qua

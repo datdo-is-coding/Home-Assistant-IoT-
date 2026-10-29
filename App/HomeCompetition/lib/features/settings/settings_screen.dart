@@ -7,6 +7,7 @@ import '../../providers/smart_home_providers.dart';
 import '../../services/gateway_client.dart';
 import '../../widgets/home_connection_name.dart';
 import '../../widgets/soft_3d_decorations.dart';
+import '../../widgets/app_update_tile.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -56,6 +57,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.watch(gatewayClientProvider
         .select((c) => (c.connected, c.error, c.usesFirebase)));
     final iconColor = theme.colorScheme.onSurfaceVariant;
+    final appVersion = ref
+        .watch(appUpdateProvider.select((update) => update.installedVersion));
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -164,15 +167,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ],
                           ))),
               const Divider(height: 1, indent: 56),
+              const AppUpdateTile(),
+              const Divider(height: 1, indent: 56),
               _SettingsTile(
                   icon: Icons.info_outline_rounded,
                   iconColor: iconColor,
                   title: 'HomeCompetition',
-                  trailing: const Text('1.6.0', style: TextStyle(fontSize: 12)),
+                  trailing:
+                      Text(appVersion, style: const TextStyle(fontSize: 12)),
                   onTap: () => showAboutDialog(
                         context: context,
                         applicationName: 'HomeCompetition',
-                        applicationVersion: '1.6.0',
+                        applicationVersion: appVersion,
                         children: [
                           const Text(
                               'Trạng thái được đồng bộ qua Firebase. Giọng nói được xử lý tại Gateway.')

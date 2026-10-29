@@ -9,6 +9,7 @@ import '../models/automation.dart';
 import '../models/voice_alias.dart';
 import '../repositories/smart_home_repository.dart';
 import '../services/app_preferences_service.dart';
+import '../services/app_update_service.dart';
 
 import '../main.dart' show gateway;
 import '../services/gateway_client.dart';
@@ -18,6 +19,9 @@ final appPreferencesServiceProvider = Provider<AppPreferencesService>((ref) {
 });
 
 final gatewayClientProvider = ChangeNotifierProvider<GatewayClient>((ref) => gateway);
+
+final appUpdateProvider = ChangeNotifierProvider<AppUpdateService>(
+    (ref) => AppUpdateService());
 
 final smartHomeRepositoryProvider = Provider<SmartHomeRepository>((ref) {
   const useMock = bool.fromEnvironment('USE_MOCK_DATA', defaultValue: false);

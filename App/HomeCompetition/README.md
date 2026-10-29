@@ -17,7 +17,11 @@ flutter build apk --release
 ```
 
 APK dùng hằng ngày: `build/app/outputs/flutter-apk/app-release.apk`.
-Bản release 1.6.0+41 được giữ tại `releases/android/HomeCompetition.apk`.
+Bản release 1.7.0+43 được giữ tại `releases/android/HomeCompetition.apk`.
+Bản này tự kiểm tra catalog Firebase, tải APK GitHub Releases trên mạng không
+tính phí và xác minh hash, package, version code, chữ ký trước khi mở trình cài
+Android. Cài đặt → Cập nhật ứng dụng có tải/cài thủ công và kiểm tra lại.
+App cũ cần cài bản bootstrap này một lần; các bản sau giữ đăng nhập/dữ liệu.
 Bản 1.6.0 dùng Progressive Blur ở dock nổi và nền Light Rays vẽ tĩnh, áp dụng
 cùng bề mặt kính xuyên sáng cho năm tab, màn đăng nhập và bảng điều khiển.
 Giảm hiệu ứng/tương phản cao dùng nền đọc rõ, không thêm blur vào từng thẻ.

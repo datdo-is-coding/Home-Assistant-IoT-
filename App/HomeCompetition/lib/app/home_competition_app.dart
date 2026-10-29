@@ -7,6 +7,7 @@ import '../screens/login_screen.dart';
 import '../screens/firebase_login_screen.dart';
 import '../services/firebase_home_client.dart';
 import '../services/gateway_client.dart';
+import '../services/app_update_service.dart';
 import 'app_router.dart';
 
 class HomeCompetitionApp extends ConsumerStatefulWidget {
@@ -20,6 +21,9 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
     with WidgetsBindingObserver {
   static const _useMock = bool.fromEnvironment('USE_MOCK_DATA');
   late final GatewayClient _client;
+  late final AppUpdateService _updates;
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
+  int? _announcedUpdate;
   Timer? _timer;
   bool _ready = _useMock;
 
@@ -27,8 +31,26 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
   void initState() {
     super.initState();
     _client = ref.read(gatewayClientProvider);
+    _updates = ref.read(appUpdateProvider)..addListener(_onUpdate);
     WidgetsBinding.instance.addObserver(this);
     if (!_useMock) _restore();
+  }
+
+  void _onUpdate() {
+    if (!mounted ||
+        !_ready ||
+        !_client.authenticated ||
+        _updates.phase != AppUpdatePhase.ready ||
+        _updates.release?.code == _announcedUpdate ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused)
+      return;
+    final messenger = _messenger.currentState;
+    if (messenger == null) return;
+    _announcedUpdate = _updates.release!.code;
+    messenger.showSnackBar(SnackBar(
+      content: Text('Bản ${_updates.release!.version} đã sẵn sàng'),
+      action: SnackBarAction(label: 'Cài đặt', onPressed: _updates.install),
+    ));
   }
 
   Future<void> _restore() async {
@@ -41,6 +63,7 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
     setState(() => _ready = true);
 
     if (_client.authenticated) {
+      if (_client.usesFirebase) unawaited(_updates.check());
       _client.revalidateSession().then((_) {
         if (mounted &&
             (WidgetsBinding.instance.lifecycleState == null ||
@@ -72,6 +95,10 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
         _client.authenticated) {
       _client.eventStream?.resume();
       _client.refresh();
+      if (_client.usesFirebase) {
+        _updates.resume();
+        unawaited(_updates.check());
+      }
       _startPolling();
     }
   }
@@ -79,6 +106,7 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
   @override
   void dispose() {
     _timer?.cancel();
+    _updates.removeListener(_onUpdate);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -89,6 +117,11 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
     final session = ref.watch(gatewayClientProvider
         .select((c) => (c.authenticated, c.currentUserId)));
     final authenticated = session.$1;
+
+    ref.listen<bool>(gatewayClientProvider.select((c) => c.authenticated),
+        (previous, next) {
+      if (next && _ready && _client.usesFirebase) unawaited(_updates.check());
+    });
 
     ref.listen<bool>(
       gatewayClientProvider.select((c) => c.isSseConnected),
@@ -105,6 +138,7 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
 
     if (!_ready || (!_useMock && !authenticated)) {
       return MaterialApp(
+        scaffoldMessengerKey: _messenger,
         title: 'HomeCompetition',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light(),
@@ -119,6 +153,7 @@ class _HomeCompetitionAppState extends ConsumerState<HomeCompetitionApp>
     }
 
     return MaterialApp.router(
+      scaffoldMessengerKey: _messenger,
       title: 'HomeCompetition',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),

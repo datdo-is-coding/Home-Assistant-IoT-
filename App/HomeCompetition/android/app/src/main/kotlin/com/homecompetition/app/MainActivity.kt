@@ -19,6 +19,12 @@ import javax.crypto.spec.GCMParameterSpec
 class MainActivity : FlutterActivity() {
     private val alias = "sic-home-session"
     private var renderSurface: Surface? = null
+    private var appUpdates: AppUpdateBridge? = null
+
+    override fun onDestroy() {
+        appUpdates?.close()
+        super.onDestroy()
+    }
 
     override fun onResume() {
         super.onResume()
@@ -79,6 +85,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         CoreProvisioningBridge(this, flutterEngine.dartExecutor.binaryMessenger)
+        appUpdates = AppUpdateBridge(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "sic/session").setMethodCallHandler { call, result ->
             val prefs = getSharedPreferences("sic_session", MODE_PRIVATE)
             try {

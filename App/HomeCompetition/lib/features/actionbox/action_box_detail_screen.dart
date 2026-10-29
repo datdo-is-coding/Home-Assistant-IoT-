@@ -163,11 +163,7 @@ class _FeatureActionBoxDetailScreenState
         });
       }
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _operationError = e is GatewayException ? e.message : e.toString();
-        _operationStatusText = 'Lỗi kết nối';
-      });
+      _showOperationError(e);
     }
   }
 
@@ -220,12 +216,20 @@ class _FeatureActionBoxDetailScreenState
         });
       }
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _operationError = e is GatewayException ? e.message : e.toString();
-        _operationStatusText = 'Lỗi kết nối';
-      });
+      _showOperationError(e);
     }
+  }
+
+  void _showOperationError(Object error) {
+    if (!mounted) return;
+    setState(() {
+      _operationError =
+          error is GatewayException ? error.message : error.toString();
+      _operationStatusText =
+          error is GatewayException && error.statusCode != null
+              ? 'Yêu cầu chưa được thực hiện'
+              : 'Lỗi kết nối';
+    });
   }
 
   String _statusMessageForState(DeviceOperationState state) {
@@ -774,7 +778,8 @@ class _FeatureActionBoxDetailScreenState
                     const SizedBox(height: 16),
 
                     if (!gateway.usesFirebase ||
-                        asMap(gateway.nodes[ab.id])['core_node_id'] == null) ...[
+                        asMap(gateway.nodes[ab.id])['core_node_id'] ==
+                            null) ...[
                       _buildIdentifyCard(ab, theme, isDark),
                       const SizedBox(height: 12),
                     ],

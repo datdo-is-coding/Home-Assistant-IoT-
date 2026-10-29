@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "app_releases": {
+      "android": {
+        "stable": {
+          ".read": "auth != null",
+          ".write": false
+        }
+      }
+    }
+  }
+}

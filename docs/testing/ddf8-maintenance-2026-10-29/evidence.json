@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-29",
+  "status": "ota_succeeded_maintenance_verified",
+  "branch": "main",
+  "node_id": 3399160,
+  "device": "HC-28848533DDF8",
+  "before": {
+    "firmware": "2.0.0-b1",
+    "boot_id": "5836394124416150883",
+    "online": true,
+    "maintenance_capability": false
+  },
+  "backup": {
+    "flash_size": 16777216,
+    "flash_sha256": "129063eb5007213ccaa5595b796426a47a667789981846e2b0e0065ea962f9b2",
+    "sqlite_integrity": "ok",
+    "sqlite_private_path": "/home/pi4/.local/state/ir-climate-admin/ddf8-before-20261029-220808/core.db"
+  },
+  "manifest": {
+    "schema": 2,
+    "role": 2,
+    "artifact_type": 1,
+    "flags": 0,
+    "compatibility_id": "eae971e7411c06ac4bb1a861529cafbc775ff4b10d7043e74a81eba82d95a644",
+    "version": "2.3.0-control1",
+    "size": 1354576,
+    "sha256": "04e662594c0d64a2d5a0095c6b57e183b80cf937d4bd76f186945b814c6e33d4",
+    "min_agent": 2,
+    "min_bootloader": 1,
+    "protocol_min": 1,
+    "protocol_max": 1,
+    "release_counter": 3,
+    "security_epoch": 0,
+    "key_id": 1721249707
+  },
+  "job_id": "OTA-357b35c27201698c9fc902d3",
+  "checks": {
+    "ota_signer_local_tests": 7,
+    "flutter_maintenance_tests": 14,
+    "flutter_analyze": "No issues found",
+    "flutter_release_build": true
+  },
+  "factory_reset_performed": false,
+  "remove_from_home_performed": false,
+  "unrelated_change_preserved": "Gateway/gateway/discovery_manager.py",
+  "ota_attempts": [
+    {
+      "job_id": "OTA-357b35c27201698c9fc902d3",
+      "status": "FAILED",
+      "offset": 290496,
+      "reason": "transfer_timeout"
+    },
+    {
+      "job_id": "OTA-48412eaa037ae5a568e1c8e1",
+      "status": "SUCCEEDED",
+      "offset": 1354576,
+      "old_boot": "8382398596809439671",
+      "new_boot": "12213965548114377147",
+      "authenticated_image_hash_matches": true,
+      "health_confirmed": true
+    }
+  ],
+  "app": {
+    "version": "1.7.0",
+    "version_code": 43,
+    "sha256": "d543d65993fbc13c69e9faf551d7342adb90e98729492dcb144524fceaf12aad",
+    "same_signer": true,
+    "installed": false,
+    "phone_adb_available": false
+  },
+  "diagnostics": {
+    "serial_capture_after_failed_attempt": "USB_UART_CHIP_RESET observed on both boards when serial was opened; both subsequently reconnected with their enrollment unchanged."
+  },
+  "after": {
+    "firmware": "2.3.0-control1",
+    "registration": "REGISTERED",
+    "firebase_online": true,
+    "maintenance_actions": [
+      "reboot",
+      "factory_reset",
+      "remove_from_home"
+    ],
+    "preserved": [
+      "assignment",
+      "credentials",
+      "channel_labels",
+      "device_names_and_types",
+      "bindings"
+    ]
+  },
+  "reboot": {
+    "operation_id": "HCM-ffea275913c04df1e1f8c3e4",
+    "transport": "Firebase RPC",
+    "states": [
+      "accepted",
+      "running",
+      "succeeded"
+    ],
+    "boot_changed": true,
+    "new_boot": "10047243855772218375",
+    "firebase_boot_matches": true
+  }
+}

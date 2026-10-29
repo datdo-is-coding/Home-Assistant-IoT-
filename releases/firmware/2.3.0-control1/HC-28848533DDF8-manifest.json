@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "role": 2,
+  "artifact_type": 1,
+  "flags": 0,
+  "compatibility_id": "eae971e7411c06ac4bb1a861529cafbc775ff4b10d7043e74a81eba82d95a644",
+  "version": "2.3.0-control1",
+  "size": 1354576,
+  "sha256": "04e662594c0d64a2d5a0095c6b57e183b80cf937d4bd76f186945b814c6e33d4",
+  "min_agent": 2,
+  "min_bootloader": 1,
+  "protocol_min": 1,
+  "protocol_max": 1,
+  "release_counter": 3,
+  "security_epoch": 0,
+  "key_id": 1721249707
+}
