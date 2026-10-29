@@ -1,102 +1,186 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:iot_dashboard/data/model/action_box_model.dart';
-import 'package:iot_dashboard/data/model/device_model.dart';
-import 'package:iot_dashboard/data/model/scene_model.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:home_competition/main.dart';
+import 'package:home_competition/services/gateway_client.dart';
 
 void main() {
-  group('ActionBoxModel Tests', () {
-    test('Correctly constructs ActionBox and calculates channels and power', () {
-      final channels = [
-        const ActionBoxChannelModel(
-          index: 1,
-          channelKey: 'ch1',
-          name: 'Đèn trần',
-          deviceType: 'light',
-          state: true,
-          voltage: 220.5,
-          current: 0.12,
-          power: 26.46,
-          energyKwh: 1.25,
-        ),
-        const ActionBoxChannelModel(
-          index: 2,
-          channelKey: 'ch2',
-          name: 'Bình nóng lạnh',
-          deviceType: 'waterHeater',
-          state: false,
-          voltage: 220.0,
-          current: 0.0,
-          power: 0.0,
-          energyKwh: 14.8,
-        ),
-      ];
-
-      final box = ActionBoxModel(
-        id: 'action_box_01',
-        name: 'ActionBox Phòng Khách',
-        room: 'Phòng khách',
-        online: true,
-        totalPower: 26.46,
-        totalEnergyKwh: 16.05,
-        channels: channels,
-      );
-
-      expect(box.id, 'action_box_01');
-      expect(box.online, true);
-      expect(box.channels.length, 2);
-      expect(box.channels[0].state, true);
-      expect(box.channels[0].power, 26.46);
-      expect(box.totalPower, 26.46);
-      expect(box.channels[1].state, false);
-      expect(box.isSubBox, false);
-    });
-
-    test('Correctly identifies SubBox', () {
-      const subBox = ActionBoxModel(
-        id: 'SB_01',
-        name: 'SubBox KWS Phòng Khách',
-        room: 'Phòng khách',
-        boardModel: 'SubBox_V1',
-      );
-      expect(subBox.isSubBox, true);
-    });
+  setUpAll(() async {
+    final configFile = File('.dart_tool/package_config.json');
+    final packages =
+        jsonDecode(await configFile.readAsString())['packages'] as List;
+    final flutter = packages.firstWhere((p) => p['name'] == 'flutter');
+    final root = Directory.fromUri(
+            configFile.absolute.uri.resolve(flutter['rootUri'] as String))
+        .uri;
+    final fonts = root.resolve('../../bin/cache/artifacts/material_fonts/');
+    final loader = FontLoader('Roboto');
+    for (final name in ['Roboto-Regular.ttf', 'Roboto-Bold.ttf']) {
+      loader.addFont(File.fromUri(fonts.resolve(name))
+          .readAsBytes()
+          .then(ByteData.sublistView));
+    }
+    await loader.load();
+    final icons = FontLoader('MaterialIcons');
+    icons.addFont(File.fromUri(fonts.resolve('MaterialIcons-Regular.otf'))
+        .readAsBytes()
+        .then(ByteData.sublistView));
+    await icons.load();
+  });
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    appTheme.value = ThemeMode.light;
   });
 
-  group('DeviceModel Tests', () {
-    test('Calculates power display correctly', () {
-      final device = DeviceModel(
-        id: 'dev_1',
-        name: 'Quạt hút',
-        icon: 'air',
-        isOn: true,
-        powerWatts: 45.0,
-        voltage: 220.0,
-        current: 0.2,
-      );
-
-      expect(device.isOn, true);
-      expect(device.powerWatts, 45.0);
-    });
+  testWidgets('connection form is usable on a small phone', (tester) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final client = GatewayClient(persistSession: false);
+    addTearDown(client.dispose);
+    await tester.pumpWidget(DTVEnergyApp(client: client));
+    expect(find.text('Ngôi nhà của bạn'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Kết nối'), findsOneWidget);
+    await tester.enterText(find.byType(TextFormField).first, '');
+    await tester.tap(find.widgetWithText(FilledButton, 'Kết nối'));
+    await tester.pump();
+    expect(find.text('Nhập địa chỉ Gateway'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
-  group('SceneModel Tests', () {
-    test('Scene execution toggle and actions count', () {
-      const scene = SceneModel(
-        id: 'scene_goodnight',
-        name: 'Đi ngủ',
-        icon: Icons.bedtime_rounded,
-        color: Color(0xFF6366F1),
-        description: 'Tắt toàn bộ đèn và bật điều hòa 26 độ',
-        actions: [
-          SceneAction(boxId: 'action_box_01', channelKey: 'ch1', targetState: false),
-          SceneAction(boxId: 'action_box_01', channelKey: 'ch2', targetState: false),
-        ],
-      );
-
-      expect(scene.actions.length, 2);
-      expect(scene.actions[0].targetState, false);
-      expect(scene.color, const Color(0xFF6366F1));
-    });
+  testWidgets(
+      'home, device, energy and settings remain usable at phone/tablet sizes',
+      (tester) async {
+    final client = GatewayClient(
+        persistSession: false,
+        client: MockClient((req) async {
+          if (req.url.path.endsWith('/telemetry')) {
+            return http.Response(
+                '{"telemetry":[{"power":52.8,"recorded_at":"2026-10-02T03:30:00Z"},{"power":42.0,"recorded_at":"2026-10-02T03:29:00Z"}]}',
+                200);
+          }
+          if (req.url.path == '/api/auth/me') {
+            return http.Response(
+                jsonEncode({
+                  'authenticated': true,
+                  'user': {'id': 1, 'fullname': 'Tuấn', 'role': 'admin'}
+                }),
+                200,
+                headers: {'content-type': 'application/json; charset=utf-8'});
+          }
+          return http.Response(
+              jsonEncode({
+                'nodes': {
+                  'AB1': {
+                    'name': 'ActionBox phòng khách',
+                    'room': 'livingroom',
+                    'status': 'online',
+                    'relay_state': [1, 0],
+                    'channels': {
+                      'ch2': {'name': 'Quạt trần', 'device_type': 'fan'},
+                      'ch1': {'name': 'Đèn phòng khách', 'device_type': 'light'}
+                    },
+                    'last_telemetry': {
+                      'voltage': 220.5,
+                      'current': .24,
+                      'power': 52.8,
+                      'energy': 1.24
+                    }
+                  },
+                  'AB2': {
+                    'name': 'ActionBox phòng ngủ',
+                    'room': 'bedroom',
+                    'status': 'offline',
+                    'relay_state': [0, 1],
+                    'channels': {
+                      'ch1': {'name': 'Đèn đầu giường', 'device_type': 'light'},
+                      'ch2': {'name': 'Quạt phòng ngủ', 'device_type': 'fan'}
+                    }
+                  },
+                },
+                'pending': {}
+              }),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }));
+    await client.loginWithKey(url: 'http://test:8000', key: 'test');
+    addTearDown(client.dispose);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.view.devicePixelRatio = 1;
+    for (final size in [
+      const Size(390, 844),
+      const Size(360, 800),
+      const Size(800, 1000)
+    ]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(DTVEnergyApp(client: client));
+      await tester.pump(const Duration(milliseconds: 400));
+      for (final label in ['Nhà', 'Thiết bị', 'Điện năng', 'Cài đặt']) {
+        await tester.tap(find.descendant(
+            of: find.byType(NavigationBar), matching: find.text(label)));
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(tester.takeException(), isNull, reason: '$size / $label');
+        if (size.width == 390) {
+          client.updatedAt = DateTime(2026, 10, 2, 10, 30);
+          client.notifyListeners();
+          await tester.pump();
+          final name = {
+            'Nhà': 'home',
+            'Thiết bị': 'devices',
+            'Điện năng': 'energy',
+            'Cài đặt': 'settings'
+          }[label];
+          await expectLater(find.byType(Scaffold).first,
+              matchesGoldenFile('goldens/$name.png'));
+        }
+      }
+    }
+    tester.view.physicalSize = const Size(360, 800);
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    for (final label in ['Nhà', 'Thiết bị', 'Điện năng', 'Cài đặt']) {
+      await tester.tap(find.descendant(
+          of: find.byType(NavigationBar), matching: find.text(label)));
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull, reason: 'Large text / $label');
+    }
+    tester.platformDispatcher.clearTextScaleFactorTestValue();
+    await tester.tap(find.descendant(
+        of: find.byType(NavigationBar), matching: find.text('Thiết bị')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('ActionBox phòng khách'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Số đo gần nhất'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pageBack();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 100));
+    tester.view.physicalSize = const Size(390, 844);
+    appTheme.value = ThemeMode.dark;
+    await tester.pump();
+    await tester.tap(find.descendant(
+        of: find.byType(NavigationBar), matching: find.text('Nhà')));
+    await tester.pump(const Duration(milliseconds: 400));
+    client.updatedAt = DateTime(2026, 10, 2, 10, 30);
+    client.notifyListeners();
+    await tester.pump();
+    await expectLater(find.byType(Scaffold).first,
+        matchesGoldenFile('goldens/home-dark.png'));
+    client.connected = false;
+    client.error = 'Không kết nối được Gateway. Kiểm tra mạng và địa chỉ.';
+    client.notifyListeners();
+    await tester.pump();
+    for (final toggle in tester.widgetList<Switch>(find.byType(Switch))) {
+      expect(toggle.onChanged, isNull);
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 }
