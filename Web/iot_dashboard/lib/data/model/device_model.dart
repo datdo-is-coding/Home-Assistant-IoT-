@@ -9,6 +9,17 @@ class DeviceModel {
   Color? color;
   List<double>? hourlyKwh;
 
+  // Thuộc tính mở rộng liên kết phần cứng và Firebase RTDB
+  final String? boxId;
+  final String? channelKey;
+  final String? deviceType;
+  final double voltage;
+  final double current;
+  final double energyKwh;
+  final bool online;
+  final String roomName;
+  bool isFavorite;
+
   DeviceModel({
     required this.id,
     required this.name,
@@ -17,6 +28,15 @@ class DeviceModel {
     this.powerWatts = 0,
     this.color,
     this.hourlyKwh,
+    this.boxId,
+    this.channelKey,
+    this.deviceType,
+    this.voltage = 220.0,
+    this.current = 0.0,
+    this.energyKwh = 0.0,
+    this.online = true,
+    this.roomName = '',
+    this.isFavorite = false,
   });
 
   double getTotalUntilCurrentHour(int currentHour) {
@@ -26,5 +46,42 @@ class DeviceModel {
         .sublist(0, validLength)
         .fold(0.0, (sum, val) => sum + val);
   }
-}
 
+  DeviceModel copyWith({
+    String? id,
+    String? name,
+    String? icon,
+    bool? isOn,
+    double? powerWatts,
+    Color? color,
+    List<double>? hourlyKwh,
+    String? boxId,
+    String? channelKey,
+    String? deviceType,
+    double? voltage,
+    double? current,
+    double? energyKwh,
+    bool? online,
+    String? roomName,
+    bool? isFavorite,
+  }) {
+    return DeviceModel(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      icon: icon ?? this.icon,
+      isOn: isOn ?? this.isOn,
+      powerWatts: powerWatts ?? this.powerWatts,
+      color: color ?? this.color,
+      hourlyKwh: hourlyKwh ?? this.hourlyKwh,
+      boxId: boxId ?? this.boxId,
+      channelKey: channelKey ?? this.channelKey,
+      deviceType: deviceType ?? this.deviceType,
+      voltage: voltage ?? this.voltage,
+      current: current ?? this.current,
+      energyKwh: energyKwh ?? this.energyKwh,
+      online: online ?? this.online,
+      roomName: roomName ?? this.roomName,
+      isFavorite: isFavorite ?? this.isFavorite,
+    );
+  }
+}

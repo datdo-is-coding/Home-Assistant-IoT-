@@ -3,6 +3,7 @@ import 'package:iot_dashboard/data/constants.dart';
 import 'package:iot_dashboard/data/model/room_model.dart';
 import 'package:iot_dashboard/data/model/user_model.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
+import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
 import 'package:iot_dashboard/view/widgets/common/device_power_manager.dart';
 
 class RoomDeviceListCard extends StatefulWidget {
@@ -68,7 +69,9 @@ class _RoomDeviceListCardState extends State<RoomDeviceListCard> {
 
     final currentRoom = rooms.firstWhere(
       (room) => room.id == selectedRoomId,
-      orElse: () => rooms.first,
+      orElse: () => rooms.isNotEmpty
+          ? rooms.first
+          : RoomModel(id: 'r_empty', name: 'Đang kết nối...', devices: []),
     );
 
     return Container(
@@ -302,7 +305,7 @@ class _RoomDeviceListCardState extends State<RoomDeviceListCard> {
                                 const SizedBox(width: 6),
                                 Text(
                                   device.isOn
-                                      ? '${device.powerWatts} W • Đang bật'
+                                      ? '${device.powerWatts.toStringAsFixed(1)} W${device.voltage > 0 ? " · ${device.voltage.toStringAsFixed(0)}V" : ""} • Đang bật'
                                       : 'Đã tắt',
                                   style: TextStyle(
                                     fontSize: AppFontSizes.caption,
@@ -328,6 +331,14 @@ class _RoomDeviceListCardState extends State<RoomDeviceListCard> {
                               device.name,
                               value,
                             );
+                            if (device.boxId != null &&
+                                device.channelKey != null) {
+                              FirebaseRealtimeService().toggleChannel(
+                                device.boxId!,
+                                device.channelKey!,
+                                value,
+                              );
+                            }
                           });
                         },
                       ),

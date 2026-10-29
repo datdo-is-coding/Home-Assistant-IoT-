@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:iot_dashboard/data/model/device_model.dart';
 import 'package:iot_dashboard/data/model/room_model.dart';
+import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
 
 /// Class quản lý và tính toán dữ liệu công suất thiết bị IoT dùng chung
 /// cho toàn bộ các biểu đồ (Charts) và thẻ thống kê (Cards) trong ứng dụng.
@@ -13,8 +14,16 @@ class DevicePowerManager {
   // Giá điện trung bình (VND / kWh)
   static const double defaultPricePerKwh = 2500.0;
 
+  List<RoomModel> get rooms {
+    final live = FirebaseRealtimeService().roomsNotifier.value;
+    if (live.isNotEmpty) {
+      return live;
+    }
+    return _defaultRooms;
+  }
+
   /// Danh sách dữ liệu phòng và thiết bị mẫu chuẩn hệ thống
-  final List<RoomModel> rooms = [
+  static final List<RoomModel> _defaultRooms = [
     RoomModel(
       id: 'e1',
       name: 'Phòng ngủ',

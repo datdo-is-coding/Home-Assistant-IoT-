@@ -6,17 +6,23 @@ import 'package:iot_dashboard/view/pages/home_page.dart';
 import 'package:iot_dashboard/view/pages/profile_page.dart';
 import 'package:iot_dashboard/view/pages/report_page.dart';
 import 'package:iot_dashboard/view/pages/setting_page.dart';
+import 'package:iot_dashboard/view/pages/devices_page.dart';
+import 'package:iot_dashboard/view/pages/scenes_page.dart';
+import 'package:iot_dashboard/view/pages/voice_page.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
 import 'package:iot_dashboard/view/widgets/navigation/sidebar_widget.dart';
 import 'package:iot_dashboard/view/widgets/navigation/topbar_widget.dart';
 
-List<Widget> pages = [
-  HomePage(), // Index 0: Dashboard (Trang chủ)
-  ReportPage(), // Index 1: Report (Báo cáo)
-  ProfilePage(), // Index 2: Profile (Hồ sơ)
-  AlertsPage(), // Index 3: About (Giới thiệu)
-  ContactPage(), // Index 4: Contact (Liên hệ)
-  SettingPage(), // Index 5: Setting (Cài đặt)
+List<Widget> pages = const [
+  HomePage(),    // Index 0: Dashboard (Trang chủ)
+  DevicesPage(), // Index 1: Thiết bị & Bo Mạch (ActionBox & SubBox)
+  ReportPage(),  // Index 2: Thống Kê & Điện Năng
+  ScenesPage(),  // Index 3: Kịch Bản & Tự Động Hóa
+  VoicePage(),   // Index 4: Giọng Nói & KWS
+  AlertsPage(),  // Index 5: Cảnh Báo
+  ProfilePage(), // Index 6: Hồ Sơ
+  ContactPage(), // Index 7: Hỗ Trợ & Liên Hệ
+  SettingPage(), // Index 8: Cài Đặt
 ];
 
 class WidgetsTree extends StatelessWidget {
@@ -42,7 +48,8 @@ class WidgetsTree extends StatelessWidget {
                   child: ValueListenableBuilder<int>(
                     valueListenable: selectedPageNotifier,
                     builder: (context, selectedPage, child) {
-                      return pages[selectedPage];
+                      final validIndex = selectedPage.clamp(0, pages.length - 1);
+                      return pages[validIndex];
                     },
                   ),
                 ),

@@ -22,7 +22,7 @@ class SidebarWidget extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: isSidebarOpenNotifier,
       builder: (context, isOpen, child) {
-        final sidebarWidth = isOpen ? 240.0 : 78.0;
+        final sidebarWidth = isOpen ? 250.0 : 78.0;
 
         return ValueListenableBuilder<int>(
           valueListenable: selectedPageNotifier,
@@ -62,9 +62,9 @@ class SidebarWidget extends StatelessWidget {
                         // 1. BRAND / LOGO HEADER VÀ NÚT ĐÓNG/MỞ
                         _buildBrandHeader(context, isOpen, isDark),
 
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 20),
 
-                        // 2. NAV LINKS LIST (Dashboard, Thống kê, Hồ sơ, Cảnh báo, Liên hệ)
+                        // 2. NAV LINKS LIST
                         Expanded(
                           child: SingleChildScrollView(
                             child: Column(
@@ -77,55 +77,84 @@ class SidebarWidget extends StatelessWidget {
                                   isDark: isDark,
                                   onTap: () => selectedPageNotifier.value = 0,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 _SidebarNavItem(
-                                  icon: Icons.bar_chart_rounded,
-                                  label: "Thống Kê",
+                                  icon: Icons.developer_board_rounded,
+                                  label: "Thiết Bị & Bo Mạch",
                                   isSelected: selectedIndex == 1,
                                   isOpen: isOpen,
                                   isDark: isDark,
                                   onTap: () => selectedPageNotifier.value = 1,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 _SidebarNavItem(
-                                  icon: Icons.person_rounded,
-                                  label: "Hồ Sơ",
+                                  icon: Icons.bar_chart_rounded,
+                                  label: "Điện Năng & Thống Kê",
                                   isSelected: selectedIndex == 2,
                                   isOpen: isOpen,
                                   isDark: isDark,
                                   onTap: () => selectedPageNotifier.value = 2,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 _SidebarNavItem(
-                                  icon: Icons.notifications_active_rounded,
-                                  label: "Cảnh Báo",
+                                  icon: Icons.bolt_rounded,
+                                  label: "Kịch Bản",
                                   isSelected: selectedIndex == 3,
                                   isOpen: isOpen,
                                   isDark: isDark,
                                   onTap: () => selectedPageNotifier.value = 3,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(height: 6),
                                 _SidebarNavItem(
-                                  icon: Icons.support_agent_rounded,
-                                  label: "Hỗ Trợ & Liên Hệ",
+                                  icon: Icons.record_voice_over_rounded,
+                                  label: "Giọng Nói & KWS",
                                   isSelected: selectedIndex == 4,
                                   isOpen: isOpen,
                                   isDark: isDark,
                                   onTap: () => selectedPageNotifier.value = 4,
+                                ),
+                                const SizedBox(height: 6),
+                                _SidebarNavItem(
+                                  icon: Icons.notifications_active_rounded,
+                                  label: "Cảnh Báo",
+                                  isSelected: selectedIndex == 5,
+                                  isOpen: isOpen,
+                                  isDark: isDark,
+                                  onTap: () => selectedPageNotifier.value = 5,
+                                ),
+                                const SizedBox(height: 6),
+                                _SidebarNavItem(
+                                  icon: Icons.person_rounded,
+                                  label: "Hồ Sơ",
+                                  isSelected: selectedIndex == 6,
+                                  isOpen: isOpen,
+                                  isDark: isDark,
+                                  onTap: () => selectedPageNotifier.value = 6,
+                                ),
+                                const SizedBox(height: 6),
+                                _SidebarNavItem(
+                                  icon: Icons.support_agent_rounded,
+                                  label: "Hỗ Trợ & Liên Hệ",
+                                  isSelected: selectedIndex == 7,
+                                  isOpen: isOpen,
+                                  isDark: isDark,
+                                  onTap: () => selectedPageNotifier.value = 7,
                                 ),
                               ],
                             ),
                           ),
                         ),
 
-                        // 3. SETTINGS AT THE BOTTOM
+                        const SizedBox(height: 8),
+
+                        // 3. SETTINGS LINK (CỐ ĐỊNH Ở ĐÁY)
                         _SidebarNavItem(
                           icon: Icons.settings_rounded,
                           label: "Cài Đặt",
-                          isSelected: selectedIndex == 5,
+                          isSelected: selectedIndex == 8,
                           isOpen: isOpen,
                           isDark: isDark,
-                          onTap: () => selectedPageNotifier.value = 5,
+                          onTap: () => selectedPageNotifier.value = 8,
                         ),
                       ],
                     ),
@@ -139,88 +168,67 @@ class SidebarWidget extends StatelessWidget {
     );
   }
 
-  /// BRAND HEADER WITH INTEGRATED TOGGLE BUTTON (Clean, 0% overlap)
   Widget _buildBrandHeader(BuildContext context, bool isOpen, bool isDark) {
-    final toggleBg = isDark ? const Color(0xFF334155) : Colors.grey.shade100;
+    final toggleBg = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.05);
+
     final toggleBorder = isDark
-        ? Colors.white.withValues(alpha: 0.2)
-        : Colors.grey.shade300;
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.08);
 
     if (!isOpen) {
-      // Collapsed View: Logo + Toggle Button underneath
-      return Column(
-        children: [
-          Center(
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF3B82F6).withValues(alpha: 0.4),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.bolt_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: InkWell(
-              onTap: () {
-                isSidebarOpenNotifier.value = !isSidebarOpenNotifier.value;
-              },
-              borderRadius: BorderRadius.circular(15),
-              child: Container(
-                width: 30,
-                height: 30,
-                decoration: BoxDecoration(
-                  color: toggleBg,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: toggleBorder, width: 1),
-                ),
-                child: Icon(
-                  Icons.chevron_right_rounded,
-                  color: isDark ? Colors.white : const Color(0xFF1E293B),
-                  size: 18,
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    // Expanded View: Logo + "Smart Home" Title + Floating Toggle Button on Right
-    return SizedBox(
-      height: 40,
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
+      return Center(
+        child: InkWell(
+          onTap: () {
+            isSidebarOpenNotifier.value = true;
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               gradient: const LinearGradient(
                 colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF3B82F6).withValues(alpha: 0.4),
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.4),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.bolt_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2563EB).withValues(alpha: 0.4),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -235,7 +243,7 @@ class SidebarWidget extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              "Smart Home",
+              "IoT Assistant",
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 16,
@@ -298,10 +306,9 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
 
   @override
   Widget build(BuildContext context) {
-    // Colors matching template
     final activeBg = widget.isDark
-        ? const Color(0xFFF8FAFC) // White active state in dark mode
-        : const Color(0xFF0F172A); // Dark active state in light mode
+        ? const Color(0xFFF8FAFC)
+        : const Color(0xFF0F172A);
 
     final activeTextColor = widget.isDark
         ? const Color(0xFF0F172A)
@@ -322,7 +329,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          height: 48,
+          height: 44,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
             color: widget.isSelected
@@ -345,11 +352,11 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
             children: [
               Icon(
                 widget.icon,
-                size: 22,
+                size: 20,
                 color: widget.isSelected ? activeTextColor : inactiveTextColor,
               ),
               if (widget.isOpen) ...[
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: AnimatedOpacity(
                     duration: const Duration(milliseconds: 200),
@@ -359,7 +366,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1,
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: widget.isSelected
                             ? FontWeight.bold
                             : FontWeight.w500,

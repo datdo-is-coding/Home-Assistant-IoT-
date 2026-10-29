@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
+import 'package:iot_dashboard/data/model/room_model.dart';
+import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
 import 'package:iot_dashboard/view/widgets/card/smart_home_card.dart';
 import 'package:iot_dashboard/view/widgets/charts/hourly_consumption_chart.dart';
-import 'package:iot_dashboard/view/widgets/common/device_power_manager.dart';
 import 'package:iot_dashboard/view/widgets/home/room_device_list_card.dart';
 
 class HomePage extends StatelessWidget {
@@ -29,8 +30,8 @@ class HomePage extends StatelessWidget {
                       cursor: SystemMouseCursors.click,
                       child: GestureDetector(
                         onTap: () {
-                          // Chuyển sang Tab Báo Cáo (ReportPage - Index 1)
-                          selectedPageNotifier.value = 1;
+                          // Chuyển sang Tab Điện Năng & Thống Kê (Index 2)
+                          selectedPageNotifier.value = 2;
                         },
                         child: const HourlyConsumptionChart(),
                       ),
@@ -44,11 +45,16 @@ class HomePage extends StatelessWidget {
 
             const SizedBox(width: 16),
 
-            // CỘT BÊN PHẢI: Chiếm 55% chiều rộng (Danh sách phòng & Thiết bị điều khiển)
+            // CỘT BÊN PHẢI: Chiếm 55% chiều rộng (Danh sách phòng & Thiết bị điều khiển thời gian thực)
             Expanded(
               flex: 55,
-              child: RoomDeviceListCard(
-                rooms: DevicePowerManager().rooms,
+              child: ValueListenableBuilder<List<RoomModel>>(
+                valueListenable: FirebaseRealtimeService().roomsNotifier,
+                builder: (context, rooms, child) {
+                  return RoomDeviceListCard(
+                    rooms: rooms,
+                  );
+                },
               ),
             ),
           ],

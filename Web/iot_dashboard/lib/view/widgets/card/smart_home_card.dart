@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:iot_dashboard/data/notifiers.dart';
+import 'package:iot_dashboard/data/services/firebase_realtime_service.dart';
 import 'package:iot_dashboard/view/widgets/common/fan_animation.dart';
 import 'package:iot_dashboard/view/widgets/common/lamp_animation.dart';
 
@@ -127,6 +128,23 @@ class _SmartHomeCardState extends State<SmartHomeCard> {
                           if (!currentAway) {
                             isLampOnNotifier.value = false;
                             isFanOnNotifier.value = false;
+                            final scenes = FirebaseRealtimeService().scenesNotifier.value;
+                            if (scenes.isNotEmpty) {
+                              final awayScene = scenes.firstWhere(
+                                (s) => s.id == 'scene_away',
+                                orElse: () => scenes.first,
+                              );
+                              FirebaseRealtimeService().triggerScene(awayScene);
+                            }
+                          } else {
+                            final scenes = FirebaseRealtimeService().scenesNotifier.value;
+                            if (scenes.isNotEmpty) {
+                              final homeScene = scenes.firstWhere(
+                                (s) => s.id == 'scene_home',
+                                orElse: () => scenes.first,
+                              );
+                              FirebaseRealtimeService().triggerScene(homeScene);
+                            }
                           }
                         },
                         borderRadius: BorderRadius.circular(16),
@@ -247,6 +265,8 @@ class _SmartHomeCardState extends State<SmartHomeCard> {
                               isOn: isLampOn,
                               onToggle: (newState) {
                                 isLampOnNotifier.value = newState;
+                                FirebaseRealtimeService().toggleChannel(
+                                    'action_box_01', 'ch1', newState);
                               },
                             );
                           },
@@ -262,6 +282,8 @@ class _SmartHomeCardState extends State<SmartHomeCard> {
                               isOn: isFanOn,
                               onToggle: (newState) {
                                 isFanOnNotifier.value = newState;
+                                FirebaseRealtimeService().toggleChannel(
+                                    'action_box_01', 'ch2', newState);
                               },
                             );
                           },
