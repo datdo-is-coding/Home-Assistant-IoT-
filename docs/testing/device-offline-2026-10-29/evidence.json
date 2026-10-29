@@ -1,6 +1,6 @@
 {
   "date": "2026-10-29",
-  "status": "pending_pi_lan_reconnection",
+  "status": "network_restored_firebase_verified",
   "application": "HomeCompetition 1.6.0+41",
   "pi": {
     "addresses": [
@@ -49,7 +49,7 @@
     "relays_commanded": false,
     "database_edited": false
   },
-  "next": "Reconnect Pi to the home Wi-Fi from its local console, then inspect live services and kernel logs over SSH.",
+  "next": "Gateway, SubBox 0B54 and ActionBox DDF8 are fresh on Firebase. DDF4/DDE8 remain offline; hardware connectivity not verified in this recovery check.",
   "console_followup": {
     "source": "user local-console photo, 2026-10-29",
     "hostname_addresses": [
@@ -67,5 +67,46 @@
     "storage_failure_confirmed": false,
     "setup_hotspot_mode": "suspected from 10.42.0.1; active connection profile not yet inspected",
     "remote_retry": "SSH unavailable at 192.168.11.29, 192.168.11.30, and 10.42.0.1 from laptop 192.168.11.51/24"
+  },
+  "recovery": {
+    "verified_at": "2026-10-29T21:46:27+07:00",
+    "active_wifi": "XIAOMI",
+    "pi_addresses": [
+      "192.168.11.29",
+      "192.168.11.30"
+    ],
+    "ssh_available": true,
+    "gateway_api_health": "ok",
+    "wifi_status_api_success": true,
+    "mqtt_broker": "emqx_broker Docker container",
+    "mqtt_tls": "TLSv1.3 handshake succeeded",
+    "audio_tls": "TLSv1.3 handshake succeeded",
+    "firebase_gateway": {
+      "online": true,
+      "last_seen_age_s": 1.3
+    },
+    "firebase_devices": {
+      "SB288485350B54": {
+        "online": true,
+        "last_updated_age_s": 1.5
+      },
+      "AB28848533DDF8": {
+        "online": true,
+        "last_updated_age_s": 1.6
+      },
+      "AB28848533DDF4": {
+        "online": false,
+        "last_updated": null
+      },
+      "AB28848533DDE8": {
+        "online": false,
+        "last_updated": null
+      }
+    },
+    "root_mount": "/dev/sda2 ext4 rw,noatime",
+    "get_throttled": "0x0",
+    "storage_failure_confirmed": false,
+    "firmware_or_backend_changes": false,
+    "relay_or_voice_test_performed": false
   }
 }

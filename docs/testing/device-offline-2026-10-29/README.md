@@ -1,7 +1,8 @@
 # Thiết bị báo ngoại tuyến — 2026-10-29
 
-Đang chẩn đoán, chưa sửa xong. App kết nối Firebase và đọc được cấu hình, nhưng
-luồng nhịp sống thực từ các Box không được duy trì. Không đổi UI để giả online.
+Đã khôi phục kết nối Pi và xác minh Gateway, SubBox 0B54, ActionBox DDF8 online
+trên Firebase. DDF4/DDE8 vẫn offline; chưa xác minh kết nối phần cứng hai bo này.
+Các quan sát dưới đây trước phần kết quả là bằng chứng trong lúc xảy ra lỗi.
 
 - Pi trả ping và /api/health trên cả .29/.30; hai IP có cùng MAC quan sát được.
   Vì vậy không coi đổi IP là nguyên nhân đã được chứng minh.
@@ -37,3 +38,20 @@ fallback trong `Gateway/systemd/autohotspot.sh`, nhưng chưa đọc được pr
 Máy tính vẫn ở `192.168.11.51/24`; SSH chưa truy cập được cả `.29`, `.30` và
 `10.42.0.1`. Bước tiếp theo là nối Pi lại Wi-Fi nhà qua console trực tiếp, rồi
 đọc trạng thái dịch vụ. Chưa đổi kết nối mạng máy tính hoặc cấu hình Pi từ xa.
+
+## Kết quả sau khi Pi nối lại Wi-Fi
+
+- Pi dùng profile `XIAOMI`; `wlan0` có cả `.29` và `.30`. SSH hoạt động lại.
+- `/api/health` trả OK; `/api/wifi/status` chạy `nmcli` thành công.
+- Broker thực tế là container `emqx_broker`, hoạt động; system service
+  `mosquitto` không phải broker đang dùng. TLS 8883 và 8765 bắt tay thành công.
+- MQTT có client SubBox và hai tiến trình Gateway. Core nhận nhịp sống mới từ
+  SubBox 0B54 và ActionBox DDF8, khoảng 1–2 giây trước thời điểm đọc.
+- Đọc trực tiếp Firebase xác nhận Gateway, 0B54 và DDF8 online; dữ liệu mới
+  trong 1,3–1,6 giây. DDF4/DDE8 vẫn offline, chưa có `last_updated`.
+- Root là `/dev/sda2`, ext4 read/write; `vcgencmd get_throttled` trả `0x0`.
+  Chưa có bằng chứng kết luận ổ lưu trữ hỏng; không sửa filesystem.
+
+Không nạp firmware, không sửa mã backend, không đổi dữ liệu đăng ký và không
+thử relay/giọng nói trong lượt khôi phục mạng này. Chưa xác nhận lại màn hình app
+trực tiếp; đã xác minh đường truyền dữ liệu thật tới Firebase.
