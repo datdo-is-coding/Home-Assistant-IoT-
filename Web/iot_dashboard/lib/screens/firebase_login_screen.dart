@@ -164,11 +164,6 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
                             onPressed:
                                 _busy ? null : () => _submit(google: true),
                             child: const Text('Tiếp tục với Google')),
-                        const SizedBox(height: 12),
-                        FilledButton.tonalIcon(
-                            onPressed: _busy ? null : () => widget.client.enterGuestMode(),
-                            icon: const Icon(Icons.rocket_launch_rounded, size: 18),
-                            label: const Text('Truy cập nhanh (Chế độ Khách / Xem thử ngay)')),
                         TextButton(
                             onPressed:
                                 _busy ? null : () => _submit(reset: true),

@@ -15,8 +15,6 @@ Bản ứng dụng Web Dashboard được đồng bộ và sao chép toàn diệ
 - **Responsive Shell thích ứng màn hình**:
   - **Màn hình lớn / Desktop**: Tự động chuyển đổi sang thanh điều hướng dọc (`NavigationRail`) kết hợp `FlagshipBackdrop`.
   - **Màn hình điện thoại / Tablet**: Thanh điều hướng nổi dạng viên thuốc (`ProgressiveBlur` capsule navigation dock).
-- **Chế độ xem thử nhanh (Guest Mode)**:
-  - Cho phép người dùng trải nghiệm ngay dashboard với dữ liệu Firebase Realtime Database mà không bắt buộc phải đăng nhập tài khoản.
 - **Tương thích hoàn toàn CanvasKit / HTML Web**:
   - Đã xử lý các API nền tảng di động (`dart:io`) với `kIsWeb` an toàn.
 
@@ -41,7 +39,5 @@ flutter build web --release
 ### 4. Chạy Web Preview cục bộ
 ```bash
 python3 -m http.server 5000 --directory build/web
-# hoặc chạy backend Python tích hợp
-python3 app.py
 ```
 Truy cập tại: `http://localhost:5000`

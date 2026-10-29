@@ -42,40 +42,10 @@ class FirebaseHomeClient extends GatewayClient {
   final Map<String, _RelayView> _relayViews = {};
   final Map<String, Future<Map<String, dynamic>>> _relayQueues = {};
 
-  bool _isGuest = false;
-  bool get isGuest => _isGuest;
-
-  void enterGuestMode() {
-    _isGuest = true;
-    final session = ++_session;
-    user = {
-      'id': 'guest-preview',
-      'username': 'Khách Trải Nghiệm',
-      'role': 'admin',
-    };
-    connected = _transportConnected = true;
-    _connectionSub = database.ref('.info/connected').onValue.listen((event) {
-      if (_closed || session != _session) return;
-      _transportConnected = event.snapshot.value == true;
-      _publish();
-    }, onError: (Object e) {
-      if (session == _session) _onError(e);
-    });
-    _devicesSub = database.ref('devices').onValue.listen((event) {
-      if (_closed || session != _session) return;
-      applyDevices(event.snapshot.value);
-    }, onError: (Object e) {
-      if (session == _session) _onError(e);
-    });
-    _expiry?.cancel();
-    _expiry = Timer.periodic(const Duration(seconds: 5), (_) => _publish());
-    notifyListeners();
-  }
-
   @override
-  bool get authenticated => auth.currentUser != null || _isGuest;
+  bool get authenticated => auth.currentUser != null;
   @override
-  String get currentUserId => auth.currentUser?.uid ?? (_isGuest ? 'guest-preview' : '');
+  String get currentUserId => auth.currentUser?.uid ?? '';
   @override
   int get generation => _session;
   @override
