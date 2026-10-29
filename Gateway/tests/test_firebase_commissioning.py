@@ -1,3 +1,4 @@
+import asyncio
 """The cloud worker must reuse the live lifecycle and never publish credentials."""
 import copy
 import sys
@@ -89,6 +90,27 @@ class FirebaseWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(value['last_updated'], 1000000)
         self.assertNotIn('secret', str(value))
 
+    async def test_ir_learning_does_not_block_status_tick_or_dispatch_twice(self):
+        self.worker.infrared=object()
+        gate=asyncio.Event()
+        async def slow(*args):
+            await gate.wait()
+            return {'request_id':'ir-test','status_code':200,'body':{'success':True}}
+        self.dispatcher.dispatch.side_effect=slow
+        self.store.data['gateway_rpc/gw-test/requests']={'owner':{'ir-test':{
+            'request_id':'ir-test','method':'POST','path':'/api/v1/ir/remotes/REMOTE-'+'a'*24+'/learn',
+            'body':{'key':'off','label':'Tắt'},'created_at':999000,'expires_at':1020000}}}
+        await asyncio.wait_for(self.worker.tick(),.5)
+        await asyncio.sleep(0)
+        self.assertEqual(self.dispatcher.dispatch.await_count,1)
+        self.worker._next_status=0
+        await asyncio.wait_for(self.worker.tick(),.5)
+        self.assertEqual(self.dispatcher.dispatch.await_count,1)
+        self.assertTrue(self.store.data['gateways/gw-test/status']['online'])
+        tasks=list(self.worker.ir_tasks.values());gate.set();await asyncio.gather(*tasks)
+        self.assertEqual(self.store.data['gateway_rpc/gw-test/responses/owner/ir-test']['status_code'],200)
+        self.assertEqual(self.store.data['gateway_rpc/gw-test/responses/owner/ir-test']['completed_at'],1000000)
+
     async def test_stop_marks_only_own_status_offline(self):
         await self.worker.close()
         self.assertFalse(self.store.data['gateways/gw-test/status']['online'])
@@ -99,6 +121,19 @@ class FirebaseWorkerTests(unittest.IsolatedAsyncioTestCase):
             await self.worker.tick()
         self.assertEqual(self.store.data, {})
         self.dispatcher.dispatch.assert_not_awaited()
+
+    async def test_core_state_event_publishes_before_three_second_heartbeat(self):
+        from test_hc_registry import RegistryTest
+        fixture=RegistryTest();fixture.setUp();self.addCleanup(fixture.tearDown)
+        state={'on':False}
+        core=SimpleNamespace(r=fixture.r,home=fixture.home,
+            projections=lambda uid:{'AB-test':{'channels':{'ch1':{'state':state['on']}}}})
+        self.worker.core=core
+        await self.worker.tick()
+        self.assertFalse(self.store.data['devices/AB-test']['channels']['ch1']['state'])
+        state['on']=True;fixture.r.event(fixture.home,'state_report',{})
+        await self.worker.tick()
+        self.assertTrue(self.store.data['devices/AB-test']['channels']['ch1']['state'])
 
 
 class ProjectionTests(unittest.TestCase):

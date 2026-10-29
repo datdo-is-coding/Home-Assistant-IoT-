@@ -343,6 +343,8 @@ class Registry(Database):
             return dict(old)
         route=self.one('SELECT c.*,n.boot_id,n.config_rev,n.reported_rev,n.registration,n.last_seen,a.parent_id,p.last_seen AS parent_seen FROM device_bindings b JOIN channels c USING(channel_id) JOIN registered_nodes n USING(node_id) JOIN node_assignments a ON a.node_id=n.node_id AND a.active=1 JOIN registered_nodes p ON p.node_id=a.parent_id AND p.registration=\'REGISTERED\' WHERE b.device_id=? AND b.active=1',(device,))
         now=self.clock()
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='core_maintenance'").fetchone():
+            require(not self.db.execute("SELECT 1 FROM core_maintenance WHERE node_id IN (?,?) AND state IN ('accepted','running') AND expires>?",(route['node_id'],route['parent_id'],now)).fetchone(),'maintenance_busy',409)
         require(route['registration']=='REGISTERED' and all(t is not None and 0<=now-t<15 for t in (route['last_seen'],route['parent_seen'])),'offline',409)
         require(route['config_rev']==route['reported_rev'],'config_pending',409)
         require(not self.db.execute("SELECT 1 FROM ota_targets WHERE node_id IN (?,?) AND status IN ('TRANSFERRING','VERIFYING','REBOOTING','HEALTH_CHECK')",(route['node_id'],route['parent_id'])).fetchone(),'ota_in_progress',409)
@@ -394,14 +396,19 @@ class Registry(Database):
         self.authorize(user,n['home_id'],('Owner',))
         require(not self.db.execute('SELECT 1 FROM node_assignments WHERE parent_id=? AND active=1',(node,)).fetchone(),'children_attached',409)
         with self.transaction():
-            self.db.execute("UPDATE registered_nodes SET registration='REVOKED',connectivity='OFFLINE' WHERE node_id=?",(node,))
-            self.db.execute('UPDATE node_credentials SET revoked=1 WHERE node_id=?',(node,))
-            self.db.execute('UPDATE factory_devices SET revoked=1 WHERE factory_id=?',(n['factory_id'],))
-            self.db.execute('UPDATE node_assignments SET active=0 WHERE node_id=?',(node,))
-            self.db.execute('UPDATE device_bindings SET active=0 WHERE channel_id IN (SELECT channel_id FROM channels WHERE node_id=?)',(node,))
-            self.db.execute("UPDATE commands SET status='FAILED',reason='revoked' WHERE node_id=? AND status IN ('RECEIVED','ACCEPTED')",(node,))
-            self.event(n['home_id'],'node_revoked',{'node_id':node})
-            self.audit(user,n['home_id'],'unpair',node)
+            self._revoke_node(user,n)
+
+    def _revoke_node(self,user,n):
+        # Caller owns the transaction and has authorized management or verified a reset receipt.
+        node=n['node_id']
+        self.db.execute("UPDATE registered_nodes SET registration='REVOKED',connectivity='OFFLINE' WHERE node_id=?",(node,))
+        self.db.execute('UPDATE node_credentials SET revoked=1 WHERE node_id=?',(node,))
+        self.db.execute('UPDATE factory_devices SET revoked=1 WHERE factory_id=?',(n['factory_id'],))
+        self.db.execute('UPDATE node_assignments SET active=0 WHERE node_id=?',(node,))
+        self.db.execute('UPDATE device_bindings SET active=0 WHERE channel_id IN (SELECT channel_id FROM channels WHERE node_id=?)',(node,))
+        self.db.execute("UPDATE commands SET status='FAILED',reason='revoked' WHERE node_id=? AND status IN ('RECEIVED','ACCEPTED')",(node,))
+        self.event(n['home_id'],'node_revoked',{'node_id':node})
+        self.audit(user,n['home_id'],'unpair',node)
 
     def snapshot(self,user,home):
         self.authorize(user,home)

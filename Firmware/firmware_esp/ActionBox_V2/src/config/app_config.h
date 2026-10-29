@@ -12,7 +12,7 @@ extern "C" {
 #define APP_FW_VERSION_MAJOR            1
 #define APP_FW_VERSION_MINOR            0
 #define APP_FW_VERSION_PATCH            0
-#define APP_FW_VERSION_STR              "1.0.0"
+#define APP_FW_VERSION_STR              "2.3.0-control1"
 
 #define APP_DEFAULT_NODE_ID             "AB001"
 #define APP_DEFAULT_ROOM_ID             "LIVING_ROOM"

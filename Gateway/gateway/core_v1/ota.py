@@ -75,6 +75,9 @@ class OtaManager:
         a=self.artifact(artifact)
         selected=[self.r.get_node(user,n) for n in nodes]
         for n in selected:require(n['home_id']==home and n['model']==a['model'] and n['registration']=='REGISTERED','wrong_target')
+        if self.r.db.execute("SELECT 1 FROM sqlite_master WHERE name='core_maintenance'").fetchone():
+            for n in selected:
+                require(not self.r.db.execute("SELECT 1 FROM core_maintenance WHERE node_id IN (?,?) AND state IN ('accepted','running') AND expires>?",(n['node_id'],n['parent_id'],self.r.clock())).fetchone(),'maintenance_busy',409)
         job=uid('OTA-')
         with self.r.transaction():
             self.r.db.execute('INSERT INTO ota_jobs VALUES(?,?,?,?,?)',(job,home,artifact,self.r.clock(),user))

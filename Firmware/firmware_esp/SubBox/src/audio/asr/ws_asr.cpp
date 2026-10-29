@@ -1,4 +1,7 @@
 #include "ws_asr.h"
+#include "infrared/infrared.h"
+#include "config/board_pins.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "cJSON.h"
 #include <cstring>
@@ -12,8 +15,9 @@
 
 static const char* TAG = "WS_ASR";
 
-WsASR::WsASR(const std::string& ws_uri, const std::string& node_id)
+WsASR::WsASR(const std::string& ws_uri, const std::string& node_id, bool pi_voice)
     : m_uri(ws_uri),
+      m_pi_voice(pi_voice),
       m_node_id(node_id),
       m_client(nullptr),
       m_connected(false),
@@ -27,11 +31,13 @@ WsASR::WsASR(const std::string& ws_uri, const std::string& node_id)
 }
 
 WsASR::~WsASR() {
+    infrared_unbind(this);
     if (m_client) {
         esp_websocket_client_stop(m_client);
         esp_websocket_client_destroy(m_client);
         m_client = nullptr;
     }
+    heap_caps_free(m_text_message);
     if (m_result_sem) {
         vSemaphoreDelete(m_result_sem);
         m_result_sem = nullptr;
@@ -51,8 +57,9 @@ bool WsASR::init() {
     auto token = SecurityConfig::get("ws_token");
 
     hc_provisioned_config enrollment{};
-    m_core_playback = hc_provisioning_load(&enrollment) == ESP_OK && enrollment.subbox;
-    if (m_core_playback) {
+    m_core_identity = hc_provisioning_load(&enrollment) == ESP_OK && enrollment.subbox;
+    m_core_playback = m_core_identity && !m_pi_voice;
+    if (m_core_identity) {
         char derived[65]{};
         if (!enrollment.committed || m_ca.empty() || hc_provisioning_speaker_token(derived) != ESP_OK ||
                 strncmp(enrollment.mqtt_uri, "mqtts://", 8) != 0) {
@@ -90,6 +97,14 @@ bool WsASR::init() {
         m_headers = "X-Device-ID: " + m_node_id + "\r\n";
     }
 
+    if (m_core_identity) {
+        m_ir_available = infrared_bind(this, [](void* owner, const char* message, size_t length) {
+            auto* self = static_cast<WsASR*>(owner);
+            std::lock_guard<std::mutex> lock(self->m_send_mutex);
+            return self->m_client && self->m_connected.load() &&
+                esp_websocket_client_send_text(self->m_client, message, length, pdMS_TO_TICKS(1000)) == static_cast<int>(length);
+        });
+    }
     esp_websocket_client_config_t ws_cfg = {};
     if (is_wss) {
         ws_cfg.cert_pem = m_ca.c_str();
@@ -160,7 +175,7 @@ bool WsASR::start() {
         return false;
     }
     char start_msg[320];
-    if (hc_runtime_enabled()) {
+    if (m_core_identity || hc_runtime_enabled()) {
         if (!hc_runtime_registered() || source_node_id.find_first_not_of("0123456789") != std::string::npos) return false;
         uint32_t nonce[4];
         esp_fill_random(nonce, sizeof(nonce));
@@ -308,12 +323,14 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "✅ Connected to Pi 4 Audio Server (%s)!", self->m_uri.c_str());
             self->m_connected = true;
+            infrared_session(self, ++self->m_ir_generation);
 
             {
-                char hello[192];
+                char hello[280];
                 snprintf(hello, sizeof(hello),
-                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":true,\"playback_only\":%s,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1}",
-                         self->m_node_id.c_str(), self->m_core_playback ? "true" : "false");
+                         "{\"t\":\"hello\",\"id\":\"%s\",\"speaker\":true,\"playback_only\":%s,\"audio_relay\":true,\"asr_only\":false,\"rl\":[0,0],\"cfg\":1,\"infrared\":{\"version\":2,\"tx\":%s,\"rx\":%s,\"rx_supported\":true}}",
+                         self->m_node_id.c_str(), self->m_core_playback ? "true" : "false",
+                         self->m_ir_available ? "true" : "false", (self->m_ir_available && BOARD_IR_RX_ENABLED) ? "true" : "false");
                 esp_websocket_client_send_text(self->m_client, hello, strlen(hello), pdMS_TO_TICKS(1000));
             }
             break;
@@ -322,6 +339,7 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
         case WEBSOCKET_EVENT_DISCONNECTED:
             ESP_LOGW(TAG, "⚠️ Disconnected from Pi 4 Audio Server");
             self->m_connected = false;
+            infrared_session(self, ++self->m_ir_generation);
             self->m_disconnected_at = esp_timer_get_time();
             self->m_streaming = false;
             if (self->m_receiving_tts.exchange(false)) {
@@ -330,13 +348,31 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
             break;
 
         case WEBSOCKET_EVENT_DATA:
-            if (data->op_code == 0x01 && data->data_ptr && data->data_len > 0) {
-                self->handleTextMessage(data->data_ptr, data->data_len);
+            if ((data->op_code == 0x01 || (data->op_code == 0 && self->m_text_message)) && data->data_ptr && data->data_len > 0) {
+                if (data->payload_offset == 0) {
+                    heap_caps_free(self->m_text_message); self->m_text_message = nullptr;
+                    self->m_text_received = 0; self->m_text_expected = data->payload_len;
+                    if (data->payload_len > 4096 || data->payload_len < data->data_len) break;
+                    if (data->payload_len == data->data_len) {
+                        self->handleTextMessage(data->data_ptr, data->data_len); break;
+                    }
+                    self->m_text_message = static_cast<char*>(heap_caps_malloc(data->payload_len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                }
+                if (self->m_text_message && static_cast<size_t>(data->payload_offset) == self->m_text_received &&
+                    self->m_text_received + data->data_len <= self->m_text_expected) {
+                    memcpy(self->m_text_message + self->m_text_received, data->data_ptr, data->data_len);
+                    self->m_text_received += data->data_len;
+                    if (self->m_text_received == self->m_text_expected) {
+                        self->m_text_message[self->m_text_expected] = 0;
+                        self->handleTextMessage(self->m_text_message, self->m_text_expected);
+                        heap_caps_free(self->m_text_message); self->m_text_message = nullptr;
+                    }
+                }
             } else if (data->op_code == 0x02 && data->data_ptr && data->data_len > 0) {
                 if (self->m_receiving_tts.load()) {
                     size_t samples = data->data_len / sizeof(int16_t);
                     self->m_playback_bytes += data->data_len;
-                    if ((data->data_len & 1) || (self->m_playback_bytes > self->m_playback_expected && self->m_core_playback) ||
+                    if ((data->data_len & 1) || (self->m_playback_bytes > self->m_playback_expected && self->m_core_identity) ||
                             !SoundPlayer::instance().streamPcmChunk(reinterpret_cast<const int16_t*>(data->data_ptr), samples)) {
                         self->m_playback_ok = false;
                     }
@@ -358,6 +394,13 @@ void WsASR::wsEventHandler(void* handler_args, esp_event_base_t base, int32_t ev
 
 void WsASR::handleTextMessage(const char* data, int len) {
     cJSON* root = cJSON_ParseWithLength(data, len);
+    const char* ir_type = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(root, "type"));
+    if (root && ir_type && (!strcmp(ir_type, "ir_send") || !strcmp(ir_type, "ir_learn") || !strcmp(ir_type, "ir_prepare"))) {
+        if (m_ir_available && m_core_identity && hc_runtime_registered() && m_connected.load())
+            infrared_submit(this, m_ir_generation, root);
+        cJSON_Delete(root); return;
+    }
+
     if (!root) return;
 
     cJSON* type = cJSON_GetObjectItem(root, "type");
@@ -402,7 +445,7 @@ void WsASR::handleTextMessage(const char* data, int len) {
             const auto* rate = cJSON_GetObjectItem(root, "sample_rate");
             const auto* channels = cJSON_GetObjectItem(root, "channels");
             const auto* width = cJSON_GetObjectItem(root, "sample_width");
-            if (m_core_playback && (m_playback_id.size() != 32 || m_playback_id.find_first_not_of("0123456789abcdef") != std::string::npos ||
+            if (m_core_identity && (m_playback_id.size() != 32 || m_playback_id.find_first_not_of("0123456789abcdef") != std::string::npos ||
                     !m_playback_expected || (m_playback_expected & 1) || !cJSON_IsNumber(rate) || rate->valuedouble != 16000 ||
                     !cJSON_IsNumber(channels) || channels->valuedouble != 1 || !cJSON_IsNumber(width) || width->valuedouble != 2)) {
                 cJSON_Delete(root);return;
@@ -415,7 +458,7 @@ void WsASR::handleTextMessage(const char* data, int len) {
             if (m_receiving_tts.exchange(false)) {
                 m_playback_ok = SoundPlayer::instance().finishPcmStream() && m_playback_ok;
                 const auto* id = cJSON_GetObjectItem(root, "playback_id");
-                if (m_core_playback && cJSON_IsString(id) && m_playback_id == id->valuestring) {
+                if (m_core_identity && cJSON_IsString(id) && m_playback_id == id->valuestring) {
                     char reply[192];
                     snprintf(reply,sizeof(reply),"{\"type\":\"playback_complete\",\"playback_id\":\"%s\",\"success\":%s,\"received_bytes\":%u}",
                              m_playback_id.c_str(),m_playback_ok && m_playback_bytes==m_playback_expected ? "true" : "false",static_cast<unsigned>(m_playback_bytes));

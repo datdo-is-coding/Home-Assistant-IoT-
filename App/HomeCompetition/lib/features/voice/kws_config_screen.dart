@@ -146,7 +146,7 @@ class _KwsConfigScreenState extends ConsumerState<KwsConfigScreen> {
           ),
         ],
       ),
-      body: !gateway.isAdmin
+      body: !gateway.canConfigure
           ? const Center(
               child: Text('Cấu hình khẩu lệnh yêu cầu quyền Quản trị viên.'))
           : boxes.when(

@@ -35,6 +35,8 @@ class MessageType(IntEnum):
     OTA_CHUNK_ACK = 27
     FRAGMENT = 28
     CHANNEL_PROBE = 29
+    MAINTENANCE = 30
+    MAINTENANCE_ACK = 31
 
 
 HEADER = struct.Struct('<2sBBBBQIIQII')

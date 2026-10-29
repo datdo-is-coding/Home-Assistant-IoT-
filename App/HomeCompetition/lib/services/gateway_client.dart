@@ -81,6 +81,7 @@ class GatewayClient extends ChangeNotifier {
   bool get authenticated => _token.isNotEmpty;
   String get token => _token;
   bool get isAdmin => user['role'] == 'admin';
+  bool get canConfigure => isAdmin;
   bool get _android =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
@@ -1038,9 +1039,12 @@ class GatewayClient extends ChangeNotifier {
       timeout: const Duration(seconds: 15),
     );
     final opData = res['operation'] is Map ? asMap(res['operation']) : res;
-    nodes.remove(deviceUid);
-    notifyListeners();
-    return DeviceOperation.fromJson(opData);
+    final operation = DeviceOperation.fromJson(opData);
+    if (operation.state == DeviceOperationState.succeeded) {
+      nodes.remove(deviceUid);
+      notifyListeners();
+    }
+    return operation;
   }
 
   Future<DeviceOperation> getOperation(String operationId) async {

@@ -10,7 +10,7 @@ static uint64_t get(const uint8_t *p, unsigned n) {
     return v;
 }
 int hc_encode(const hc_frame *f, uint8_t *out, size_t capacity, hc_mac_fn mac, void *ctx) {
-    if (!f || !out || !mac || f->type<HC_HELLO || f->type>HC_CHANNEL_PROBE ||
+    if (!f || !out || !mac || f->type<HC_HELLO || f->type>HC_MAINTENANCE_ACK ||
         (f->flags & ~3u) || f->payload_len>HC_MAX_PAYLOAD || !f->message_id ||
         !f->boot_id || !f->sequence) return HC_INVALID;
     size_t length=HC_HEADER_SIZE+f->payload_len;
@@ -26,7 +26,7 @@ int hc_encode(const hc_frame *f, uint8_t *out, size_t capacity, hc_mac_fn mac, v
 int hc_validate(const uint8_t *d, size_t len, hc_mac_fn mac, void *ctx) {
     if (!d || !mac || len<HC_HEADER_SIZE+HC_TAG_SIZE || len>HC_MAX_FRAME ||
         d[0]!='H' || d[1]!='C' || d[2]!=HC_VERSION || d[3]<HC_HELLO ||
-        d[3]>HC_CHANNEL_PROBE || (d[4]&~3u) || d[5]>HC_MAX_PAYLOAD ||
+        d[3]>HC_MAINTENANCE_ACK || (d[4]&~3u) || d[5]>HC_MAX_PAYLOAD ||
         len!=HC_HEADER_SIZE+HC_TAG_SIZE+d[5] || !get(d+6,8) ||
         !get(d+22,8) || !get(d+30,4)) return HC_INVALID;
     uint8_t tag[HC_TAG_SIZE], diff=0;

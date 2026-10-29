@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from typing import Optional, Tuple
 try:
     import numpy as np
@@ -56,7 +57,6 @@ SMARTHOME_HOTWORDS = [
 
 ASR_PHONETIC_CORRECTIONS = [
 
-    (r"\bbất quá\b", "bật quạt"),
     (r"\bbật quá\b", "bật quạt"),
     (r"\bbật quà\b", "bật quạt"),
     (r"\bbật quát\b", "bật quạt"),
@@ -73,8 +73,6 @@ ASR_PHONETIC_CORRECTIONS = [
     (r"\bbạt đèn\b", "bật đèn"),
     (r"\bbạt đền\b", "bật đèn"),
 
-    (r"\bbạn bè\b", "bật đèn"),
-    (r"\bbạn bè phòng\b", "bật đèn phòng"),
 
     (r"\bphong khách\b", "phòng khách"),
     (r"\bphòng khach\b", "phòng khách"),
@@ -89,12 +87,6 @@ ASR_PHONETIC_CORRECTIONS = [
     (r"\bphong bep\b", "phòng bếp"),
     (r"\bphòng bep\b", "phòng bếp"),
 
-    (r"\bban đêm không ngủ\b", "bật quạt phòng ngủ"),
-    (r"\bđêm qua không ngủ\b", "bật quạt phòng ngủ"),
-    (r"\bđêm qua\b", "bật quạt"),
-    (r"\bban đêm\b", "bật đèn"),
-    (r"\bkhông ngủ\b", "phòng ngủ"),
-    (r"\bkhong ngu\b", "phòng ngủ"),
     (r"\bhòng ngủ\b", "phòng ngủ"),
     (r"\bphòng ngũ\b", "phòng ngủ"),
     (r"\bbật qua\b", "bật quạt"),
@@ -303,7 +295,22 @@ class ASREngine:
         text, _ = self.transcribe_with_confidence(pcm_samples, sample_rate)
         return text
 
-    def transcribe_with_confidence(self, pcm_samples, sample_rate: int = None) -> Tuple[str, float]:
+    def transcribe_scoped(self,pcm_samples,sample_rate,vocabulary):
+        return self.transcribe_with_confidence(pcm_samples,sample_rate,vocabulary=vocabulary)
+
+    @staticmethod
+    def _known_command(text,vocabulary):
+        def normalized(value):
+            value=unicodedata.normalize('NFD',value.casefold().replace('đ','d'))
+            return ' '.join(''.join(c for c in value if not unicodedata.combining(c)).split())
+        match=re.fullmatch(r'(bat|tat|turn on|turn off) (.+)',normalized(text))
+        names={normalized(v) for v in vocabulary}
+        if match:return match[2] in names
+        from core_v1.infrared.voice import climate_intent
+        intent=climate_intent(text)
+        return bool(intent and intent[0] in names and ('temperature' not in intent[1] or 16<=intent[1]['temperature']<=30))
+
+    def transcribe_with_confidence(self, pcm_samples, sample_rate: int = None, *, vocabulary=None) -> Tuple[str, float]:
         """
         Transcribe audio and return (corrected_text, confidence_score).
         confidence_score: 0.0 (garbage) to 1.0 (perfect recognition).
@@ -329,8 +336,9 @@ class ASREngine:
                 logger.warning(f"Audio too short ({duration_s:.2f}s) or too quiet (RMS={rms:.4f})")
                 return "", 0.0
 
-            if self._using_beam_search and self._registry:
-                self._active_hotwords = sorted(set(SMARTHOME_HOTWORDS) | set(self._extract_registry_hotwords(self._registry)))
+            if self._using_beam_search and (self._registry or vocabulary is not None):
+                dynamic=self._extract_registry_hotwords(self._registry) if vocabulary is None else vocabulary
+                self._active_hotwords = sorted(set(SMARTHOME_HOTWORDS) | {v.upper() for v in dynamic})
                 stream = self.recognizer.create_stream(hotwords="/".join(self._active_hotwords))
             else:
                 stream = self.recognizer.create_stream()
@@ -344,11 +352,11 @@ class ASREngine:
             if not raw_text:
                 return "", 0.0
 
-            corrected = self._phonetic_correct(raw_text)
+            corrected = raw_text.lower() if self._known_command(raw_text,vocabulary or ()) else self._phonetic_correct(raw_text)
             if corrected != raw_text:
                 logger.info(f"ASR corrected: '{raw_text}' → '{corrected}'")
 
-            confidence = self._estimate_confidence(corrected, raw_text, duration_s, rms)
+            confidence = self._estimate_confidence(corrected, raw_text, duration_s, rms, vocabulary=vocabulary or ())
             logger.info(f"ASR result: '{corrected}' (confidence={confidence:.2f}, beam={'Y' if self._using_beam_search else 'N'})")
 
             return corrected, confidence
@@ -366,7 +374,7 @@ class ASREngine:
         result = re.sub(r"\s+", " ", result).strip()
         return result
 
-    def _estimate_confidence(self, corrected_text: str, raw_text: str, duration_s: float, rms: float) -> float:
+    def _estimate_confidence(self, corrected_text: str, raw_text: str, duration_s: float, rms: float, *, vocabulary=()) -> float:
         """
         Estimate transcription confidence using multiple heuristics:
         1. Audio quality (duration, energy)
@@ -394,7 +402,7 @@ class ASREngine:
         }
         text_lower = corrected_text.lower()
         keyword_hits = sum(1 for kw in smarthome_keywords if kw in text_lower)
-        if keyword_hits >= 2:
+        if keyword_hits >= 2 or self._known_command(corrected_text,vocabulary):
             score += 0.25
         elif keyword_hits == 1:
             score += 0.10

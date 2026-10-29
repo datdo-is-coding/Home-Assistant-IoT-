@@ -1,7 +1,6 @@
 #include "local_kws.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -21,19 +20,14 @@ static const char* TAG = "LOCAL_KWS";
 
 namespace {
 // Conservative until measured on the target boards. KwsCommand repeats the
-// same floor so a low-confidence window can never reach sentence assembly.
-constexpr float EXECUTION_CONFIDENCE = 0.75f;
-constexpr uint64_t SAME_CLASS_DEDUP_MS = 700;
-constexpr uint64_t INITIAL_LAST_MS = 0;
-
-uint64_t nowMs() {
-#if defined(ESP_PLATFORM)
-    return static_cast<uint64_t>(esp_timer_get_time() / 1000);
-#else
-    using namespace std::chrono;
-    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
-#endif
-}
+// same floor so a low-confidence word can never reach sentence assembly.
+constexpr float EXECUTION_CONFIDENCE = 0.50f;
+constexpr size_t VAD_FRAME_SAMPLES = SAMPLE_RATE * 20 / 1000;
+constexpr size_t PREROLL_SAMPLES = SAMPLE_RATE * 100 / 1000;
+constexpr size_t MIN_SPEECH_SAMPLES = SAMPLE_RATE * 80 / 1000;
+constexpr size_t END_SILENCE_SAMPLES = SAMPLE_RATE * 60 / 1000;
+constexpr size_t MAX_WORD_SAMPLES = TOTAL_SAMPLES;
+constexpr size_t SEGMENT_CAPACITY = MAX_WORD_SAMPLES + 2 * PREROLL_SAMPLES;
 
 void* kwsAlloc(size_t size) {
 #if defined(ESP_PLATFORM)
@@ -50,7 +44,8 @@ LocalKws::LocalKws() = default;
 
 LocalKws::~LocalKws() {
     reset();
-    free(m_ring);
+    free(m_segment);
+    free(m_frame);
     free(m_window);
     free(m_mfcc);
     free(m_pool_scratch);
@@ -58,12 +53,13 @@ LocalKws::~LocalKws() {
 }
 
 bool LocalKws::init() {
-    if (!m_ring) m_ring = static_cast<float*>(kwsAlloc(sizeof(float) * TOTAL_SAMPLES));
+    if (!m_segment) m_segment = static_cast<float*>(kwsAlloc(sizeof(float) * SEGMENT_CAPACITY));
+    if (!m_frame) m_frame = static_cast<float*>(kwsAlloc(sizeof(float) * VAD_FRAME_SAMPLES));
     if (!m_window) m_window = static_cast<float*>(kwsAlloc(sizeof(float) * TOTAL_SAMPLES));
     if (!m_mfcc) m_mfcc = static_cast<float*>(kwsAlloc(sizeof(float) * NUM_FRAMES * NUM_MFCC_COEFFS));
     if (!m_pool_scratch) m_pool_scratch = static_cast<float*>(kwsAlloc(sizeof(float) * 16 * 49 * 6));
     if (!m_dw_scratch) m_dw_scratch = static_cast<float*>(kwsAlloc(sizeof(float) * 32 * 49 * 6));
-    if (!m_ring || !m_window || !m_mfcc || !m_pool_scratch || !m_dw_scratch) {
+    if (!m_segment || !m_frame || !m_window || !m_mfcc || !m_pool_scratch || !m_dw_scratch) {
 #if defined(ESP_PLATFORM)
         ESP_LOGE(TAG, "Local KWS buffers unavailable");
 #endif
@@ -71,6 +67,7 @@ bool LocalKws::init() {
     }
     if (!m_extractor) m_extractor = std::make_unique<MFCCExtractor>();
     if (!m_extractor->init()) {
+        m_extractor.reset();
 #if defined(ESP_PLATFORM)
         ESP_LOGE(TAG, "MFCC initialization failed");
 #endif
@@ -78,20 +75,21 @@ bool LocalKws::init() {
     }
     reset();
 #if defined(ESP_PLATFORM)
-    ESP_LOGI(TAG, "Local KWS ready (16 kHz, 1 s window, 250 ms stride)");
+    ESP_LOGI(TAG, "Local KWS ready (word VAD 20 ms, preroll 100 ms/end 60 ms, centered 1 s)");
 #endif
     return true;
 }
 
 bool LocalKws::start() {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_extractor || !m_ring) return false;
-    memset(m_ring, 0, sizeof(float) * TOTAL_SAMPLES);
+    if (!m_extractor || !m_segment || !m_frame || !m_window || !m_mfcc ||
+        !m_pool_scratch || !m_dw_scratch) return false;
+    memset(m_segment, 0, sizeof(float) * SEGMENT_CAPACITY);
     memset(m_window, 0, sizeof(float) * TOTAL_SAMPLES);
-    m_head = 0;
-    m_samples_since_step = 0;
-    m_last_class = -1;
-    m_last_class_ms = INITIAL_LAST_MS;
+    m_segment_samples = PREROLL_SAMPLES;
+    resetWord();
+    m_frame_samples = 0;
+    m_noise_rms = INITIAL_NOISE_RMS;
     m_command.reset();
     m_partial.clear();
     m_final.clear();
@@ -107,26 +105,113 @@ void LocalKws::setSourceNodeId(const char* node_id) {
     m_source_node_id = node_id ? node_id : "";
 }
 
-void LocalKws::appendSamples(const int16_t* pcm, size_t samples) {
-    for (size_t i = 0; i < samples; ++i) {
-        m_ring[m_head] = static_cast<float>(pcm[i]) / 32768.0f;
-        m_head = (m_head + 1) % TOTAL_SAMPLES;
+void LocalKws::resetWord() {
+    // Carry the preceding 100 ms into the next onset, without copying onset twice.
+    if (m_segment && m_segment_samples >= PREROLL_SAMPLES) {
+        memmove(m_segment, m_segment + m_segment_samples - PREROLL_SAMPLES,
+            sizeof(float) * PREROLL_SAMPLES);
     }
+    m_segment_samples = PREROLL_SAMPLES;
+    m_speech_samples = m_silence_samples = 0;
+    m_word_active = false;
 }
 
-bool LocalKws::inferWindow(uint64_t now_ms) {
+bool LocalKws::processVadFrame(size_t samples) {
+    float energy = 0.0f;
+    for (size_t i = 0; i < samples; ++i) energy += m_frame[i] * m_frame[i];
+    const float rms = std::sqrt(energy / samples);
+    const float speech_threshold = m_noise_rms * 2.2f + 0.006f;
+    const float silence_threshold = m_noise_rms * 1.3f + 0.002f;
+
+    if (!m_word_active) {
+        if (rms < speech_threshold) {
+            m_noise_rms = 0.98f * m_noise_rms + 0.02f * rms;
+            memmove(m_segment, m_segment + samples, sizeof(float) * (PREROLL_SAMPLES - samples));
+            memcpy(m_segment + PREROLL_SAMPLES - samples, m_frame, sizeof(float) * samples);
+            return true;
+        }
+        m_word_active = true;
+#if defined(ESP_PLATFORM)
+        ESP_LOGI(TAG, "KWS_VAD_START rms=%.4f noise=%.4f speech_threshold=%.4f silence_threshold=%.4f",
+            static_cast<double>(rms), static_cast<double>(m_noise_rms),
+            static_cast<double>(speech_threshold), static_cast<double>(silence_threshold));
+#endif
+    }
+
+    if (m_segment_samples + samples > SEGMENT_CAPACITY) return false;
+    memcpy(m_segment + m_segment_samples, m_frame, sizeof(float) * samples);
+    m_segment_samples += samples;
+    if (rms >= silence_threshold) {
+        m_speech_samples += samples;
+        m_silence_samples = 0;
+    } else {
+        m_silence_samples += samples;
+    }
+    // Bound a model window, not the utterance: continuous speech must keep listening.
+    if (m_segment_samples - PREROLL_SAMPLES - m_silence_samples >= MAX_WORD_SAMPLES) {
+#if defined(ESP_PLATFORM)
+        ESP_LOGI(TAG, "KWS_VAD_LIMIT rms=%.4f silence_threshold=%.4f; infer window, continue stream",
+            static_cast<double>(rms), static_cast<double>(silence_threshold));
+#endif
+        return finishWord();
+    }
+    if (m_silence_samples >= END_SILENCE_SAMPLES) return finishWord();
+    return true;
+}
+
+bool LocalKws::finishWord() {
+    if (m_speech_samples >= MIN_SPEECH_SAMPLES) {
+        // STREAM_END may precede the silence tail: balance the preroll with zeros.
+        const size_t desired_tail = PREROLL_SAMPLES - std::min(PREROLL_SAMPLES, m_silence_samples);
+        const size_t max_tail = (SEGMENT_CAPACITY > m_segment_samples) ? (SEGMENT_CAPACITY - m_segment_samples) : 0;
+        const size_t missing_tail = std::min(desired_tail, max_tail);
+        if (missing_tail > 0) {
+            memset(m_segment + m_segment_samples, 0, sizeof(float) * missing_tail);
+            m_segment_samples += missing_tail;
+        }
+        if (!inferWord()) return false;
+    }
+    resetWord();
+    return true;
+}
+
+bool LocalKws::inferWord() {
 #if defined(ESP_PLATFORM)
     const int64_t started_us = esp_timer_get_time();
 #endif
-    for (size_t i = 0; i < TOTAL_SAMPLES; ++i) {
-        m_window[i] = m_ring[(m_head + i) % TOTAL_SAMPLES];
+    memset(m_window, 0, sizeof(float) * TOTAL_SAMPLES);
+    if (m_segment_samples <= 2 * PREROLL_SAMPLES) {
+        resetWord();
+        return true;
     }
+    const size_t word_samples = m_segment_samples - 2 * PREROLL_SAMPLES;
+    size_t trim = 0;
+    size_t retained = 0;
+    size_t front = 0;
+
+    if (word_samples >= TOTAL_SAMPLES) {
+        trim = PREROLL_SAMPLES + (word_samples - TOTAL_SAMPLES) / 2;
+        retained = TOTAL_SAMPLES;
+        front = 0;
+    } else {
+        const size_t max_context = (TOTAL_SAMPLES - word_samples) / 2;
+        const size_t context = std::min(PREROLL_SAMPLES, max_context);
+        trim = PREROLL_SAMPLES - context;
+        retained = m_segment_samples - trim * 2;
+        if (retained > TOTAL_SAMPLES) retained = TOTAL_SAMPLES;
+        front = (TOTAL_SAMPLES - retained) / 2;
+    }
+    if (trim + retained > m_segment_samples) retained = m_segment_samples - trim;
+    if (front + retained > TOTAL_SAMPLES) retained = TOTAL_SAMPLES - front;
+    memcpy(m_window + front, m_segment + trim, sizeof(float) * retained);
     m_extractor->extract(m_window, m_mfcc);
 
     float probabilities[NUM_CLASSES] = {};
     kws_run_inference_quantized(m_mfcc, probabilities, m_pool_scratch, m_dw_scratch);
 #if defined(ESP_PLATFORM)
-    ESP_LOGI(TAG, "KWS_WINDOW elapsed_us=%lld stride_ms=250 free_internal=%u free_psram=%u",
+    ESP_LOGI(TAG, "KWS_WORD samples=%u speech_samples=%u pad_front=%u elapsed_us=%lld free_internal=%u free_psram=%u",
+        static_cast<unsigned>(m_segment_samples), static_cast<unsigned>(m_speech_samples),
+        static_cast<unsigned>(front),
         static_cast<long long>(esp_timer_get_time() - started_us),
         static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
         static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
@@ -134,26 +219,26 @@ bool LocalKws::inferWindow(uint64_t now_ms) {
 
     int top_class = 0;
     float top_probability = probabilities[0];
-    for (int i = 1; i < NUM_CLASSES; ++i) {
+    for (int i = 0; i < NUM_CLASSES; ++i) {
+        if (!std::isfinite(probabilities[i]) || probabilities[i] < 0.0f || probabilities[i] > 1.0f) {
+#if defined(ESP_PLATFORM)
+            ESP_LOGE(TAG, "Invalid model probability at class %d", i);
+#endif
+            return false;
+        }
         if (probabilities[i] > top_probability) {
             top_probability = probabilities[i];
             top_class = i;
         }
     }
-    if (!std::isfinite(top_probability) || top_probability < 0.0f || top_probability > 1.0f) {
-        return false;
-    }
-
     const bool usable = top_class != CLASS_NOISE && top_class != CLASS_UNKNOWN &&
         top_probability >= EXECUTION_CONFIDENCE;
+#if defined(ESP_PLATFORM)
+    ESP_LOGI(TAG, "KWS_RESULT class=%s confidence=%.3f accepted=%d",
+        KWS_LABELS[top_class], static_cast<double>(top_probability), usable);
+#endif
     if (usable) {
-        const bool repeated = top_class == m_last_class &&
-            now_ms - m_last_class_ms < SAME_CLASS_DEDUP_MS;
-        if (!repeated) {
-            m_command.add(top_class, top_probability);
-            m_last_class = top_class;
-            m_last_class_ms = now_ms;
-        }
+        m_command.add(top_class, top_probability);
     }
     m_partial = m_command.text();
     return true;
@@ -161,21 +246,26 @@ bool LocalKws::inferWindow(uint64_t now_ms) {
 
 bool LocalKws::feedAudio(const int16_t* pcm, size_t samples) {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (!m_active) return false;
-    if (!pcm || samples == 0) return true;
-
+    if (!m_active || m_inference_failed) return false;
+    if (samples == 0) return true;
+    if (!pcm) { m_inference_failed = true; return false; }
 
     size_t offset = 0;
     while (offset < samples) {
-        const size_t capacity = STEP_SAMPLES - m_samples_since_step;
+        const size_t capacity = VAD_FRAME_SAMPLES - m_frame_samples;
         const size_t take = std::min(capacity, samples - offset);
-        appendSamples(pcm + offset, take);
+        for (size_t i = 0; i < take; ++i) {
+            m_frame[m_frame_samples + i] = static_cast<float>(pcm[offset + i]) / 32768.0f;
+        }
         offset += take;
-        m_samples_since_step += take;
-        if (m_samples_since_step >= STEP_SAMPLES) {
-            m_samples_since_step = 0;
-            if (!inferWindow(nowMs())) {
+        m_frame_samples += take;
+        if (m_frame_samples == VAD_FRAME_SAMPLES) {
+            m_frame_samples = 0;
+            if (!processVadFrame(VAD_FRAME_SAMPLES)) {
                 m_inference_failed = true;
+#if defined(ESP_PLATFORM)
+                ESP_LOGW(TAG, "KWS buffer/inference error; discard stream");
+#endif
                 return false;
             }
         }
@@ -186,16 +276,15 @@ bool LocalKws::feedAudio(const int16_t* pcm, size_t samples) {
 void LocalKws::stop() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_active) return;
-    if (m_samples_since_step > 0 && m_extractor) {
-        // Catch a word ending between 250 ms boundaries. Duplicate windows
-        // are filtered by same-class deduplication.
-        if (!inferWindow(nowMs())) m_inference_failed = true;
+    if (!m_inference_failed && m_frame_samples > 0) {
+        if (!processVadFrame(m_frame_samples)) m_inference_failed = true;
     }
+    if (!m_inference_failed && m_word_active && !finishWord()) m_inference_failed = true;
 
     m_final = m_inference_failed ? "__KWS_AUDIO_ERROR__" : commandText();
     m_has_final = true;
     m_active = false;
-    m_samples_since_step = 0;
+    m_frame_samples = 0;
 }
 
 void LocalKws::cancel() {
@@ -204,12 +293,12 @@ void LocalKws::cancel() {
     m_final = "__KWS_AUDIO_ERROR__";
     m_has_final = true;
     m_partial.clear();
-    m_samples_since_step = 0;
+    m_frame_samples = 0;
 }
 
 bool LocalKws::hasPartialResult() const {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return m_active && !m_partial.empty() && m_partial != "__KWS_EMPTY__" &&
+    return m_active && !m_inference_failed && !m_partial.empty() && m_partial != "__KWS_EMPTY__" &&
         m_partial != "__KWS_INVALID__";
 }
 
@@ -238,14 +327,14 @@ void LocalKws::reset() {
     m_active = false;
     m_has_final = false;
     m_inference_failed = false;
-    m_head = 0;
-    m_samples_since_step = 0;
-    m_last_class = -1;
-    m_last_class_ms = INITIAL_LAST_MS;
+    m_frame_samples = 0;
+    m_noise_rms = INITIAL_NOISE_RMS;
     m_command.reset();
     m_partial.clear();
     m_final.clear();
-    if (m_ring) memset(m_ring, 0, sizeof(float) * TOTAL_SAMPLES);
+    if (m_segment) memset(m_segment, 0, sizeof(float) * SEGMENT_CAPACITY);
+    m_segment_samples = PREROLL_SAMPLES;
+    resetWord();
     if (m_window) memset(m_window, 0, sizeof(float) * TOTAL_SAMPLES);
 }
 

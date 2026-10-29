@@ -1,0 +1,4 @@
+Bootloader binary size 0x52b0 bytes. 0x2d50 bytes (35%) free.
+Successfully created ESP32-S3 image.
+SubBox.bin binary size 0x124590 bytes. Smallest app partition is 0x2f0000 bytes. 0x1cba70 bytes (61%) free.
+Project build complete. To flash, run:

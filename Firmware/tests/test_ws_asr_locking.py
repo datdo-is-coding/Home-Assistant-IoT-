@@ -12,6 +12,9 @@ class WsAsrLockingTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             stubs = {
+                'config/board_pins.h': '#pragma once\n#define BOARD_IR_RX_ENABLED 0\n',
+                'esp_heap_caps.h': '#pragma once\n#include <cstdlib>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\ninline void* heap_caps_malloc(size_t n,int){return malloc(n);}\ninline void heap_caps_free(void* p){free(p);}\n',
+                'infrared/infrared.h': '#pragma once\n#include "cJSON.h"\n#include <cstdint>\n#include <cstddef>\nusing IrReply=bool(*)(void*,const char*,size_t);\ninline int ir_submissions=0;\ninline bool infrared_bind(void*,IrReply){return true;}\ninline void infrared_unbind(void*){}\ninline void infrared_session(void*,uint32_t){}\ninline void infrared_submit(void*,uint32_t,const cJSON*){++ir_submissions;}\n',
                 'voice_test_state.h': '#pragma once\n#include <string>\ninline bool core_enrolled=false,core_enabled=false;\ninline std::string last_text,configured_uri,configured_headers;\n',
                 'hc_provisioning.h': '#pragma once\n#include "voice_test_state.h"\n#include <cstring>\nstruct hc_provisioned_config{int subbox=1,committed=1;char factory_id[16]={},mqtt_uri[128]={};};\ninline int hc_provisioning_load(hc_provisioned_config* c){if(!core_enrolled)return -1;strcpy(c->factory_id,"HC-001122334401");strcpy(c->mqtt_uri,"mqtts://192.168.11.29:8883");return 0;}\ninline int hc_provisioning_speaker_token(char out[65]){memset(out,\'a\',64);out[64]=0;return 0;}\n',
                 'esp_log.h': '#pragma once\n#define ESP_LOGI(...)\n#define ESP_LOGW(...)\n#define ESP_LOGE(...)\n#define ESP_LOGD(...)\n',
@@ -33,7 +36,7 @@ constexpr int ESP_OK=0;
 inline const char* esp_err_to_name(int){return "error";}
 enum {WEBSOCKET_EVENT_ANY,WEBSOCKET_EVENT_CONNECTED,WEBSOCKET_EVENT_CLOSED,
       WEBSOCKET_EVENT_DISCONNECTED,WEBSOCKET_EVENT_DATA,WEBSOCKET_EVENT_ERROR};
-struct esp_websocket_event_data_t{int op_code;const char* data_ptr;int data_len;};
+struct esp_websocket_event_data_t{int op_code;const char* data_ptr;int data_len;int payload_len=0,payload_offset=0;};
 struct esp_websocket_client_config_t{const char *cert_pem,*headers,*uri;int buffer_size,
  reconnect_timeout_ms,network_timeout_ms,ping_interval_sec,pingpong_timeout_sec;
  bool disable_auto_reconnect,enable_close_reconnect;};
@@ -64,6 +67,7 @@ inline int esp_websocket_client_send_bin(Client*,const char* p,int n,int){return
 #include <vector>
 #include "audio/asr/ws_asr.h"
 #include "audio_output/sound_player.h"
+#include "infrared/infrared.h"
 #include <cstring>
 WsASR* current=nullptr;
 std::vector<std::thread> callbacks;
@@ -98,6 +102,7 @@ int main(){
     });
     auto receive=[](const char* json){
         esp_websocket_event_data_t data{1,json,(int)strlen(json)};
+        data.payload_len=data.data_len;
         connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_DATA,&data);
     };
     receive(R"({"type":"audio_end","follow_up":true,"follow_up_command":"listen"})");
@@ -107,6 +112,8 @@ int main(){
     assert(followups==1);
     receive(R"({"type":"audio_end","follow_up":true,"follow_up_command":"listen"})");
     assert(followups==1); // repeated END must not reopen microphone
+    receive(R"({"type":"ir_prepare","id":"IR-aaaaaaaaaaaaaaaaaaaaaaaa"})");
+    assert(ir_submissions==0); // Legacy unauthenticated socket must not control IR.
 
     core_enrolled=true;core_enabled=false;
     WsASR core("ws://192.168.11.30:8765/ws/audio","wrong-old-id");assert(core.init());
@@ -118,6 +125,13 @@ int main(){
     assert(last_text.find("\"playback_only\":true")!=std::string::npos);
     assert(last_text.find("SB001122334401")!=std::string::npos);
     assert(!core.start()); // Playback transport must never become microphone ingress.
+    std::string fragmented=R"({"type":"ir_prepare","id":"IR-aaaaaaaaaaaaaaaaaaaaaaaa","padding":")"+std::string(2000,'a')+R"("})";
+    esp_websocket_event_data_t first{1,fragmented.data(),1024,(int)fragmented.size(),0};
+    esp_websocket_event_data_t rest{1,fragmented.data()+1024,(int)fragmented.size()-1024,(int)fragmented.size(),1024};
+    connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_DATA,&first);
+    assert(ir_submissions==0);
+    connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_DATA,&rest);
+    assert(ir_submissions==1); // One complete authenticated command after reassembly.
     receive(R"({"type":"audio_start","format":"pcm","sample_rate":16000,"channels":1,"sample_width":2,"size":4,"playback_id":"11111111111111111111111111111111"})");
     const char pcm4[4]={1,0,2,0};
     esp_websocket_event_data_t bin{2,pcm4,4};
@@ -132,6 +146,20 @@ int main(){
     connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_DATA,&bin);
     receive(R"({"type":"audio_end","playback_id":"22222222222222222222222222222222"})");
     assert(last_text.find("\"success\":false")!=std::string::npos);
+
+    WsASR relay("ws://old:8765/ws/audio","old-id",true);assert(relay.init());
+    connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_CONNECTED,nullptr);
+    assert(last_text.find("\"playback_only\":false")!=std::string::npos);
+    relay.setSourceNodeId("AB1");assert(!relay.start());
+    relay.setSourceNodeId("3476310");assert(relay.start());
+    assert(last_text.find("\"source_node_id\":3476310")!=std::string::npos);
+    short voiced[480]={};assert(relay.feedAudio(voiced,480));relay.stop();
+    finish_ok=true;
+    receive(R"({"type":"audio_start","format":"pcm","sample_rate":16000,"channels":1,"sample_width":2,"size":4,"playback_id":"33333333333333333333333333333333"})");
+    connected_client->handler(connected_client->arg,"",WEBSOCKET_EVENT_DATA,&bin);
+    receive(R"({"type":"audio_end","playback_id":"33333333333333333333333333333333"})");
+    assert(last_text.find("\"received_bytes\":4")!=std::string::npos);
+    assert(last_text.find("\"success\":true")!=std::string::npos);
 
 }
 ''')

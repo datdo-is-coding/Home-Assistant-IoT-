@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-29",
+  "version": "1.3.4+24",
+  "sha256": "ae870f1962cb0e6e437d33838a554ba50f446d1073b4966a37a3779c2ac8aecb",
+  "bytes": 36483691,
+  "installed": true,
+  "signing_certificate_unchanged": true,
+  "flutter_analyze": "No issues found",
+  "full_flutter_tests_passed": 178,
+  "last_navigation_tests_passed": 7,
+  "physical_tabs_opened": [
+    "Nhà",
+    "Thiết bị",
+    "Điện năng",
+    "Kịch bản",
+    "Cài đặt"
+  ],
+  "physical_color_modes_checked": [
+    "dark",
+    "light"
+  ],
+  "original_dark_mode_restored": true,
+  "active_display_hz": 120,
+  "continuous_flutter_fps_measured": false,
+  "physical_network_loss_tested": false,
+  "relay_control_tested_in_this_ui_run": false,
+  "runtime_flutter_or_android_errors_after_final_launch": 0,
+  "final_automation_suggestions_collapsed": true
+}

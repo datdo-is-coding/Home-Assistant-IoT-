@@ -13,11 +13,37 @@ cd App/HomeCompetition
 flutter pub get
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --release
 ```
 
-APK mới build: `build/app/outputs/flutter-apk/app-debug.apk` (bản phát triển).
-Bản 1.2.3+18 đang cài được giữ tại `releases/android/HomeCompetition.apk`.
+APK dùng hằng ngày: `build/app/outputs/flutter-apk/app-release.apk`.
+Bản release 1.6.0+41 được giữ tại `releases/android/HomeCompetition.apk`.
+Bản 1.6.0 dùng Progressive Blur ở dock nổi và nền Light Rays vẽ tĩnh, áp dụng
+cùng bề mặt kính xuyên sáng cho năm tab, màn đăng nhập và bảng điều khiển.
+Giảm hiệu ứng/tương phản cao dùng nền đọc rõ, không thêm blur vào từng thẻ.
+Xem [ảnh và kiểm tra](../../docs/testing/progressive-blur-2026-10-29/README.md).
+Giao diện đã tinh giản: tên nhà xanh/cam báo kết nối, chấm online trên thẻ,
+phần giải thích và kỹ thuật được thu gọn. Xem
+[`app-minimal-ui-2026-10-29`](../../docs/testing/app-minimal-ui-2026-10-29/README.md).
+Bản 1.4.0 bổ sung nền ánh sáng, viền nổi, phản hồi nghiêng khi chạm và kính ở
+thanh điều hướng. Remote IR mở từ biểu tượng remote ở tab Thiết bị; cấu hình
+và điều khiển đi qua Firebase RPC tới Pi rồi tới SubBox đã enroll qua WSS.
+Chọn SubBox, bộ mã, thử và xác nhận thiết bị phản ứng trước khi lưu. Bản 1.5.0
+thêm học riêng Bật/Tắt/Đặt nhiệt độ, tên gọi giọng nói và khai báo mắt thu.
+Prototype hiện chỉ có LED phát: chỉ bật mục “Đã lắp mắt thu hồng ngoại” sau khi
+lắp đúng phần cứng. Panasonic 216-bit hợp lệ có bảng nhiệt độ đầy đủ; giao thức
+khác chỉ hiện những mức đã học. A75C4187 là bộ nút nguồn/tăng/giảm tương đối,
+không được coi là mã Bật/Tắt/nhiệt độ tuyệt đối.
+Sau khi có mã phù hợp, nói “bật điều hòa”, “tắt điều hòa”, “đặt điều hòa 26 độ”;
+Pi chọn remote trong phòng của micro, chờ SubBox xác nhận phát rồi trả lời.
+IR không đo được trạng thái điều hòa. Xem
+[kiểm tra 1.5.0](../../docs/testing/ir-climate-admin-2026-10-29/README.md).
+Tên gọi giọng nói mặc định theo tên thiết bị, cho phép sửa riêng. Lưu cấu hình
+có tiến trình/kết quả/lỗi; bật/tắt hiển thị trạng thái đang chờ trước ACK của bo.
+Chi tiết kiểm tra app và Pi tại
+[`device-config-response-2026-10-29`](../../docs/testing/device-config-response-2026-10-29/README.md).
+Chỉ dùng `flutter run` hoặc APK debug khi phát triển/chẩn đoán; không dùng FPS
+của bản debug để đánh giá hiệu năng bản phát hành.
 Android applicationId giữ `com.dtv.homeassistant.dtv_home_assistant` để khớp app
 đã đăng ký Firebase; namespace mới `com.homecompetition.app`, tên hiển thị
 HomeCompetition. Không đổi applicationId khi chưa đăng ký lại Firebase/Google
@@ -67,23 +93,25 @@ Thiếu state hoặc số đo không được giả thành trạng thái/số0 �
 
 ## Điều khiển và quyền
 
-Để tương thích firmware Firebase hiện có, điều khiển ghi boolean vào
-`devices/<id>/channels/<ch>/state`. Ghi dùng HTTPS REST có Firebase ID token,
-không dùng hàng đợi ghi offline của SDK để tránh phát lại lệnh khi có mạng.
-Trạng thái hiển thị là **giá trị trên Firebase**, không phải ACK relay hay xác
-nhận tải điện. Ghi bị từ chối được trả lỗi; không tự sửa UI thành thành công.
-Timeout không tự gửi lại vì không thể khẳng định server đã nhận hay chưa.
+Thiết bị Core đã enroll được điều khiển qua Firebase RPC tới Pi, kiểm tra quyền
+nhà, cấu hình kênh và ACK từ bo. UI phản hồi chạm bằng trạng thái đang chờ;
+không coi ghi cloud là đã đóng relay. APPLIED là trạng thái firmware báo lại,
+không phải đo tải điện. Đường tương thích cũ vẫn ghi boolean qua HTTPS REST có
+Firebase ID token; không dùng hàng đợi ghi offline để phát lại lệnh khi có mạng.
 
 Firebase Rules phải kiểm tra quyền đọc/ghi phía server cho tài khoản của nhà.
-Đăng ký tài khoản không tự cấp quyền thiết bị. Chỉ custom claim `role=admin`
-cho phép mở thao tác sửa metadata trong UI; Rules vẫn phải tự kiểm tra claim.
-Không dùng luật `.read/.write: true` trên dữ liệu nhà. Thay đổi này không deploy
-Rules, tạo tài khoản, hoặc ghi vào database thật. Giữ nguồn cấu hình Firebase
-cũ; cần kiểm tra SHA signing key/Google provider trên project khi cài điện thoại.
+Đăng ký tài khoản không tự cấp quyền thiết bị. Với Core, Owner là Quản trị nhà;
+Installer có quyền cấu hình nhưng không có quyền reset/xóa bo. Vai trò được
+lấy từ Pi đã xác thực, kiểm tra lại phía server trên mỗi thao tác. Xem quyền ở
+Cài đặt → Tài khoản → Cập nhật quyền. Tài khoản Google đang liên kết đã được
+cấp Owner theo yêu cầu ngày 29/10; không tạo mật khẩu chung hay cấp quyền IAM.
+Khởi động lại, khôi phục gốc và gỡ khỏi nhà có theo dõi kết quả; reset/xóa cần
+xác nhận và firmware hỗ trợ. SubBox còn ActionBox con không được reset/xóa.
+Không dùng luật `.read/.write: true` trên dữ liệu nhà.
 
 Firmware `archive/2026-10-28-cleanup/files/Firmware/firmware_actionbox_sim` có số đo mô phỏng; dữ liệu do nó gửi không phải
-bằng chứng đo tải thật. Firmware ActionBox_V2/SubBox và Pi Gateway hiện không
-được thay bằng cầu nối Firebase trong lần gộp app này.
+bằng chứng đo tải thật. Đường Core/Firebase hiện chạy với firmware ActionBox_V2,
+SubBox và Pi Gateway; không lấy mô phỏng làm bằng chứng điều khiển phần cứng.
 
 ## Kiểm chứng
 

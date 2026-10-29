@@ -1,0 +1,50 @@
+{
+  "node_id": 3476308,
+  "factory_id": "HC-288485350B54",
+  "firmware": "2.0.4-b1",
+  "boot_id": "7426449444960805527",
+  "connectivity": "ONLINE",
+  "last_seen_age_seconds": 8.459,
+  "cached_firmware_note": "last OTA result; real 2.0.4-b2 version verified from USB boot log",
+  "kws_revisions": [
+    4
+  ],
+  "kws_sync_current_boot": true,
+  "recent_voice_results": [
+    {
+      "event_id": 69260,
+      "reason": "incomplete_command",
+      "command_created": false
+    },
+    {
+      "event_id": 69241,
+      "reason": "incomplete_command",
+      "command_created": false
+    },
+    {
+      "event_id": 68931,
+      "reason": "no_command",
+      "command_created": false
+    }
+  ],
+  "relays": [
+    {
+      "number": 1,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0
+    },
+    {
+      "number": 2,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0
+    },
+    {
+      "number": 3,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0
+    }
+  ]
+}

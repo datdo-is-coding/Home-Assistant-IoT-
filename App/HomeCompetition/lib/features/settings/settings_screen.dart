@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/smart_home_providers.dart';
 import '../../services/gateway_client.dart';
+import '../../widgets/home_connection_name.dart';
+import '../../widgets/soft_3d_decorations.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -21,14 +23,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void initState() {
     super.initState();
     _loadHomeName();
+    _loadAccess();
+  }
+
+  Future<void> _loadAccess() async {
+    final gateway = ref.read(gatewayClientProvider);
+    if (!gateway.usesFirebase) return;
+    try {
+      await gateway.request('/api/commissioning/context');
+      if (mounted) setState(() {});
+    } catch (_) {
+      // Offline settings remain usable; device management still verifies on the Gateway.
+    }
   }
 
   Future<void> _loadHomeName() async {
     final gateway = ref.read(gatewayClientProvider);
     final saved = await ref.read(appPreferencesServiceProvider).loadHomeName(
-      gatewayUrl: gateway.serverUrl,
-      userId: gateway.currentUserId,
-    );
+          gatewayUrl: gateway.serverUrl,
+          userId: gateway.currentUserId,
+        );
     if (mounted) {
       setState(() => _homeName = saved);
     }
@@ -38,375 +52,188 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeMode = ref.watch(themeModeProvider);
-    final gateway = ref.watch(gatewayClientProvider);
-    final homeNameWatched = ref.watch(homeNameProvider);
-    final currentHomeName = homeNameWatched.isNotEmpty ? homeNameWatched : _homeName;
-
-    final roomsAsync = ref.watch(roomsStreamProvider);
-    final actionBoxesAsync = ref.watch(actionBoxesStreamProvider);
-    final devicesAsync = ref.watch(devicesStreamProvider);
-
-    final rooms = roomsAsync.value ?? [];
-    final actionBoxes = actionBoxesAsync.value ?? [];
-    final devices = devicesAsync.value ?? [];
-    final onlineCount = devices.where((d) => d.online).length;
+    final gateway = ref.read(gatewayClientProvider);
+    ref.watch(gatewayClientProvider
+        .select((c) => (c.connected, c.error, c.usesFirebase)));
+    final iconColor = theme.colorScheme.onSurfaceVariant;
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
+      backgroundColor: Colors.transparent,
       body: SafeArea(
-        child: CustomScrollView(
-          physics: const BouncingScrollPhysics(),
-          slivers: [
-
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              sliver: SliverToBoxAdapter(
+          child: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          const SliverPadding(
+            padding: EdgeInsets.fromLTRB(20, 16, 20, 12),
+            sliver: SliverToBoxAdapter(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Cài đặt',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                        color: theme.colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Cấu hình nhà, tài khoản và dữ liệu',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Cài đặt',
+                    style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.9)),
+                HomeConnectionName(),
+              ],
+            )),
+          ),
+          _buildSectionHeader('Giao diện'),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverToBoxAdapter(
+                child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<ThemeMode>(
+                segments: const [
+                  ButtonSegment(
+                      value: ThemeMode.light,
+                      label: Text('Sáng'),
+                      icon: Icon(Icons.light_mode_rounded, size: 16)),
+                  ButtonSegment(
+                      value: ThemeMode.dark,
+                      label: Text('Tối'),
+                      icon: Icon(Icons.dark_mode_rounded, size: 16)),
+                  ButtonSegment(
+                      value: ThemeMode.system,
+                      label: Text('Hệ thống'),
+                      icon: Icon(Icons.settings_suggest_rounded, size: 16)),
+                ],
+                selected: {themeMode},
+                onSelectionChanged: (selection) {
+                  HapticFeedback.selectionClick();
+                  ref.read(themeModeProvider.notifier).state = selection.first;
+                },
               ),
-            ),
-
-            _buildSectionHeader('Giao diện & Hiển thị'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            )),
+          ),
+          _buildSectionHeader('Ngôi nhà'),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverToBoxAdapter(
+                child: _SettingsGroup(children: [
+              _SettingsTile(
+                  icon: Icons.home_rounded,
+                  iconColor: iconColor,
+                  title: 'Tên ngôi nhà',
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showEditHomeNameDialog(context)),
+              const Divider(height: 1, indent: 56),
+              _SettingsTile(
+                  icon: Icons.meeting_room_rounded,
+                  iconColor: iconColor,
+                  title: 'Phòng',
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.push('/devices')),
+              const Divider(height: 1, indent: 56),
+              _SettingsTile(
+                  icon: Icons.record_voice_over_rounded,
+                  iconColor: iconColor,
+                  title: 'Giọng nói',
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => context.push('/voice')),
+            ])),
+          ),
+          _buildSectionHeader('Ứng dụng'),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            sliver: SliverToBoxAdapter(
+                child: _SettingsGroup(children: [
+              _SettingsTile(
+                  icon: Icons.person_rounded,
+                  iconColor: iconColor,
+                  title: 'Tài khoản',
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showUserAccountSheet(context, gateway)),
+              const Divider(height: 1, indent: 56),
+              _SettingsTile(
+                  icon: Icons.notifications_none_rounded,
+                  iconColor: iconColor,
+                  title: 'Thông báo',
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                            title: const Text('Thông báo'),
+                            content: const Text(
+                                'Cảnh báo hiển thị trong ứng dụng. Chưa hỗ trợ thông báo đẩy khi ứng dụng ở nền.'),
+                            actions: [
+                              TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: const Text('Đóng'))
+                            ],
+                          ))),
+              const Divider(height: 1, indent: 56),
+              _SettingsTile(
+                  icon: Icons.info_outline_rounded,
+                  iconColor: iconColor,
+                  title: 'HomeCompetition',
+                  trailing: const Text('1.6.0', style: TextStyle(fontSize: 12)),
+                  onTap: () => showAboutDialog(
+                        context: context,
+                        applicationName: 'HomeCompetition',
+                        applicationVersion: '1.6.0',
                         children: [
                           const Text(
-                            'Chế độ màu (Theme)',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Gam màu trung tính ấm áp (Light) hoặc tối sang trọng (Dark)',
-                            style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
-                          ),
-                          const SizedBox(height: 14),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            physics: const BouncingScrollPhysics(),
-                            child: SegmentedButton<ThemeMode>(
-                              segments: const [
-                                ButtonSegment(
-                                  value: ThemeMode.light,
-                                  label: Text('Sáng'),
-                                  icon: Icon(Icons.light_mode_rounded, size: 16),
-                                ),
-                                ButtonSegment(
-                                  value: ThemeMode.dark,
-                                  label: Text('Tối'),
-                                  icon: Icon(Icons.dark_mode_rounded, size: 16),
-                                ),
-                                ButtonSegment(
-                                  value: ThemeMode.system,
-                                  label: Text('Hệ thống'),
-                                  icon: Icon(Icons.settings_suggest_rounded, size: 16),
-                                ),
-                              ],
-                              selected: {themeMode},
-                              onSelectionChanged: (Set<ThemeMode> newSelection) {
-                                HapticFeedback.lightImpact();
-                                ref.read(themeModeProvider.notifier).state = newSelection.first;
-                              },
-                            ),
-                          ),
+                              'Trạng thái được đồng bộ qua Firebase. Giọng nói được xử lý tại Gateway.')
                         ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            _buildSectionHeader('Quản lý ngôi nhà'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.home_rounded,
-                      iconColor: const Color(0xFF1E88E5),
-                      title: 'Tên ngôi nhà',
-                      subtitle: currentHomeName,
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => _showEditHomeNameDialog(context),
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _SettingsTile(
-                      icon: Icons.meeting_room_rounded,
-                      iconColor: const Color(0xFFFF9800),
-                      title: 'Phòng và không gian',
-                      subtitle: '${rooms.length} phòng đã cấu hình',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.push('/devices'),
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _SettingsTile(
-                      icon: Icons.people_alt_rounded,
-                      iconColor: const Color(0xFF00897B),
-                      title: 'Tài khoản người dùng',
-                      subtitle:
-                          '${gateway.user['username'] ?? "Người dùng"} · ${gateway.user['role'] ?? "Thành viên"}',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => _showUserAccountSheet(context, gateway),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            _buildSectionHeader('Phần cứng & Trợ lý ảo'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.developer_board_rounded,
-                      iconColor: const Color(0xFF43A047),
-                      title: 'Bộ điều khiển ActionBox',
-                      subtitle:
-                          '${actionBoxes.length} bộ điều khiển · $onlineCount thiết bị trực tuyến',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.push('/devices'),
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _SettingsTile(
-                      icon: Icons.record_voice_over_rounded,
-                      iconColor: const Color(0xFFD81B60),
-                      title: 'Nhận diện giọng nói',
-                      subtitle: gateway.usesFirebase ? 'Chưa có dịch vụ cấu hình giọng nói trên Firebase' : 'Trợ lý ngoại tuyến Sherpa-ONNX',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () => context.push('/voice'),
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _SettingsTile(
-                      icon: Icons.router_rounded,
-                      iconColor: const Color(0xFF5E35B1),
-                      title: gateway.usesFirebase ? 'Firebase Realtime Database' : 'Máy chủ Gateway IoT',
-                      subtitle: gateway.usesFirebase ? 'Đồng bộ dữ liệu qua Internet' : '${gateway.serverUrl} (HTTP / WS / MQTT)',
-                      trailing: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: (gateway.connected
-                                  ? const Color(0xFF43A047)
-                                  : const Color(0xFFE53935))
-                              .withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          gateway.connected ? 'Trực tuyến' : 'Mất kết nối',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: gateway.connected
-                                ? const Color(0xFF43A047)
-                                : const Color(0xFFE53935),
-                          ),
-                        ),
-                      ),
-                      onTap: () => _showGatewayInfoSheet(context, gateway),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            SliverToBoxAdapter(child: ListTile(
-              leading: const Icon(Icons.analytics_outlined),
-              title: const Text('Điện năng & Cảnh báo'),
-              subtitle: const Text('Số đo từ thiết bị, tình trạng kết nối'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.go('/energy'),
-            )),
-            _buildSectionHeader('Thông báo'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Icon(
-                              Icons.info_outline_rounded,
-                              size: 22,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Thông báo & Trạng thái hệ thống',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w700,
-                                    color: theme.colorScheme.onSurface,
-                                  ),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Cảnh báo ngắt kết nối và trạng thái thiết bị được hiển thị trực tiếp theo thời gian thực (In-app Live Alerts). Tính năng thông báo đẩy nền (Push Notification) sẽ khả dụng trong phiên bản Cloud tiếp theo.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    height: 1.4,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            _buildSectionHeader('Kỹ thuật & Cấu hình nâng cao'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.code_rounded,
-                      iconColor: theme.colorScheme.onSurfaceVariant,
-                      title: _showEngineering
-                          ? 'Thu gọn cài đặt kỹ thuật'
-                          : 'Hiển thị tùy chọn kỹ sư',
-                      subtitle: 'MQTT topics, trạng thái Gateway, nhật ký telemetry',
-                      trailing: Icon(
-                        _showEngineering ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                      ),
-                      onTap: () => setState(() => _showEngineering = !_showEngineering),
-                    ),
-                    if (_showEngineering) ...[
-                      const Divider(height: 1),
-                      _SettingsTile(
-                        icon: Icons.terminal_rounded,
-                        iconColor: const Color(0xFF546E7A),
-                        title: 'Nhật ký kết nối Gateway (Live Telemetry)',
-                        subtitle:
-                            'Đã ghi nhận ${gateway.nodes.length} nodes · ${gateway.pending.length} pending',
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => _showPacketLogSheet(context, gateway),
-                      ),
-                      const Divider(height: 1, indent: 56),
-                      _SettingsTile(
-                        icon: Icons.restart_alt_rounded,
-                        iconColor: const Color(0xFFD32F2F),
-                        title: 'Khởi động lại kết nối Gateway',
-                        subtitle: 'Đồng bộ lại danh sách thiết bị và trạng thái rơ-le',
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () async {
-                          HapticFeedback.heavyImpact();
+                      )),
+            ])),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            sliver: SliverToBoxAdapter(
+                child: _SettingsGroup(children: [
+              _SettingsTile(
+                  icon: Icons.tune_rounded,
+                  iconColor: iconColor,
+                  title: 'Nâng cao',
+                  trailing: Icon(_showEngineering
+                      ? Icons.expand_less_rounded
+                      : Icons.expand_more_rounded),
+                  onTap: () =>
+                      setState(() => _showEngineering = !_showEngineering)),
+              if (_showEngineering) ...[
+                const Divider(height: 1),
+                _SettingsTile(
+                    icon: Icons.cloud_outlined,
+                    iconColor: iconColor,
+                    title: 'Kết nối',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => _showGatewayInfoSheet(context, gateway)),
+                _SettingsTile(
+                    icon: Icons.terminal_rounded,
+                    iconColor: iconColor,
+                    title: 'Nhật ký',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => _showPacketLogSheet(context, gateway)),
+                _SettingsTile(
+                    icon: Icons.refresh_rounded,
+                    iconColor: iconColor,
+                    title: 'Đồng bộ lại',
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () async {
+                      try {
+                        await gateway.refresh();
+                        if (context.mounted)
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Đang làm mới kết nối với Gateway...'),
-                              duration: Duration(seconds: 1),
-                            ),
+                            SnackBar(
+                                content: Text(gateway.error ??
+                                    (gateway.connected
+                                        ? 'Đã đồng bộ.'
+                                        : 'Chưa kết nối được.'))),
                           );
-                          try {
-                            await ref.read(gatewayClientProvider).refresh();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Đã cập nhật trạng thái Gateway thành công.'),
-                                  backgroundColor: Color(0xFF43A047),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Lỗi kết nối Gateway: $e'),
-                                  backgroundColor: theme.colorScheme.error,
-                                ),
-                              );
-                            }
-                          }
-                        },
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-
-            _buildSectionHeader('Thông tin ứng dụng'),
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: SliverToBoxAdapter(
-                child: _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.info_outline_rounded,
-                      iconColor: const Color(0xFF1E88E5),
-                      title: 'HomeCompetition',
-                      subtitle: 'Phiên bản 2.4.0 (Flutter & Riverpod)',
-                      trailing: const Text('v2.4.0',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      onTap: () {},
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _SettingsTile(
-                      icon: Icons.verified_user_outlined,
-                      iconColor: const Color(0xFF43A047),
-                      title: 'Quyền riêng tư & Bảo mật',
-                      subtitle: 'Xử lý dữ liệu hoàn toàn trong mạng cục bộ',
-                      trailing: const Icon(Icons.chevron_right_rounded),
-                      onTap: () {},
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SliverToBoxAdapter(child: SizedBox(height: 48)),
-          ],
-        ),
-      ),
+                      } catch (e) {
+                        if (context.mounted)
+                          ScaffoldMessenger.of(context)
+                              .showSnackBar(SnackBar(content: Text('$e')));
+                      }
+                    }),
+              ],
+            ])),
+          ),
+        ],
+      )),
     );
   }
 
@@ -439,10 +266,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ref.read(homeNameProvider.notifier).updateHomeName(newName);
                 final gateway = ref.read(gatewayClientProvider);
                 ref.read(appPreferencesServiceProvider).saveHomeName(
-                  newName,
-                  gatewayUrl: gateway.serverUrl,
-                  userId: gateway.currentUserId,
-                );
+                      newName,
+                      gatewayUrl: gateway.serverUrl,
+                      userId: gateway.currentUserId,
+                    );
               }
               Navigator.pop(ctx);
             },
@@ -459,6 +286,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -493,18 +321,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: CircleAvatar(
                   backgroundColor: theme.colorScheme.primary.withOpacity(0.12),
-                  child: Icon(Icons.person_rounded, color: theme.colorScheme.primary),
+                  child: Icon(Icons.person_rounded,
+                      color: theme.colorScheme.primary),
                 ),
                 title: Text(
                   user['username']?.toString() ?? 'Tài khoản Gateway',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
-                subtitle: Text('Vai trò: ${user['role'] ?? "Quản trị viên"}'),
+                subtitle: Text(gateway.isAdmin ? 'Quản trị nhà' : 'Thành viên'),
+                trailing: gateway.usesFirebase
+                    ? IconButton(
+                        tooltip: 'Cập nhật quyền',
+                        onPressed: _loadAccess,
+                        icon: const Icon(Icons.refresh_rounded))
+                    : null,
               ),
               const Divider(height: 24),
               Text(
                 'Trạng thái phiên: ${gateway.authenticated ? "Đã đăng nhập" : "Chưa xác thực"}',
-                style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontSize: 13, color: theme.colorScheme.onSurfaceVariant),
               ),
               const SizedBox(height: 20),
               SizedBox(
@@ -512,8 +348,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: theme.colorScheme.error,
-                    side: BorderSide(color: theme.colorScheme.error.withOpacity(0.4)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    side: BorderSide(
+                        color: theme.colorScheme.error.withOpacity(0.4)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
                   icon: const Icon(Icons.logout_rounded),
                   label: const Text('Đăng xuất'),
@@ -535,6 +373,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -568,9 +407,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: (gateway.connected ? const Color(0xFF43A047) : const Color(0xFFE53935))
+                      color: (gateway.connected
+                              ? const Color(0xFF43A047)
+                              : const Color(0xFFE53935))
                           .withOpacity(0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -589,16 +431,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               const SizedBox(height: 14),
               _buildInfoRow('Địa chỉ URL', gateway.serverUrl),
-              _buildInfoRow('Thời gian cập nhật',
-                  gateway.updatedAt != null ? '${gateway.updatedAt!.hour}:${gateway.updatedAt!.minute.toString().padLeft(2, "0")}:${gateway.updatedAt!.second.toString().padLeft(2, "0")}' : 'Chưa có'),
-              _buildInfoRow('Số node trực tuyến', '${gateway.nodes.length} thiết bị'),
-              _buildInfoRow('Thiết bị chờ ghép nối', '${gateway.pending.length} thiết bị'),
+              _buildInfoRow(
+                  'Thời gian cập nhật',
+                  gateway.updatedAt != null
+                      ? '${gateway.updatedAt!.hour}:${gateway.updatedAt!.minute.toString().padLeft(2, "0")}:${gateway.updatedAt!.second.toString().padLeft(2, "0")}'
+                      : 'Chưa có'),
+              _buildInfoRow(
+                  'Số node trực tuyến', '${gateway.nodes.length} thiết bị'),
+              _buildInfoRow('Thiết bị chờ ghép nối',
+                  '${gateway.pending.length} thiết bị'),
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
                   ),
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Làm mới kết nối'),
@@ -621,6 +469,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -683,20 +532,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               : asMap(node['last_telemetry']);
                           final power = readNumber(pzem['power']) ?? 0.0;
                           final voltage = readNumber(pzem['voltage']) ?? 0.0;
-                          final relayState = node['relay_state']?.toString() ?? '[0, 0]';
+                          final relayState =
+                              node['relay_state']?.toString() ?? '[0, 0]';
 
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                              color: theme.colorScheme.surfaceContainerHighest
+                                  .withOpacity(0.3),
                               borderRadius: BorderRadius.circular(16),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
                                       entry.key,
@@ -717,7 +569,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 Text(
                                   'IP: ${node['ip'] ?? "N/A"} · MAC: ${node['mac'] ?? "N/A"}',
                                   style: TextStyle(
-                                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+                                      fontSize: 11,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
@@ -747,7 +601,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(fontSize: 13, color: Colors.grey)),
-          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -780,17 +636,13 @@ class _SettingsGroup extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    return Material(
-      color: isDark ? const Color(0xFF1E242B) : Colors.white,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
+    return DecoratedBox(
+      decoration: Soft3DDecorations.card(isDark: isDark),
+      child: Material(
+        color: Colors.transparent,
+        clipBehavior: Clip.antiAlias,
         borderRadius: BorderRadius.circular(AppTheme.cardRadius),
-        side: BorderSide(
-          color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
-        ),
-      ),
-      child: Column(
-        children: children,
+        child: Column(children: children),
       ),
     );
   }
@@ -800,7 +652,6 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final Color iconColor;
   final String title;
-  final String subtitle;
   final Widget? trailing;
   final VoidCallback onTap;
 
@@ -808,18 +659,14 @@ class _SettingsTile extends StatelessWidget {
     required this.icon,
     required this.iconColor,
     required this.title,
-    required this.subtitle,
     this.trailing,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Semantics(
       button: true,
-      label: '$title, $subtitle',
       child: ConstrainedBox(
         constraints: const BoxConstraints(minHeight: 48),
         child: ListTile(
@@ -837,10 +684,6 @@ class _SettingsTile extends StatelessWidget {
           title: Text(
             title,
             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
-          subtitle: Text(
-            subtitle,
-            style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
           ),
           trailing: trailing,
         ),

@@ -253,7 +253,7 @@ void device_manager_on_button_event(uint8_t channel, ButtonAction action, void *
             nvs_storage_record_relay_state(2, new_st);
         } else if (action == ButtonAction::VOICE_TRIGGER) {
             ESP_LOGI(TAG, "LOCAL BUTTON Ch2: Held >= 700ms -> Triggering Voice Streaming");
-            voice_capture_start_streaming(2);
+            voice_capture_start_streaming(WAKE_TRIGGER_BUTTON);
         }
         return;
     }

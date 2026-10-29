@@ -7,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:home_competition/app/home_competition_app.dart';
 import 'package:home_competition/providers/smart_home_providers.dart';
 import 'package:home_competition/services/gateway_client.dart';
+import 'package:home_competition/widgets/device_card.dart';
 
 class PerformanceClient extends GatewayClient {
   PerformanceClient() : super(persistSession: false) {
@@ -68,7 +69,8 @@ void main() {
       gatewayClientProvider.overrideWith((ref) => client),
     ], child: const HomeCompetitionApp()));
     await tester.pumpAndSettle();
-    expect(find.text('120 thiết bị · 120 trực tuyến'), findsOneWidget);
+    expect(find.byType(DeviceCard), findsWidgets);
+    expect(client.nodes.length, 40);
     final scroll = find.byType(CustomScrollView).first;
     expect(scroll, findsOneWidget);
     // Warm up both directions before recording steady-state frames.
@@ -105,6 +107,7 @@ void main() {
           'p50_ms': percentile(0.5),
           'p95_ms': percentile(0.95),
           'p99_ms': percentile(0.99),
+          'over_8ms': values.where((v) => v > 8.333).length,
           'over_16ms': values.where((v) => v > 16.667).length
         };
       }

@@ -1,7 +1,19 @@
 # Điều khiển bằng KWS tại SubBox, phản hồi tại Pi4
 
+**Đã thay thế theo yêu cầu ngày 28/10/2026:** chuyển nhận dạng và xử lý lệnh
+về Pi4. ActionBox giữ WakeNet/thu âm và relay, SubBox chuyển PCM/phát loa;
+không chạy model KWS cục bộ hoặc train thêm. Xem
+[kế hoạch rollback](../plans/2026-10-28-pi4-voice-rollback.md) và
+[bằng chứng triển khai](../../testing/pi4-voice-rollback-2026-10-28/README.md).
+Thiết kế KWS bên dưới được giữ làm lịch sử, không phải kiến trúc đang chạy.
+
 Ngày thiết kế: 25/10/2026. Cập nhật 26/10: đã triển khai pilot Pi/SubBox/DDF8; timing đạt sau tối ưu, nhận dạng âm thanh thật chưa đạt. Xem báo cáo triển khai.
 Bằng chứng và giới hạn: `docs/implementation/2026-10-25-local-kws.md`.
+
+Cập nhật 28/10: theo yêu cầu người dùng, thay cửa sổ trượt bằng VAD từng từ
+và đệm giữa 1 giây như firmware KWS cũ, sửa lỗi lặp onset và đếm im lặng thành
+thời gian nói. Chi tiết: [kế hoạch VAD](../plans/2026-10-28-subbox-word-vad.md).
+Model/MFCC giữ nguyên; build và kiểm tra trên máy chưa thay thế nghiệm thu bo thật.
 
 ## Yêu cầu đã được người dùng chốt
 

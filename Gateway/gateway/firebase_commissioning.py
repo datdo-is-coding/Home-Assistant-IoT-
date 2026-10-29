@@ -127,6 +127,9 @@ class FirebaseCommissioningBridge:
         self._granted = False
         self._rules_checked = False
         self._next_status = 0
+        self._state_seq = None
+        self.ir_tasks = {}
+        self.infrared = None
 
     def status(self, online):
         return {'online': online, 'last_seen': int(self.clock() * 1000),
@@ -143,7 +146,9 @@ class FirebaseCommissioningBridge:
             await self.store.patch({f'gateway_access/{uid}/{gid}': True
                                     for uid in self.config['installer_uids']})
             self._granted = True
-        if self.clock() >= self._next_status:
+        state_seq = (self.core.r.db.execute('SELECT coalesce(max(event_id),0) FROM state_events WHERE home_id=?',(self.core.home,)).fetchone()[0]
+                     if self.core else None)
+        if self.clock() >= self._next_status or state_seq != self._state_seq:
             updates = {f'gateways/{gid}/status': self.status(True)}
             for node_id, node in self.gateway.registry.get_all_nodes().items():
                 projection = device_projection(node_id, node)
@@ -153,6 +158,7 @@ class FirebaseCommissioningBridge:
                 updates.update({f'devices/{node_id}':value for node_id,value in
                                 self.core.projections(self.config['installer_uids'][0]).items()})
             await self.store.patch(updates)
+            self._state_seq = state_seq
             self._next_status = self.clock() + 3
         if not isinstance(requests, dict):
             return
@@ -168,6 +174,13 @@ class FirebaseCommissioningBridge:
                 path = f'gateway_rpc/{gid}/responses/{uid}/{request_id}'
                 if request_id in responses or await self.store.read(path) is not None:
                     await self.store.write(f'gateway_rpc/{gid}/requests/{uid}/{request_id}', None)
+                    continue
+                if self.infrared and str(envelope.get('path','')).startswith('/api/v1/ir/'):
+                    key=(uid,request_id)
+                    if key not in self.ir_tasks and len(self.ir_tasks)<4:
+                        task=asyncio.create_task(self._ir_request(uid,request_id,envelope,path))
+                        self.ir_tasks[key]=task
+                        task.add_done_callback(lambda done,k=key:self.ir_tasks.pop(k,None))
                     continue
                 try:
                     too_large = len(json.dumps(envelope, allow_nan=False).encode()) > 16384
@@ -185,6 +198,18 @@ class FirebaseCommissioningBridge:
                         type(response.get('completed_at')) in (int, float) and
                         response['completed_at'] < self.clock() * 1000 - 300000):
                     await self.store.write(f'gateway_rpc/{gid}/responses/{uid}/{request_id}', None)
+
+    async def _ir_request(self, uid, request_id, envelope, path):
+        try:
+            response=await self.dispatcher.dispatch(uid,request_id,envelope)
+            response['completed_at']=int(self.clock()*1000)
+            await self.store.write(path,response)
+            gid=self.config['gateway_id']
+            await self.store.write(f'gateway_rpc/{gid}/requests/{uid}/{request_id}',None)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.warning('IR mailbox deferred (%s)',type(exc).__name__)
 
     async def run(self):
         if self.core and hasattr(self.gateway,'audio_server'):
@@ -206,6 +231,9 @@ class FirebaseCommissioningBridge:
             await asyncio.sleep(.5)
 
     async def close(self):
+        tasks=list(self.ir_tasks.values())
+        for task in tasks:task.cancel()
+        if tasks:await asyncio.gather(*tasks,return_exceptions=True)
         if self.voice_task:
             self.voice_task.cancel()
             await asyncio.gather(self.voice_task,return_exceptions=True)
@@ -235,7 +263,13 @@ def configured_bridge(gateway):
             raise ValueError('Core coordinator registry must already exist')
         registry=Registry(data/'core.db',read_key(data/'master.key'),recover=False)
         core=CoreCommissioning(registry,config['core'],config['installer_uids'])
-    return FirebaseCommissioningBridge(gateway, AdminStore(config), config,core=core)
+    bridge=FirebaseCommissioningBridge(gateway, AdminStore(config), config,core=core)
+    if core:
+        from core_v1.infrared.service import InfraredService
+        bridge.infrared=InfraredService(core,getattr(gateway,'audio_server',None))
+        core.infrared=bridge.infrared
+        bridge.dispatcher.infrared=bridge.infrared
+    return bridge
 
 
 if __name__ == '__main__':

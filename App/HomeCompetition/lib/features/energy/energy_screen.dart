@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../models/device.dart';
 import '../../providers/smart_home_providers.dart';
+import '../../widgets/connectivity_dot.dart';
+import '../../widgets/home_connection_name.dart';
+import '../../widgets/soft_3d_decorations.dart';
 
 class EnergyScreen extends ConsumerWidget {
   const EnergyScreen({super.key});
@@ -9,131 +13,155 @@ class EnergyScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final readings = ref.watch(devicesStreamProvider);
-    final status =
-        ref.watch(gatewayClientProvider.select((c) => (c.connected, c.error)));
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     return Scaffold(
-      appBar: AppBar(
-          title: const Text('Điện năng & Cảnh báo'),
-          automaticallyImplyLeading: false),
-      body: readings.when(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+          child: readings.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, __) => const Center(
             child: Text('Không tải được số đo. Vui lòng thử lại.')),
         data: (devices) {
-          final measured =
-              devices.where((d) => d.online && d.powerWatts != null).toList();
-          final totalPower =
+          final measured = devices
+              .where((d) =>
+                  d.online &&
+                  d.powerWatts != null &&
+                  d.powerWatts!.isFinite &&
+                  d.powerWatts! >= 0)
+              .toList();
+          final watts =
               measured.fold<double>(0, (sum, d) => sum + d.powerWatts!);
           final energies = devices
               .map((d) => d.metadata['energy'])
               .whereType<num>()
               .where((v) => v.isFinite && v >= 0)
               .toList();
-          final totalEnergy = energies.fold<double>(0, (sum, v) => sum + v);
+          final kwh = energies.fold<double>(0, (sum, value) => sum + value);
           final offline = devices.where((d) => !d.online).length;
           return CustomScrollView(
             key: const PageStorageKey('energy-scroll'),
             slivers: [
               SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                  sliver: SliverToBoxAdapter(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                sliver: SliverToBoxAdapter(
                     child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (status.$2 != null)
-                            Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Text(status.$2!,
-                                    style: TextStyle(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .error))),
-                          Card(
-                              child: Padding(
-                                  padding: const EdgeInsets.all(20),
-                                  child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Expanded(
+                          child: Text('Điện năng',
+                              style: TextStyle(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.9))),
+                      IconButton(
+                        tooltip: 'Thông tin số đo',
+                        icon: const Icon(Icons.info_outline_rounded, size: 21),
+                        onPressed: () => showDialog<void>(
+                            context: context,
+                            builder: (dialogContext) => AlertDialog(
+                                  title: const Text('Số đo điện năng'),
+                                  content: Text(
+                                      '${measured.length}/${devices.length} kênh có công suất mới.\n'
+                                      '${energies.length}/${devices.length} kênh có chỉ số điện năng tích lũy.\n\n'
+                                      'Tích lũy là chỉ số công tơ đã ghi nhận, không phải lượng dùng riêng hôm nay. '
+                                      'Thanh ngang thể hiện tỷ trọng công suất. Chưa có lịch sử theo giờ/ngày.'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(dialogContext),
+                                        child: const Text('Đóng'))
+                                  ],
+                                )),
+                      ),
+                    ]),
+                    const HomeConnectionName(),
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: Soft3DDecorations.card(isDark: isDark),
+                      child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                                child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      const Row(children: [
-                                        Icon(Icons.bolt_rounded),
-                                        SizedBox(width: 8),
-                                        Expanded(
-                                            child: Text('Công suất đang đo'))
-                                      ]),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                          measured.isEmpty
-                                              ? 'Chưa có mẫu mới'
-                                              : '${totalPower.toStringAsFixed(1)} W',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .headlineMedium),
-                                      Text(
-                                          '${measured.length}/${devices.length} kênh có số đo mới'),
-                                      const Divider(height: 28),
-                                      Text(
-                                          energies.isEmpty
-                                              ? 'Điện năng tích lũy: chưa có mẫu'
-                                              : 'Điện năng tích lũy: ${totalEnergy.toStringAsFixed(3)} kWh',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium),
-                                      Text(
-                                          'Đã có chỉ số của ${energies.length}/${devices.length} kênh · Không phải mức tiêu thụ riêng hôm nay',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodySmall),
-                                    ],
-                                  ))),
-                          const SizedBox(height: 24),
-                          Text('Công suất theo thiết bị',
-                              style: Theme.of(context).textTheme.titleLarge),
-                          const SizedBox(height: 4),
-                          const Text(
-                              'Độ dài thanh thể hiện tỷ trọng trong tổng công suất đang đo.'),
-                          if (devices.isEmpty)
-                            const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 24),
-                                child: Text(
-                                    'Chưa có thiết bị trên Firebase. Dữ liệu sẽ xuất hiện khi thiết bị được đồng bộ.')),
-                        ]),
-                  )),
+                                  Text('Công suất',
+                                      style: theme.textTheme.bodySmall),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                      measured.isEmpty
+                                          ? '— W'
+                                          : '${watts.toStringAsFixed(1)} W',
+                                      style: const TextStyle(
+                                          fontSize: 24,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: -0.6)),
+                                ])),
+                            const SizedBox(width: 16),
+                            Expanded(
+                                child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                  Text(
+                                      energies.length < devices.length
+                                          ? 'Tích lũy · ${energies.length}/${devices.length}'
+                                          : 'Tích lũy',
+                                      style: theme.textTheme.bodySmall),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                      energies.isEmpty
+                                          ? '— kWh'
+                                          : '${kwh.toStringAsFixed(3)} kWh',
+                                      style: const TextStyle(
+                                          fontSize: 21,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: -0.6)),
+                                ])),
+                          ]),
+                    ),
+                    if (measured.length < devices.length) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                          '${measured.length}/${devices.length} kênh có số đo mới',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                    if (offline > 0) ...[
+                      const SizedBox(height: 10),
+                      Text('$offline thiết bị ngoại tuyến',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                    const SizedBox(height: 26),
+                    Text('Theo thiết bị',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    if (devices.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Text('Chưa có thiết bị.'),
+                      ),
+                  ],
+                )),
+              ),
               SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  sliver: SliverList.builder(
-                    itemCount: devices.length,
-                    itemBuilder: (context, index) => _PowerRow(
-                        device: devices[index], totalPower: totalPower),
-                  )),
-              SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Divider(),
-                          Text('Cảnh báo kết nối',
-                              style: Theme.of(context).textTheme.titleMedium),
-                          const SizedBox(height: 8),
-                          if (!status.$1)
-                            const Text(
-                                'Mất kết nối Firebase hoặc chưa đọc được dữ liệu. Điều khiển đã khóa.'),
-                          if (offline > 0)
-                            Text(
-                                '$offline kênh ngoại tuyến hoặc số đo đã quá hạn.'),
-                          if (status.$1 && offline == 0 && devices.isNotEmpty)
-                            const Text('Không có cảnh báo mất kết nối'),
-                          const SizedBox(height: 16),
-                          Text(
-                              'Chưa có lịch sử theo giờ/ngày trên Firebase. Biểu đồ đang dùng số đo hiện tại; điện năng tích lũy có thể là chỉ số của mẫu cũ.',
-                              style: Theme.of(context).textTheme.bodySmall),
-                        ]),
-                  )),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                sliver: SliverList.builder(
+                  itemCount: devices.length,
+                  itemBuilder: (context, index) =>
+                      _PowerRow(device: devices[index], totalPower: watts),
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
           );
         },
-      ),
+      )),
     );
   }
 }
@@ -145,53 +173,94 @@ class _PowerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final power = device.online ? device.powerWatts : null;
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final power = device.online &&
+            device.powerWatts != null &&
+            device.powerWatts!.isFinite &&
+            device.powerWatts! >= 0
+        ? device.powerWatts
+        : null;
     final fraction = power != null && totalPower > 0
         ? (power / totalPower).clamp(0.0, 1.0)
         : 0.0;
+    final current = device.currentAmps;
     final energy = device.metadata['energy'];
+    final hasEnergy = energy is num && energy.isFinite && energy >= 0;
     return Padding(
-        padding: const EdgeInsets.only(bottom: 20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(device.iconData, size: 22),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: Text(device.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall)),
-              const SizedBox(width: 8),
-              Text(power == null
-                  ? 'Chưa có mẫu'
-                  : '${power.toStringAsFixed(1)} W'),
-            ]),
-            const SizedBox(height: 10),
-            if (power == null)
-              Semantics(
-                  label: '${device.name}: Chưa có mẫu mới',
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => context.push('/devices/${device.id}'),
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: Soft3DDecorations.card(isDark: isDark),
+            child: Column(children: [
+              Row(children: [
+                Icon(device.iconData,
+                    size: 21, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 12),
+                Expanded(
+                    child: Text(device.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w600))),
+                const SizedBox(width: 8),
+                ConnectivityDot(online: device.online),
+                const SizedBox(width: 10),
+                Text(power == null ? '— W' : '${power.toStringAsFixed(1)} W',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 13)),
+              ]),
+              const SizedBox(height: 16),
+              if (power == null)
+                Semantics(
+                  label: '${device.name}: chưa có mẫu mới',
                   child: Container(
-                      height: 10,
+                      height: 4,
                       decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(5))))
-            else
-              LinearProgressIndicator(
-                value: fraction,
-                minHeight: 10,
-                borderRadius: BorderRadius.circular(5),
-                semanticsLabel: 'Tỷ trọng công suất ${device.name}',
-                semanticsValue: '${(fraction * 100).toStringAsFixed(0)}%',
-              ),
-            const SizedBox(height: 6),
-            Text(
-                '${device.currentText} · ${energy is num && energy.isFinite && energy >= 0 ? '${energy.toStringAsFixed(3)} kWh tích lũy' : 'Chưa có chỉ số điện năng'}',
-                style: Theme.of(context).textTheme.bodySmall),
-          ],
-        ));
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(2),
+                      )),
+                )
+              else
+                LinearProgressIndicator(
+                  value: fraction,
+                  minHeight: 4,
+                  borderRadius: BorderRadius.circular(2),
+                  semanticsLabel: 'Tỷ trọng công suất ${device.name}',
+                  semanticsValue: '${(fraction * 100).toStringAsFixed(0)}%',
+                ),
+              if (current != null || hasEnergy) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      spacing: 16,
+                      runSpacing: 4,
+                      children: [
+                        if (current != null)
+                          Text('${current.toStringAsFixed(3)} A',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant)),
+                        if (hasEnergy)
+                          Tooltip(
+                              message: 'Điện năng tích lũy',
+                              child: Text('${energy.toStringAsFixed(3)} kWh',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant))),
+                      ],
+                    )),
+              ],
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }

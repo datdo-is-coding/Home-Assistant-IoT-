@@ -1,8 +1,23 @@
 # Bản phát hành được giữ sau dọn repo
 
-- `android/HomeCompetition.apk`: APK debug 1.3.0+19 đã cài trên điện thoại;
+- `android/HomeCompetition.apk`: APK release 1.6.0+41 với Progressive Blur,
+  nền Light Rays và dock nổi; giữ học IR, nhiệt độ/giọng nói và Quản trị nhà.
+  Xem [kiểm tra giao diện](../docs/testing/progressive-blur-2026-10-29/README.md);
   giữ application ID, chữ ký và dữ liệu đăng nhập. Đây không phải bản release
   Play Store. SHA-256 nằm trong `SHA256SUMS`.
+- `firmware/2.3.0-control1/SubBox.bin` và `ActionBox_V2.bin`: đúng hai image
+  app-only đã nạp USB cho SubBox 0B54 (0x20000) và ActionBox DDF4 (0x310000),
+  hash nạp đã kiểm tra; giữ NVS/bootloader/otadata/model. Thêm IR RX có khai báo
+  phần cứng và lệnh quản trị Core có deadline/ACK. DDF4 đã reboot qua Firebase
+  và giữ đăng ký. Đây chưa phải gói OTA ký; DDF8 hoãn cập nhật OTA theo yêu cầu.
+  Học IR/nhiệt độ điều hòa thật chờ lắp mắt thu và người dùng kiểm thử sau.
+  Xem [bằng chứng và cách dùng](../docs/testing/ir-climate-admin-2026-10-29/README.md).
+- `firmware/2.2.0-ir1/HC-288485350B54.bin`: app SubBox đã nạp USB vào ota_0
+  (0x20000), giữ NVS/bootloader/otadata. IR TX GPIO40, RX bị khóa vì prototype
+  chỉ có LED phát; giữ nhận giọng nói trên Pi. Đây là image app-only cho lượt
+  USB này, chưa phải gói OTA có target/manifest ký để phát hành cho khách.
+  Panasonic A75C4187 đã được người dùng xác nhận phản ứng và lưu trên app;
+  xem [kiểm tra](../docs/testing/flagship-ir-2026-10-29/README.md).
 - `firmware/2.0.1-b1/`: đúng hai image đã OTA thành công cho DDF4 và SubBox 0B54,
   cùng target đã ký và manifest công khai. Chữ ký, loại bo, version và digest đã
   được kiểm tra. Không có khóa ký riêng hay dữ liệu nhà máy trong các image này.

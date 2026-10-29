@@ -4,10 +4,10 @@
 #include <stddef.h>
 
 #define SUBBOX_FW_NAME                  "Aetheria-SubBox-Gateway"
-#define SUBBOX_FW_VERSION_MAJOR         1
-#define SUBBOX_FW_VERSION_MINOR         0
+#define SUBBOX_FW_VERSION_MAJOR         2
+#define SUBBOX_FW_VERSION_MINOR         3
 #define SUBBOX_FW_VERSION_PATCH         0
-#define SUBBOX_FW_VERSION_STR           "1.0.0-prod"
+#define SUBBOX_FW_VERSION_STR           "2.3.0-control1"
 
 #define SUBBOX_DEFAULT_ID               "subbox_bedroom_01"
 #define SUBBOX_DEFAULT_ROOM_NAME        "Phòng Ngủ"

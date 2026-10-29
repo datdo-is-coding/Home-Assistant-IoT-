@@ -117,7 +117,7 @@ void main() {
     expect((await repo.getActionBoxes()).single.channels.single.index, 1);
     expect(devices.single.currentAmps, 0.25);
     expect(devices.single.metadata['energy'], 1.2);
-    expect(devices.single.stateText, contains('chưa xác nhận tải'));
+    expect(devices.single.stateText, contains('Đang đồng bộ'));
     repo.dispose();
     client.dispose();
   });
@@ -378,6 +378,116 @@ void main() {
     expect(requests.where((request) => request.method == 'PUT'), isEmpty);
   });
 
+  Future<Map<String, dynamic>> readyCore() async {
+    await ready();
+    final raw = fixture(DateTime.now());
+    raw['box'].addAll({'core_node_id': 12, 'config_rev': 1, 'boot_id': 7});
+    raw['box']['channels']['ch1']
+        .addAll({'logical_device_id': 'DEV-test', 'state_seq': 10});
+    db.devices.send(raw);
+    return raw;
+  }
+
+  test(
+      'unassigned Core channels stay configurable but are not fake device tiles',
+      () async {
+    await readyCore();
+    final raw = fixture(DateTime.now());
+    raw['box']['core_node_id'] = 12;
+    final gateway = GatewayClient(persistSession: false)..connected = true;
+    final repo = GatewaySmartHomeRepository(gateway);
+    repo.applySnapshot(firebaseNodes(raw, now: DateTime.now()));
+    expect(await repo.getDevices(), isEmpty);
+    expect(
+        (await repo.getActionBoxes()).single.channels.single.configured, false);
+    repo.dispose();
+    gateway.dispose();
+  });
+
+  test(
+      'Core tile changes immediately, survives stale snapshot, then follows fresh report',
+      () async {
+    final raw = await readyCore();
+    mailbox(result: {'status': 'APPLIED', 'state_seq': 10});
+    final base = cloudHandler!;
+    final response = Completer<void>();
+    cloudHandler = (request) async {
+      if (request.url.path.contains('/responses/')) await response.future;
+      return base(request);
+    };
+    final sending = client.relay('box', 'ch1', true);
+    expect(client.nodes['box']['channels']['ch1']['state'], true);
+    expect(client.nodes['box']['channels']['ch1']['command_pending'], true);
+    db.devices.send(raw);
+    expect(client.nodes['box']['channels']['ch1']['state'], true);
+    response.complete();
+    await sending;
+    expect(client.nodes['box']['channels']['ch1']['state'], true);
+    expect(client.nodes['box']['channels']['ch1']['command_pending'], false);
+    raw['box']['channels']['ch1']['state_seq'] = 11;
+    db.devices.send(raw);
+    expect(client.nodes['box']['channels']['ch1']['state'], false);
+  });
+
+  test('failed command rolls back immediately and rapid toggles preserve order',
+      () async {
+    await readyCore();
+    mailbox(
+        resultStatus: 409, result: {'success': false, 'message': 'offline'});
+    final failed = client.relay('box', 'ch1', true);
+    expect(client.nodes['box']['channels']['ch1']['state'], true);
+    await expectLater(failed, throwsA(isA<GatewayException>()));
+    expect(client.nodes['box']['channels']['ch1']['state'], false);
+    requests.clear();
+    mailbox(result: {'status': 'APPLIED', 'state_seq': 10});
+    final base = cloudHandler!;
+    final response = Completer<void>();
+    cloudHandler = (request) async {
+      if (request.url.path.contains('/responses/') && !response.isCompleted)
+        await response.future;
+      return base(request);
+    };
+    final on = client.relay('box', 'ch1', true),
+        off = client.relay('box', 'ch1', false);
+    expect(client.nodes['box']['channels']['ch1']['state'], false);
+    response.complete();
+    await Future.wait([on, off]);
+    final commands = requests
+        .where((r) => r.method == 'PUT')
+        .map((r) => jsonDecode(r.body)['body']['on'])
+        .toList();
+    expect(commands, [true, false]);
+  });
+
+  test(
+      'saved name/type/aliases appear immediately and older projection cannot undo them',
+      () async {
+    final raw = await readyCore();
+    mailbox(result: {
+      'success': true,
+      'configuration': {
+        'device_id': 'box',
+        'config_rev': 2,
+        'channels': {
+          'ch1': {
+            'name': 'Máy pha cà phê',
+            'device_type': 'custom',
+            'aliases': ['máy cà phê']
+          }
+        }
+      }
+    });
+    await client.updateDevice(
+        deviceId: 'box',
+        ch1Name: 'Máy pha cà phê',
+        ch1Type: 'custom',
+        ch1Aliases: ['máy cà phê']);
+    expect(client.nodes['box']['channels']['ch1']['name'], 'Máy pha cà phê');
+    db.devices.send(raw);
+    expect(client.nodes['box']['channels']['ch1']['name'], 'Máy pha cà phê');
+    expect(client.nodes['box']['channels']['ch1']['aliases'], ['máy cà phê']);
+  });
+
   test('auth-scoped realtime data, disconnect, and deletion clear UI correctly',
       () async {
     await ready();
@@ -489,7 +599,8 @@ void main() {
     final empty = await client.request('/api/kws/config');
     expect(empty['sources'], isEmpty);
     expect(empty['bindings'], isEmpty);
-    expect(client.isAdmin, isTrue);
+    expect(client.canConfigure, isTrue);
+    expect(client.isAdmin, isFalse);
     await client.request('/api/kws/config',
         method: 'PUT', body: {'revision': 1, 'sources': [], 'bindings': []});
     final envelopes = requests
@@ -500,6 +611,27 @@ void main() {
     expect(envelopes.every((e) => e['path'] == '/api/kws/config'), isTrue);
     expect(requests.every((r) => r.url.scheme == 'https' && r.url.port != 8000),
         isTrue);
+  });
+  test(
+      'home management follows verified Owner capabilities and is cleared on demotion',
+      () async {
+    await ready();
+    mailbox(result: {
+      'profile': 'core-v1',
+      'role': 'Owner',
+      'capabilities': {'configure': true, 'manage_devices': true}
+    });
+    await client.request('/api/commissioning/context');
+    expect(client.isAdmin, isTrue);
+    expect(client.canConfigure, isTrue);
+    mailbox(result: {
+      'profile': 'core-v1',
+      'role': 'Member',
+      'capabilities': {'configure': false, 'manage_devices': false}
+    });
+    await client.request('/api/commissioning/context');
+    expect(client.isAdmin, isFalse);
+    expect(client.canConfigure, isFalse);
   });
   test('Core relay commands use Firebase RPC and require APPLIED', () async {
     await ready();
@@ -533,7 +665,7 @@ void main() {
     expect(find.textContaining('8000'), findsNothing);
     await tester.tap(find.text('Chưa có tài khoản? Đăng ký'));
     await tester.pump();
-    expect(find.text('Tạo tài khoản Firebase'), findsOneWidget);
+    expect(find.text('Tạo tài khoản mới'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

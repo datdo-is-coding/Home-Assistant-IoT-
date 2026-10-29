@@ -26,6 +26,7 @@ import config
 from registry_manager import RegistryManager, ROOM_ALIASES, slug
 from mqtt_handler import MQTTHandler
 from intent_engine import IntentEngine
+from asr_engine import ASREngine
 from dialog_manager import DialogManager, DialogSession
 from tts_engine import TTSEngine
 from kws_service import KwsService
@@ -71,11 +72,11 @@ class SmartHomeGateway:
     def __init__(self):
         self.registry = RegistryManager()
         self.mqtt = MQTTHandler()
-        self.local_kws_enabled = True
+        self.local_kws_enabled = False
         self.intent = None
         self.dialog = DialogManager(registry=self.registry)
         self.tts = TTSEngine()
-        self.asr = None
+        self.asr = ASREngine()
         self.audio_server = AudioServer(self)
         self.kws = KwsService(self)
         self.verifier = CommandVerifier(self.mqtt, self.registry)
@@ -112,7 +113,9 @@ class SmartHomeGateway:
         logger.info("  Inventory: %s", self.registry.inventory_for_prompt())
         logger.info("=" * 60)
 
-        logger.info("SubBox local KWS enabled; Pi microphone recognition disabled")
+        if not await asyncio.to_thread(self.asr.initialize, self.registry):
+            raise RuntimeError('Pi voice ASR initialization failed')
+        logger.info("Pi voice enabled: SubBox relays PCM; Pi owns ASR and command processing")
         if config.TTS_PROVIDER.strip().lower() == "vieneu":
             await self.tts.vieneu.initialize()
 

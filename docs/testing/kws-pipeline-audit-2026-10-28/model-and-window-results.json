@@ -1,0 +1,84 @@
+{
+  "tensor_parity": {
+    "arrays": 18,
+    "int8_weights": 3776,
+    "float_scale_and_bias": 340,
+    "identical": true,
+    "sha256": "478996e4ac80e70f452bd1d5fb2aa1dfe00ef88dc079b237ed9e11c20835a869"
+  },
+  "same_pcm_compiled_old_and_new": [
+    {
+      "input": "silence",
+      "mfcc_max_abs_diff": 0.0,
+      "probability_max_abs_diff": 0.0,
+      "predicted_class": 4,
+      "confidence": 0.7760096788406372
+    },
+    {
+      "input": "bật",
+      "mfcc_max_abs_diff": 0.0,
+      "probability_max_abs_diff": 0.0,
+      "predicted_class": 0,
+      "confidence": 0.9580694437026978
+    },
+    {
+      "input": "đèn",
+      "mfcc_max_abs_diff": 0.0,
+      "probability_max_abs_diff": 0.0,
+      "predicted_class": 9,
+      "confidence": 0.9196568131446838
+    },
+    {
+      "input": "phòng",
+      "mfcc_max_abs_diff": 0.0,
+      "probability_max_abs_diff": 0.0,
+      "predicted_class": 5,
+      "confidence": 0.9612568616867065
+    },
+    {
+      "input": "ngủ",
+      "mfcc_max_abs_diff": 0.0,
+      "probability_max_abs_diff": 0.0,
+      "predicted_class": 3,
+      "confidence": 0.9418224096298218
+    }
+  ],
+  "silence_preprocessing": {
+    "firmware_energy_floor": 1e-10,
+    "training_zero_energy_replacement": 2.220446049250313e-16,
+    "firmware_normalized_c0": -3.4176182746887207,
+    "training_source_expected_normalized_c0": -5.498278547984715,
+    "absolute_c0_difference": 2.0806602732959947,
+    "stored_test_shape": [
+      355,
+      99,
+      13
+    ],
+    "stored_test_zero_like_c0_count": 8029,
+    "stored_test_frame_count": 35145
+  },
+  "actual_subbox_short_stream_window_placement": [
+    {
+      "speech_ms": 100,
+      "subbox_nonzero_start_ms": 900.0,
+      "subbox_nonzero_end_ms": 1000.0,
+      "ideal_center_padding_each_side_ms": 450.0
+    },
+    {
+      "speech_ms": 200,
+      "subbox_nonzero_start_ms": 800.0,
+      "subbox_nonzero_end_ms": 1000.0,
+      "ideal_center_padding_each_side_ms": 400.0
+    },
+    {
+      "speech_ms": 250,
+      "subbox_nonzero_start_ms": 750.0,
+      "subbox_nonzero_end_ms": 1000.0,
+      "ideal_center_padding_each_side_ms": 375.0
+    }
+  ],
+  "notes": [
+    "Read-only source/host audit; no training, new audio capture, serial access, flash or relay commands.",
+    "Window-location probe stubs inference only to observe exact PCM passed by unchanged LocalKws; it is not an accuracy test."
+  ]
+}

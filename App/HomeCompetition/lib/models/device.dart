@@ -97,24 +97,34 @@ class Device {
 
   double? get currentAmps {
     final current = metadata['current'];
-    return online && current is num && current.isFinite && current >= 0 ? current.toDouble() : null;
+    return online && current is num && current.isFinite && current >= 0
+        ? current.toDouble()
+        : null;
   }
 
-  String get currentText => !online ? 'Dòng điện: mất kết nối'
-      : currentAmps == null ? 'Dòng điện: chưa có mẫu'
-      : 'Dòng điện: ${currentAmps!.toStringAsFixed(3)} A';
+  String get currentText => !online
+      ? 'Dòng điện: mất kết nối'
+      : currentAmps == null
+          ? 'Dòng điện: chưa có mẫu'
+          : 'Dòng điện: ${currentAmps!.toStringAsFixed(3)} A';
 
   String get measurementText {
     final voltage = metadata['voltage'];
-    return [currentText,
-      if (online && voltage is num && voltage.isFinite) '${voltage.toStringAsFixed(0)} V',
-      if (online && powerWatts != null && powerWatts!.isFinite) '${powerWatts!.toStringAsFixed(1)} W',
+    return [
+      currentText,
+      if (online && voltage is num && voltage.isFinite)
+        '${voltage.toStringAsFixed(0)} V',
+      if (online && powerWatts != null && powerWatts!.isFinite)
+        '${powerWatts!.toStringAsFixed(1)} W',
     ].join(' · ');
   }
 
   String get stateText {
     if (!online) return 'Ngoại tuyến';
-    if (metadata['cloud_state'] == true) return 'Firebase: ${isOn ? "bật" : "tắt"} · chưa xác nhận tải';
+    if (metadata['command_pending'] == true)
+      return isOn ? 'Đang bật…' : 'Đang tắt…';
+    if (metadata['cloud_state'] == true)
+      return '${isOn ? "Bật" : "Tắt"} · Đang đồng bộ';
     if (!isOn) return 'Đã tắt';
 
     final canDim = metadata['can_dim'] == true;
@@ -122,7 +132,8 @@ class Device {
     final hasThermostat = metadata['has_thermostat'] == true;
 
     final hasPower = powerWatts != null && powerWatts! > 0;
-    final powerStr = hasPower ? 'Bật · ${powerWatts!.toStringAsFixed(1)} W' : 'Đang bật';
+    final powerStr =
+        hasPower ? 'Bật · ${powerWatts!.toStringAsFixed(1)} W' : 'Đang bật';
 
     switch (type) {
       case DeviceType.light:

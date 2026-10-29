@@ -1,0 +1,58 @@
+I (712) app_init: Application information:
+I (712) app_init: Project name:     SubBox
+I (712) app_init: App version:      2.0.4-b2
+I (712) app_init: Compile time:     Oct 28 2026 16:48:23
+I (712) app_init: ELF file SHA256:  59f751ef4...
+I (713) app_init: ESP-IDF:          v6.0.2
+I (2307) LOCAL_KWS: Local KWS ready (word VAD 50 ms, preroll/end 100 ms, centered 1 s)
+I (2317) AUDIO_MGR: Initializing Multi-ActionBox Audio Manager (Capacity: 4 nodes)...
+I (3027) WS_ASR: ✅ Connected to Pi 4 Audio Server (wss://192.168.11.29:8765/ws/audio)!
+I (3107) SUBBOX_MQTT: MQTT Connected to Pi4 Broker! Subscribing to command topics...
+I (17347) TASK_MGR: SubBox Health: Free SRAM=11 KB, Free PSRAM=7839 KB
+I (32347) TASK_MGR: SubBox Health: Free SRAM=11 KB, Free PSRAM=7839 KB
+I (47347) TASK_MGR: SubBox Health: Free SRAM=11 KB, Free PSRAM=7839 KB
+I (52997) ESPNOW_TRANSPORT: 🎙️ [ESPNOW RX] Audio STREAM_START from 28:84:85:33:DD:E8 (Node: 3476310)
+I (52997) AUDIO_MGR: Registered new audio stream channel for ActionBox: 3476310
+I (52997) AUDIO_MGR: 🎙️ [STREAM_START] Explicit session lock onto ActionBox: 3476310 (ASR started)
+I (52997) ESPNOW_TRANSPORT: 🎙️ [ESPNOW RX] Audio STREAM_START from 28:84:85:33:DD:E8 (Node: 3476310)
+I (54347) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0175 silence_threshold=0.0092; infer window, continue stream
+I (54497) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=16000 pad_front=0 elapsed_us=144829 free_internal=15595 free_psram=7896160
+I (54497) LOCAL_KWS: KWS_RESULT class=đèn confidence=0.825 accepted=1
+I (55627) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0174 silence_threshold=0.0119; infer window, continue stream
+I (55777) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=16000 pad_front=0 elapsed_us=147480 free_internal=15991 free_psram=7896376
+I (55777) LOCAL_KWS: KWS_RESULT class=khách confidence=0.634 accepted=0
+I (56617) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0784 silence_threshold=0.0119; infer window, continue stream
+I (56777) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=16000 pad_front=0 elapsed_us=159380 free_internal=15991 free_psram=7896376
+I (56777) LOCAL_KWS: KWS_RESULT class=khách confidence=0.435 accepted=0
+I (57717) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0134 silence_threshold=0.0126; infer window, continue stream
+I (57867) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=15200 pad_front=0 elapsed_us=150248 free_internal=15991 free_psram=7896376
+I (57867) LOCAL_KWS: KWS_RESULT class=khách confidence=0.520 accepted=0
+I (58287) ESPNOW_TRANSPORT: 🛑 [ESPNOW RX] Audio STREAM_END from ActionBox (Node: 3476310)
+I (58287) AUDIO_MGR: 🛑 [STREAM_END] ActionBox 3476310 signalled speech end
+I (58287) ESPNOW_TRANSPORT: 🛑 [ESPNOW RX] Audio STREAM_END from ActionBox (Node: 3476310)
+I (58287) AUDIO_MGR: 🛑 [STREAM_END] ActionBox 3476310 signalled speech end
+I (58287) ESPNOW_TRANSPORT: 🛑 [ESPNOW RX] Audio STREAM_END from ActionBox (Node: 3476310)
+I (58287) AUDIO_MGR: 🛑 [STREAM_END] ActionBox 3476310 signalled speech end
+I (58437) LOCAL_KWS: KWS_WORD samples=13520 speech_samples=10320 pad_front=1240 elapsed_us=140977 free_internal=15639 free_psram=7896256
+I (58437) LOCAL_KWS: KWS_RESULT class=khách confidence=0.354 accepted=0
+I (58437) AUDIO_MGR: PCM relay complete for 3476310; final text: "đèn"
+I (58627) WS_ASR: 📢 Speaker busy status: 1
+I (61557) WS_ASR: 🏁 Incoming TTS audio stream finished.
+I (61707) WS_ASR: 📢 Speaker busy status: 0
+I (62347) TASK_MGR: SubBox Health: Free SRAM=14 KB, Free PSRAM=7711 KB
+I (77347) TASK_MGR: SubBox Health: Free SRAM=14 KB, Free PSRAM=7711 KB
+I (89957) ESPNOW_TRANSPORT: 🎙️ [ESPNOW RX] Audio STREAM_START from 28:84:85:33:DD:E8 (Node: 3476310)
+I (89957) AUDIO_MGR: 🎙️ [STREAM_START] Explicit session lock onto ActionBox: 3476310 (ASR started)
+I (89957) ESPNOW_TRANSPORT: 🎙️ [ESPNOW RX] Audio STREAM_START from 28:84:85:33:DD:E8 (Node: 3476310)
+I (91257) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0123 silence_threshold=0.0085; infer window, continue stream
+I (91407) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=16000 pad_front=0 elapsed_us=146018 free_internal=14983 free_psram=7896280
+I (91407) LOCAL_KWS: KWS_RESULT class=khách confidence=0.430 accepted=0
+I (92347) TASK_MGR: SubBox Health: Free SRAM=14 KB, Free PSRAM=7711 KB
+I (92697) LOCAL_KWS: KWS_VAD_LIMIT rms=0.2266 silence_threshold=0.0126; infer window, continue stream
+I (92857) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=16000 pad_front=0 elapsed_us=160810 free_internal=15951 free_psram=7896376
+I (92857) LOCAL_KWS: KWS_RESULT class=khách confidence=0.769 accepted=1
+I (93647) LOCAL_KWS: KWS_VAD_LIMIT rms=0.0156 silence_threshold=0.0126; infer window, continue stream
+I (93797) LOCAL_KWS: KWS_WORD samples=19200 speech_samples=15200 pad_front=0 elapsed_us=147135 free_internal=15951 free_psram=7896376
+I (93797) LOCAL_KWS: KWS_RESULT class=khách confidence=0.643 accepted=0
+I (94707) LOCAL_KWS: KWS_WORD samples=15200 speech_samples=12000 pad_front=400 elapsed_us=148449 free_internal=15907 free_psram=7896256
+I (94707) LOCAL_KWS: KWS_RESULT class=khách confidence=0.655 accepted=0

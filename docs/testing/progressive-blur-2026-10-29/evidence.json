@@ -1,0 +1,76 @@
+{
+  "version": "1.6.0+41",
+  "date": "2026-10-29",
+  "flutter_full_tests_passed": 189,
+  "focused_and_render_checks_passed": 12,
+  "analyze": "No issues found",
+  "visual_modes": [
+    "light",
+    "dark"
+  ],
+  "visual_tabs": [
+    "home",
+    "devices",
+    "energy",
+    "automation",
+    "settings"
+  ],
+  "performance_120_channels_5hz_profile": {
+    "scroll_120_channels_5hz": {
+      "build": {
+        "count": 571,
+        "p50_ms": 0.416,
+        "p95_ms": 14.175,
+        "p99_ms": 28.51,
+        "over_8ms": 53,
+        "over_16ms": 18
+      },
+      "raster": {
+        "count": 571,
+        "p50_ms": 7.8,
+        "p95_ms": 18.869,
+        "p99_ms": 22.649,
+        "over_8ms": 233,
+        "over_16ms": 36
+      },
+      "updates": 81
+    }
+  },
+  "performance_notes": "Bounded synthetic test on Xiaomi 23116PN5BC; not sustained 120 FPS acceptance. Final static-painter raster cache hint added after this measurement.",
+  "deployment": {
+    "installed": true,
+    "version": "1.6.0",
+    "code": 41,
+    "updated_from": 40,
+    "uninstall_used": false,
+    "sha256": "d253c7d3efb97ca456c34c896e534c24079bb05c8795bbff41d3c4ff5d2342ca",
+    "same_signer": true,
+    "duplicate_top_inset_fixed": true,
+    "root_control_sheet_fixed": true,
+    "runtime_errors": []
+  },
+  "install_incident": {
+    "old_code_observed": 38,
+    "driver_auto_uninstalled_on_downgrade": true,
+    "local_session_may_be_lost": true,
+    "user_informed": true,
+    "user_declined_old_app_restore": true,
+    "firebase_data_changed_by_test": false
+  },
+  "runtime": {
+    "running": true,
+    "runtime_errors": []
+  },
+  "release_hash_check": "all entries OK",
+  "live_review": {
+    "google_signed_in_again": true,
+    "cloud_home_loaded": true,
+    "device_count_observed": 12,
+    "five_tabs_reviewed": true,
+    "relay_commands_sent": false,
+    "session_preserved_after_final_update": true,
+    "compact_dock_observed_on_hardware": true,
+    "dark_mode_observed_on_hardware": true
+  },
+  "final_insets_and_interaction_tests_passed": 11
+}

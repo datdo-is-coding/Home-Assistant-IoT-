@@ -13,6 +13,8 @@ class ActionBoxChannel {
   final DeviceType type;
   final bool configured;
   final bool isOn;
+  final List<String> voiceAliases;
+  final bool commandPending;
 
   const ActionBoxChannel({
     required this.index,
@@ -22,6 +24,8 @@ class ActionBoxChannel {
     this.type = DeviceType.light,
     this.configured = true,
     this.isOn = false,
+    this.voiceAliases = const [],
+    this.commandPending = false,
   });
 
   ActionBoxChannel copyWith({
@@ -32,6 +36,8 @@ class ActionBoxChannel {
     DeviceType? type,
     bool? configured,
     bool? isOn,
+    List<String>? voiceAliases,
+    bool? commandPending,
   }) {
     return ActionBoxChannel(
       index: index ?? this.index,
@@ -41,6 +47,8 @@ class ActionBoxChannel {
       type: type ?? this.type,
       configured: configured ?? this.configured,
       isOn: isOn ?? this.isOn,
+      voiceAliases: voiceAliases ?? this.voiceAliases,
+      commandPending: commandPending ?? this.commandPending,
     );
   }
 }

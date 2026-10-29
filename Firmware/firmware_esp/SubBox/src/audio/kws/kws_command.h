@@ -9,7 +9,7 @@ public:
     void reset() { action = device = room = -1; invalid = has_room_word = false; }
     void add(int id, float confidence) {
         if (id < 0 || id >= NUM_CLASSES) { invalid = true; return; }
-        if (!std::isfinite(confidence) || confidence < 0.75f || confidence > 1.f) return;
+        if (!std::isfinite(confidence) || confidence < 0.50f || confidence > 1.f) return;
         if (id == CLASS_NOISE || id == CLASS_UNKNOWN) return;
         if (id == CLASS_PHONG) { has_room_word = true; return; }
         int* slot = (id == CLASS_BAT || id == CLASS_TAT) ? &action :

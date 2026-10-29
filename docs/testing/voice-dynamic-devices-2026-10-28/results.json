@@ -1,0 +1,80 @@
+{
+  "before_rename": {
+    "resolved": true,
+    "on": true,
+    "device": "DEV-6d2638f68912511b5fcf0bc4"
+  },
+  "actual_app_type_den": {
+    "error": "invalid_device_type"
+  },
+  "name_only_old_light_category_still_controls_coffee": {
+    "resolved": true,
+    "on": true,
+    "device": "DEV-6d2638f68912511b5fcf0bc4"
+  },
+  "canonical_new_name_on": {
+    "resolved": true,
+    "on": true,
+    "device": "DEV-6d2638f68912511b5fcf0bc4"
+  },
+  "canonical_new_name_off": {
+    "resolved": true,
+    "on": false,
+    "device": "DEV-6d2638f68912511b5fcf0bc4"
+  },
+  "old_exact_name": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "old_light_category_after_kind_changed": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "short_alias": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "room_suffix": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "polite_suffix": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "core_alias_update": {
+    "error": "invalid_input"
+  },
+  "new_box_unassigned": {
+    "resolved": false,
+    "error": "voice_no_target"
+  },
+  "new_box_bound_from_original_mic": {
+    "selected": true,
+    "channel": 2,
+    "command_status": "ACCEPTED"
+  },
+  "new_box_own_mic": {
+    "resolved": true
+  },
+  "duplicate_name": {
+    "resolved": false,
+    "error": "voice_ambiguous"
+  },
+  "confidence_heuristic_same_duration_and_rms": {
+    "bật đèn": 0.8,
+    "tắt đèn": 0.8,
+    "bật máy pha cà phê": 0.65,
+    "tắt máy pha cà phê": 0.65,
+    "bật đèn bể cá": 0.8
+  },
+  "full_voice_pipeline_with_correct_coffee_text": {
+    "verify": "low_confidence"
+  },
+  "live_source_hashes": {
+    "asr_engine.py": "ddf6cb7d4bb5573e9b6a1fc33166d1ab493713784b5b7e83e5a7808778eaaa3c",
+    "core_v1/voice.py": "6c4c68442429777f13089b48062610c6bd7ebe6bd52b5a634ad19a659abf168c",
+    "core_v1/speaker_voice.py": "390ac9f7a44959d7ab6de9fd98eefa2a4b6c9a0b8d34883bbc29335898cbd947",
+    "core_v1/firebase_commissioning.py": "f395bd8088aafe1da8e0e4b13e67af471a0351292c97fdf754299713cce85dda"
+  }
+}

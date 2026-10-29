@@ -13,7 +13,7 @@ class WsASR : public ASREngine {
 public:
     using CommandResultCallback = std::function<void(const std::string& verify, const std::string& voice_reply)>;
 
-    WsASR(const std::string& ws_uri, const std::string& node_id);
+    WsASR(const std::string& ws_uri, const std::string& node_id, bool pi_voice = false);
     ~WsASR() override;
 
     bool init() override;
@@ -51,7 +51,13 @@ private:
     static void wsEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
     void handleTextMessage(const char* data, int len);
 
+    bool m_ir_available = false;
+    uint32_t m_ir_generation = 0;
+    char* m_text_message = nullptr;
+    size_t m_text_expected = 0, m_text_received = 0;
     std::string m_uri;
+    bool m_pi_voice = false;
+    bool m_core_identity = false;
     bool m_core_playback = false;
     std::string m_playback_id;
     size_t m_playback_bytes = 0, m_playback_expected = 0;

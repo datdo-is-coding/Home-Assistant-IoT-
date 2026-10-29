@@ -1,3 +1,5 @@
+import 'package:home_competition/widgets/device_card.dart';
+import 'package:home_competition/core/theme/app_theme.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -103,13 +105,22 @@ void main() {
       expect(client.updatedAt, capturedTime);
 
       // Truthful indicators: 0 devices online (TUYỆT ĐỐI KHÔNG hiện trạng thái online giả)
-      expect(find.text('2 thiết bị · 0 trực tuyến'), findsOneWidget);
+      expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('home-connection-name')))
+              .style
+              ?.color,
+          AppColors.light.warning);
+      final cards = tester.widgetList<DeviceCard>(find.byType(DeviceCard));
+      expect(cards, hasLength(2));
+      expect(cards.every((card) => !card.device.online), isTrue);
 
       await tester.pumpWidget(const SizedBox.shrink());
       debugDefaultTargetPlatformOverride = null;
     });
 
-    test('Corrupted cache recovery automatically cleans up corrupted entries without crashing',
+    test(
+        'Corrupted cache recovery automatically cleans up corrupted entries without crashing',
         () async {
       SharedPreferences.setMockInitialValues({
         'gw_snapshot_http://gateway:8000::user1': '{corrupted json not valid!',
@@ -124,8 +135,7 @@ void main() {
 
       // Corrupted entry should be removed from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
-      expect(
-          prefs.getString('gw_snapshot_http://gateway:8000::user1'), isNull);
+      expect(prefs.getString('gw_snapshot_http://gateway:8000::user1'), isNull);
     });
 
     test('Logout clears cache scope from local storage', () async {
@@ -190,7 +200,11 @@ void main() {
           generation: 1,
         ),
         capturedAt: DateTime.now(),
-        nodes: {'AB1': {'relay_state': [1, 0]}},
+        nodes: {
+          'AB1': {
+            'relay_state': [1, 0]
+          }
+        },
       );
 
       await cacheService.saveSnapshot(snapshot);
@@ -202,15 +216,14 @@ void main() {
 
       // But SharedPreferences disk hasn't flushed yet
       var prefs = await SharedPreferences.getInstance();
-      expect(
-          prefs.getString('gw_snapshot_http://gateway:8000::user1'), isNull);
+      expect(prefs.getString('gw_snapshot_http://gateway:8000::user1'), isNull);
 
       // Wait for debounce timer
       await Future<void>.delayed(const Duration(milliseconds: 70));
 
       prefs = await SharedPreferences.getInstance();
-      expect(prefs.getString('gw_snapshot_http://gateway:8000::user1'),
-          isNotNull);
+      expect(
+          prefs.getString('gw_snapshot_http://gateway:8000::user1'), isNotNull);
     });
   });
 }

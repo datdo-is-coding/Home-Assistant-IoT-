@@ -14,7 +14,7 @@ class AudioRelayTest(unittest.TestCase):
             (root / 'freertos').mkdir()
             (root / 'audio_output').mkdir()
             stubs = {
-                'audio_output/sound_player.h': '#pragma once\nenum class SoundType { WAKE, SUCCESS, ERROR, BOOTUP };\nclass SoundPlayer { public: static SoundPlayer& instance() { static SoundPlayer s; return s; } bool play(SoundType) { return true; } };\n',
+                'audio_output/sound_player.h': '#pragma once\nenum class SoundType { WAKE, SUCCESS, ERROR, BOOTUP };\ninline int wake_sounds=0;\nclass SoundPlayer { public: static SoundPlayer& instance() { static SoundPlayer s; return s; } bool play(SoundType t) { if(t==SoundType::WAKE) ++wake_sounds; return true; } };\n',
                 'esp_heap_caps.h': '#pragma once\n#include <cstdlib>\n#define MALLOC_CAP_SPIRAM 1\n#define MALLOC_CAP_8BIT 2\ninline void* heap_caps_malloc(size_t n, int) { return malloc(n); }\n',
                 'esp_log.h': '#pragma once\n#define ESP_LOGI(...)\n#define ESP_LOGW(...)\n#define ESP_LOGE(...)\n',
                 'esp_timer.h': '#pragma once\n#include <cstdint>\ninline int64_t audio_test_time = 1000000; inline int64_t esp_timer_get_time() { return audio_test_time; }\n',
@@ -28,6 +28,7 @@ class AudioRelayTest(unittest.TestCase):
 #include <cstring>
 #include <vector>
 #include "esp_timer.h"
+#include "audio_output/sound_player.h"
 #include "audio/audio_manager/audio_manager.h"
 
 class Remote : public ASREngine {
@@ -143,6 +144,34 @@ int main() {
     packet.msg_type = AUDIO_MSG_TYPE_STREAM_CHUNK; packet.payload_len = sizeof(pcm);
     manager.ingestAudioPacket(packet); manager.process();
     assert(local_commands == count); // no wake/start, no execution
+
+    auto buffered = std::make_shared<Remote>();
+    AudioManager deferred(nullptr, buffered, true);deferred.init();
+    const int before_wake = wake_sounds;
+    strcpy(packet.source_node_id,"AB_BUFFERED");packet.msg_type=AUDIO_MSG_TYPE_WAKE;
+    deferred.ingestAudioPacket(packet);deferred.ingestAudioPacket(packet);deferred.process();
+    assert(wake_sounds==before_wake+1 && buffered->starts==0);
+    audio_test_time+=2000000;deferred.process();
+    assert(deferred.getActiveSourceNodeId().empty()); // Wake alone never starts the PCM timeout.
+    strcpy(packet.source_node_id,"AB_BUFFERED");packet.msg_type=AUDIO_MSG_TYPE_STREAM_START;
+    packet.sequence_num=0;packet.payload_len=0;deferred.ingestAudioPacket(packet);deferred.process();
+    assert(buffered->starts==0);
+    assert(wake_sounds==before_wake+1); // No second chime at speech onset.
+    packet.msg_type=AUDIO_MSG_TYPE_STREAM_CHUNK;packet.payload_len=sizeof(pcm);
+    for(int i=1;i<=400;++i){
+        packet.sequence_num=i&255;deferred.ingestAudioPacket(packet);deferred.process();
+        assert(buffered->starts==0 && buffered->received.empty());
+    }
+    packet.msg_type=AUDIO_MSG_TYPE_STREAM_END;packet.payload_len=0;
+    deferred.ingestAudioPacket(packet);deferred.process();
+    assert(buffered->starts==1 && buffered->stops==1 && buffered->received.size()==80000);
+    assert(buffered->source=="AB_BUFFERED");
+    // Lost data must never start an upload or decode a partial command.
+    packet.msg_type=AUDIO_MSG_TYPE_STREAM_START;packet.sequence_num=0;
+    deferred.ingestAudioPacket(packet);
+    packet.msg_type=AUDIO_MSG_TYPE_STREAM_CHUNK;packet.payload_len=sizeof(pcm);packet.sequence_num=1;
+    deferred.ingestAudioPacket(packet);packet.sequence_num=3;deferred.ingestAudioPacket(packet);
+    deferred.process();assert(buffered->starts==1 && buffered->cancels==1);
 
 }
 ''')

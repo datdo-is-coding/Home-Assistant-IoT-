@@ -1,0 +1,114 @@
+{
+  "base_commit": "97162e2d71b58935df0f42bdda863eace3bbddd4",
+  "source_state": "uncommitted working tree",
+  "firmware_version": "2.0.4-b1",
+  "binary_path": "Firmware/firmware_esp/SubBox/build/SubBox.bin",
+  "binary_bytes": 1197456,
+  "binary_sha256": "be98ea9efd33876fef7e0b341da754d22898c14b069e6a94c58f5e1e1a8475c9",
+  "host_tests": {
+    "passed": 37,
+    "duration_seconds": 33.019,
+    "status": "OK"
+  },
+  "vad_sanitizer_cases": [
+    {
+      "case": "short100",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "short200",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "short_noise",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "stream_end",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "word_gap",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "brief_gap",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "long_word",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "max_word",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "cancel_restart",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "background",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "packet_boundaries",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "bad_model",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "bad_input",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "init_failure",
+      "passed": true,
+      "diagnostics": ""
+    },
+    {
+      "case": "prefix_then_failure",
+      "passed": true,
+      "diagnostics": ""
+    }
+  ],
+  "shared_kws_unchanged_from_head": {
+    "kws_config.h": true,
+    "kws_mfcc.h": true,
+    "kws_mfcc.cpp": true,
+    "kws_model_quantized.h": true
+  },
+  "source_sha256": {
+    "Firmware/firmware_esp/SubBox/src/audio/kws/local_kws.cpp": "a8aeba2703d9b64af64b6b71103b8110a3005c26a50ac1166c704a1c11746400",
+    "Firmware/firmware_esp/SubBox/src/audio/kws/local_kws.h": "69f97ce19d49bd182e3d66299d5b062299327da135500813177f310e29ed6dd6",
+    "Firmware/firmware_esp/SubBox/src/CMakeLists.txt": "1c4a5605c601f5f2715d981700b33ffb6381419209bc9dd3e0cc9d1226e0f9b1",
+    "Firmware/tests/test_kws_word_vad.py": "d0d9fbc2326199f7b35179e61e50e85f8a892c8589d1561611b740d553a9c35a",
+    "Firmware/firmware_esp/common/kws/kws_config.h": "f53f72f7350e85a09d37abf2f64b8691702e5ebe04f16fb00fd64c7fcd062e61",
+    "Firmware/firmware_esp/common/kws/kws_mfcc.h": "408e6a333b433c29c4d714f9b2341052a1fe2591a21db0e69b45d68c72297832",
+    "Firmware/firmware_esp/common/kws/kws_mfcc.cpp": "ee31091ec7ddbd0cf5468e3d1acc2bf3a0f2efd078bc35455d7ed88854421248",
+    "Firmware/firmware_esp/common/kws/kws_model_quantized.h": "72a274b305369a33a249fb05bd5736514e8d598f457c24b68d150cb5d46c2008"
+  },
+  "hardware_flashed": true,
+  "physical_voice_acceptance": false,
+  "training_performed": false,
+  "installation_evidence": "ota-installation.json",
+  "deployed_node_id": 3476308,
+  "deployed_factory_id": "HC-288485350B54",
+  "ota_job_id": "OTA-9854d6202ef747a496f425e4",
+  "release_counter": 7
+}

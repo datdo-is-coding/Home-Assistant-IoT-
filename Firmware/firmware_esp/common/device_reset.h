@@ -80,6 +80,7 @@ esp_err_t prepare_reset(ResetKind kind, const char* operation_id, uint32_t owner
 esp_err_t execute_confirmed_reset(ResetKind kind, const char* operation_id);
 // Network callers must deliver the durable result before restarting.
 esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id);
+esp_err_t complete_confirmed_reset_core(ResetKind kind, const char* operation_id);
 
 /**
  * @brief Resume interrupted reset after power cut.

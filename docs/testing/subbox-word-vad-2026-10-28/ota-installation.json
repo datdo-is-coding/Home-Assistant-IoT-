@@ -1,0 +1,54 @@
+{
+  "job_id": "OTA-9854d6202ef747a496f425e4",
+  "node_id": 3476308,
+  "status": "SUCCEEDED",
+  "offset": 1197456,
+  "old_boot": "13632356330802601459",
+  "reason": null,
+  "updated": 1793179405.0384717,
+  "version": "2.0.4-b1",
+  "sha256": "be98ea9efd33876fef7e0b341da754d22898c14b069e6a94c58f5e1e1a8475c9",
+  "size": 1197456,
+  "factory_id": "HC-288485350B54",
+  "firmware": "2.0.4-b1",
+  "boot_id": "17416318675581746605",
+  "connectivity": "ONLINE",
+  "heartbeat_age_seconds": 1.263,
+  "seconds_since_success": 87.786,
+  "kws_configuration_unchanged": true,
+  "kws_revisions": [
+    4
+  ],
+  "kws_sync_current_boot": true,
+  "gateway_service": "active",
+  "ota_service": "active",
+  "backup_path": "/home/pi4/.local/state/commercial-ota/pilot/backups/subbox-vad-20261028-091727",
+  "release_counter": 7,
+  "physical_voice_acceptance": false,
+  "actionbox_states": [
+    {
+      "node_id": 3476310,
+      "number": 1,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "reported_at": 1793179491.5721412
+    },
+    {
+      "node_id": 3476310,
+      "number": 2,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "reported_at": 1793179491.5722065
+    },
+    {
+      "node_id": 3476310,
+      "number": 3,
+      "relay_state": 0,
+      "ct_valid": 1,
+      "fault_flags": 0,
+      "reported_at": 1793179491.5722616
+    }
+  ]
+}

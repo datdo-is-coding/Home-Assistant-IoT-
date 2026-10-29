@@ -84,7 +84,7 @@ esp_err_t execute_confirmed_reset(ResetKind kind, const char* operation_id) {
     return ESP_OK;
 }
 
-esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id) {
+static esp_err_t complete_reset(ResetKind kind, const char* operation_id, bool keep_transport_until_reboot) {
     if (kind == ResetKind::NONE) return ESP_ERR_INVALID_ARG;
 
     uint32_t epoch = nvs_storage_get_owner_epoch();
@@ -131,7 +131,8 @@ esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id) {
     // 3. Force ALL relays to OFF (channel 1..BOARD_RELAY_CHANNEL_COUNT)
     // Ensures latching relay pulses complete before flash operations or reboot!
     for (uint8_t ch = 1; ch <= BOARD_RELAY_CHANNEL_COUNT; ch++) {
-        relay_off(ch);
+        err = relay_off(ch);
+        if (err != ESP_OK) return err;
     }
 
     // 4. Update reset_intent in NVS (state = RELAYS_OFF)
@@ -148,15 +149,22 @@ esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id) {
     if (kind == ResetKind::REBOOT) {
         nvs_storage_generate_new_boot_id();
     } else if (kind == ResetKind::NETWORK_RESET) {
-        err = espnow_transport_clear_peers();
+        if (!keep_transport_until_reboot) err = espnow_transport_clear_peers();
         if (err == ESP_OK) err = nvs_storage_reset_network();
     } else if (kind == ResetKind::FACTORY_RESET) {
-        err = espnow_transport_clear_peers();
+        if (!keep_transport_until_reboot) err = espnow_transport_clear_peers();
         if (err == ESP_OK) err = nvs_storage_factory_reset(NULL);
     }
 
     // 6. Clear reset_intent from NVS, commit
     return err == ESP_OK ? nvs_storage_clear_reset_intent() : err;
+}
+
+esp_err_t complete_confirmed_reset(ResetKind kind, const char* operation_id) {
+    return complete_reset(kind,operation_id,false);
+}
+esp_err_t complete_confirmed_reset_core(ResetKind kind, const char* operation_id) {
+    return complete_reset(kind,operation_id,true);
 }
 
 bool resume_interrupted_reset(void) {

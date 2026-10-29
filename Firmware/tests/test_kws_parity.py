@@ -38,7 +38,7 @@ def mel_to_hz(mel):
 
 
 def reference_mfcc(signal):
-    """Mirror the training extractor and the shared C++ implementation."""
+    """Mirror the training extractor, including its zero-only float64 epsilon."""
     signal = np.asarray(signal, dtype=np.float32)
     if signal.size < SAMPLE_RATE:
         signal = np.pad(signal, (0, SAMPLE_RATE - signal.size))
@@ -63,7 +63,8 @@ def reference_mfcc(signal):
             filters[m - 1, k] = (right - k) / (right - centre)
 
     spectrum = np.abs(np.fft.rfft(frames * window, NUM_FFT, axis=1)) ** 2 / NUM_FFT
-    energies = np.maximum(spectrum @ filters.T, 1e-10)
+    energies = spectrum @ filters.T
+    energies = np.where(energies == 0, np.finfo(float).eps, energies)
     log_mel = np.log(energies)
 
     dct = np.zeros((NUM_CEPSTRAL, NUM_FILTERS), dtype=np.float32)
@@ -138,7 +139,7 @@ class TestKwsParity(unittest.TestCase):
                              f"stale model reference in {path}")
 
         subbox_cmake = (SUBBOX_SRC / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn("common/kws/kws_mfcc.cpp", subbox_cmake)
+        self.assertNotIn('"${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws/kws_mfcc.cpp"', subbox_cmake)
         self.assertIn("common/kws", subbox_cmake)
         self.assertTrue((COMMON_KWS / "kws_mfcc.cpp").is_file())
         self.assertTrue((COMMON_KWS / "kws_model_quantized.h").is_file())
@@ -153,12 +154,10 @@ class TestKwsParity(unittest.TestCase):
             self.assertEqual(wav.getframerate(), SAMPLE_RATE)
             pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16)
 
-        reference = reference_mfcc(pcm.astype(np.float32) / 32768.0)
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             raw_path = root / "sample.raw"
             out_path = root / "mfcc.bin"
-            pcm.tofile(str(raw_path))
             runner = r'''
 #include "kws_mfcc.h"
 #include <cstdio>
@@ -192,12 +191,22 @@ int main(int argc, char** argv) {
                 str(COMMON_KWS / "kws_mfcc.cpp"), "-o", str(binary),
             ], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stderr)
-            run = subprocess.run([str(binary), str(raw_path), str(out_path)],
-                                 capture_output=True, text=True)
-            self.assertEqual(run.returncode, 0, run.stderr)
-            actual = np.fromfile(str(out_path), dtype=np.float32).reshape(NUM_FRAMES, NUM_CEPSTRAL)
-
-        self.assertLess(float(np.max(np.abs(actual - reference))), 2e-3)
+            cases = {
+                'word': pcm,
+                'silence': np.zeros(SAMPLE_RATE, dtype=np.int16),
+                'quiet_pcm': np.random.default_rng(42).integers(-2, 3, SAMPLE_RATE, dtype=np.int16),
+            }
+            for label, samples in cases.items():
+                with self.subTest(audio=label):
+                    samples.tofile(str(raw_path))
+                    run = subprocess.run([str(binary), str(raw_path), str(out_path)],
+                                         capture_output=True, text=True)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    actual = np.fromfile(str(out_path), dtype=np.float32).reshape(NUM_FRAMES, NUM_CEPSTRAL)
+                    reference = reference_mfcc(samples.astype(np.float32) / 32768.0)
+                    self.assertLess(float(np.max(np.abs(actual - reference))), 2e-3)
+                    if label == 'silence':
+                        self.assertLess(float(np.max(np.abs(actual[:, 0] - (-5.4982785)))), 2e-5)
 
     def test_quantized_inference_accuracy_on_test_vectors(self):
         x_test_path = KWS_DATA / "X_test.npy"

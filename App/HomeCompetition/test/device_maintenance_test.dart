@@ -11,13 +11,60 @@ import 'package:home_competition/models/device.dart';
 import 'package:home_competition/providers/smart_home_providers.dart';
 import 'package:home_competition/services/gateway_client.dart';
 
+class _PendingRemoveClient extends GatewayClient {
+  _PendingRemoveClient() : super(persistSession: false) {
+    user = {'role': 'admin'};
+  }
+  @override
+  void startEventStream() {}
+  @override
+  Future<void> refresh() async {}
+  @override
+  Future<Map<String, dynamic>> request(String path,
+      {Map<String, dynamic>? body, String? method, Duration? timeout}) async {
+    if (path.endsWith('/remove'))
+      return {
+        'operation': {
+          'operation_id': 'op-pending',
+          'kind': 'remove_from_home',
+          'state': 'accepted'
+        }
+      };
+    if (path == '/api/operations/op-pending')
+      return {
+        'operation': {
+          'operation_id': 'op-pending',
+          'kind': 'remove_from_home',
+          'state': 'failed',
+          'error_message': 'Chưa có xác nhận từ bo'
+        }
+      };
+    throw StateError('Unexpected maintenance request: $path');
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   final sampleChannels = [
-    const ActionBoxChannel(index: 0, channelKey: 'ch1', name: 'Đèn chính phòng khách', type: DeviceType.light, isOn: true),
-    const ActionBoxChannel(index: 1, channelKey: 'ch2', name: 'Quạt trần phòng khách', type: DeviceType.fan, isOn: false),
-    const ActionBoxChannel(index: 2, channelKey: 'ch3', name: 'Bình nóng lạnh', type: DeviceType.socket, isOn: false),
+    const ActionBoxChannel(
+        index: 0,
+        channelKey: 'ch1',
+        name: 'Đèn chính phòng khách',
+        type: DeviceType.light,
+        isOn: true),
+    const ActionBoxChannel(
+        index: 1,
+        channelKey: 'ch2',
+        name: 'Quạt trần phòng khách',
+        type: DeviceType.fan,
+        isOn: false),
+    const ActionBoxChannel(
+        index: 2,
+        channelKey: 'ch3',
+        name: 'Bình nóng lạnh',
+        type: DeviceType.socket,
+        isOn: false),
   ];
 
   final sampleActionBoxV2 = ActionBox(
@@ -58,7 +105,8 @@ void main() {
     return ProviderScope(
       overrides: [
         gatewayClientProvider.overrideWith((ref) => client),
-        actionBoxesStreamProvider.overrideWith((ref) => Stream.value([actionBox])),
+        actionBoxesStreamProvider
+            .overrideWith((ref) => Stream.value([actionBox])),
       ],
       child: MaterialApp(
         home: FeatureActionBoxDetailScreen(actionBoxId: actionBox.id),
@@ -77,7 +125,11 @@ void main() {
           return http.Response(
             jsonEncode({
               'authenticated': true,
-              'user': {'id': role == 'admin' ? 1 : 2, 'username': role, 'role': role},
+              'user': {
+                'id': role == 'admin' ? 1 : 2,
+                'username': role,
+                'role': role
+              },
             }),
             200,
           );
@@ -93,7 +145,33 @@ void main() {
   }
 
   group('ActionBox & SubBox Maintenance Tests (Task T11)', () {
-    testWidgets('Test Role Guard: Member sees admin banner and is blocked from reboot', (tester) async {
+    testWidgets(
+        'an accepted remove request cannot report success before the device result',
+        (tester) async {
+      tester.view.physicalSize = const Size(1200, 1800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final client = _PendingRemoveClient();
+      addTearDown(client.dispose);
+      client.nodes[sampleActionBoxV2.id] = {'name': sampleActionBoxV2.name};
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpAndSettle();
+      final remove = find.byKey(const Key('remove_device_tile'));
+      await tester.ensureVisible(remove);
+      await tester.tap(remove);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('confirm_remove_button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Chưa có xác nhận từ bo'), findsOneWidget);
+      expect(find.text('Đã gỡ thiết bị thành công!'), findsNothing);
+      expect(client.nodes.containsKey(sampleActionBoxV2.id), isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+    testWidgets(
+        'Test Role Guard: Member sees admin banner and is blocked from reboot',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -101,7 +179,8 @@ void main() {
 
       final client = await createTestClient(role: 'member');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       // Check admin required banner is displayed
@@ -118,7 +197,9 @@ void main() {
       expect(find.byKey(const Key('reboot_confirm_dialog')), findsNothing);
     });
 
-    testWidgets('Test Admin User: Reboot dialog contains board name, model and affected channels', (tester) async {
+    testWidgets(
+        'Test Admin User: Reboot dialog contains board name, model and affected channels',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -126,7 +207,8 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       // Admin banner is NOT displayed
@@ -141,10 +223,15 @@ void main() {
       expect(find.textContaining('ActionBox Phòng Khách'), findsWidgets);
       expect(find.textContaining('ACTIONBOX_V2'), findsOneWidget);
       expect(find.textContaining('3 kênh rơ-le phụ tải'), findsOneWidget);
-      expect(find.textContaining('Đèn chính phòng khách, Quạt trần phòng khách, Bình nóng lạnh'), findsOneWidget);
+      expect(
+          find.textContaining(
+              'Đèn chính phòng khách, Quạt trần phòng khách, Bình nóng lạnh'),
+          findsOneWidget);
     });
 
-    testWidgets('Test Identify: Triggers 15s countdown and does NOT send relay command', (tester) async {
+    testWidgets(
+        'Test Identify: Triggers 15s countdown and does NOT send relay command',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -156,29 +243,34 @@ void main() {
       final client = await createTestClient(
         role: 'admin',
         handler: (request) async {
-          if (request.url.path.contains('/operations') && request.method == 'POST') {
+          if (request.url.path.contains('/operations') &&
+              request.method == 'POST') {
             final body = json.decode(request.body);
             if (body['kind'] == 'identify') {
               identifyCalled = true;
-              return http.Response(json.encode({
-                'success': true,
-                'operation': {
-                  'operation_id': 'op_ident_123',
-                  'kind': 'identify',
-                  'device_uid': 'ab_v2_living',
-                  'state': 'running',
-                }
-              }), 202);
+              return http.Response(
+                  json.encode({
+                    'success': true,
+                    'operation': {
+                      'operation_id': 'op_ident_123',
+                      'kind': 'identify',
+                      'device_uid': 'ab_v2_living',
+                      'state': 'running',
+                    }
+                  }),
+                  202);
             }
           }
-          if (request.url.path.contains('/relay') || request.url.path.contains('/control')) {
+          if (request.url.path.contains('/relay') ||
+              request.url.path.contains('/control')) {
             relayCalled = true;
           }
           return http.Response('{"success": true}', 200);
         },
       );
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       final identifyBtn = find.byKey(const Key('identify_button'));
@@ -191,7 +283,9 @@ void main() {
       expect(find.textContaining('Đang nhấp nháy đèn LED'), findsOneWidget);
     });
 
-    testWidgets('Test Reboot Execution: Dispatches reboot and polls operation until succeeded', (tester) async {
+    testWidgets(
+        'Test Reboot Execution: Dispatches reboot and polls operation until succeeded',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -201,29 +295,34 @@ void main() {
       final client = await createTestClient(
         role: 'admin',
         handler: (request) async {
-          if (request.url.path.endsWith('/operations') && request.method == 'POST') {
-            return http.Response(json.encode({
-              'success': true,
-              'operation': {
-                'operation_id': 'op_reboot_999',
-                'kind': 'reboot',
-                'device_uid': 'ab_v2_living',
-                'state': 'running',
-              }
-            }), 202);
+          if (request.url.path.endsWith('/operations') &&
+              request.method == 'POST') {
+            return http.Response(
+                json.encode({
+                  'success': true,
+                  'operation': {
+                    'operation_id': 'op_reboot_999',
+                    'kind': 'reboot',
+                    'device_uid': 'ab_v2_living',
+                    'state': 'running',
+                  }
+                }),
+                202);
           }
           if (request.url.path.contains('/operations/op_reboot_999')) {
             pollCount++;
             final state = pollCount >= 2 ? 'succeeded' : 'awaiting_reconnect';
-            return http.Response(json.encode({
-              'success': true,
-              'operation': {
-                'operation_id': 'op_reboot_999',
-                'kind': 'reboot',
-                'device_uid': 'ab_v2_living',
-                'state': state,
-              }
-            }), 200);
+            return http.Response(
+                json.encode({
+                  'success': true,
+                  'operation': {
+                    'operation_id': 'op_reboot_999',
+                    'kind': 'reboot',
+                    'device_uid': 'ab_v2_living',
+                    'state': state,
+                  }
+                }),
+                200);
           }
           if (request.url.path == '/api/nodes') {
             return http.Response('{"success": true, "nodes": {}}', 200);
@@ -232,7 +331,8 @@ void main() {
         },
       );
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       // Open reboot dialog
@@ -255,7 +355,9 @@ void main() {
       expect(find.byKey(const Key('operation_dismiss_button')), findsOneWidget);
     });
 
-    testWidgets('Test Network Reset Dialog: Shows data preserved vs data erased', (tester) async {
+    testWidgets(
+        'Test Network Reset Dialog: Shows data preserved vs data erased',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -263,20 +365,25 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('network_reset_tile')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('network_reset_confirm_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('network_reset_confirm_dialog')),
+          findsOneWidget);
       expect(find.textContaining('DỮ LIỆU ĐƯỢC BẢO LƯU'), findsOneWidget);
       expect(find.textContaining('calibration'), findsOneWidget);
       expect(find.textContaining('DỮ LIỆU BỊ ĐẶT LẠI'), findsOneWidget);
-      expect(find.byKey(const Key('confirm_network_reset_button')), findsOneWidget);
+      expect(find.byKey(const Key('confirm_network_reset_button')),
+          findsOneWidget);
     });
 
-    testWidgets('Test Factory Reset Dialog: High danger warning, lists erased data vs preserved calibration', (tester) async {
+    testWidgets(
+        'Test Factory Reset Dialog: High danger warning, lists erased data vs preserved calibration',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -284,13 +391,15 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('factory_reset_tile')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('factory_reset_confirm_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('factory_reset_confirm_dialog')),
+          findsOneWidget);
       expect(find.textContaining('CẢNH BÁO'), findsOneWidget);
       expect(find.textContaining('trạng thái an toàn (OFF)'), findsOneWidget);
       expect(find.textContaining('SẼ XÓA HOÀN TOÀN'), findsOneWidget);
@@ -302,26 +411,38 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.byKey(const Key('confirm_factory_reset_button')), findsOneWidget);
+      expect(find.byKey(const Key('confirm_factory_reset_button')),
+          findsOneWidget);
     });
 
-    testWidgets('SubBox network reset explains Wi-Fi recovery and retained peers', (tester) async {
+    testWidgets(
+        'SubBox network reset explains Wi-Fi recovery and retained peers',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final client = await createTestClient();
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleSubBox));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleSubBox));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('network_reset_tile')));
       await tester.pumpAndSettle();
-      expect(find.descendant(of: find.byKey(const Key('network_reset_confirm_dialog')),
-          matching: find.textContaining('Xóa Wi-Fi đã lưu')), findsOneWidget);
-      expect(find.textContaining('danh sách ActionBox đã ghép nối được giữ nguyên'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('network_reset_confirm_dialog')),
+              matching: find.textContaining('Xóa Wi-Fi đã lưu')),
+          findsOneWidget);
+      expect(
+          find.textContaining(
+              'danh sách ActionBox đã ghép nối được giữ nguyên'),
+          findsOneWidget);
       expect(find.textContaining('Số kênh bị ảnh hưởng'), findsNothing);
     });
 
-    testWidgets('Test SubBox Removal: Dialog shows child ActionBoxes protection notice', (tester) async {
+    testWidgets(
+        'Test SubBox Removal: Dialog shows child ActionBoxes protection notice',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -329,19 +450,24 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleSubBox));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleSubBox));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('remove_device_tile')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('remove_device_confirm_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('remove_device_confirm_dialog')),
+          findsOneWidget);
       expect(find.textContaining('LƯU Ý SUBBOX'), findsOneWidget);
-      expect(find.textContaining('Chờ khôi phục tuyến (Route Recovery)'), findsOneWidget);
-      expect(find.textContaining('tuyệt đối không bị xóa ngầm'), findsOneWidget);
+      expect(find.textContaining('Chờ khôi phục tuyến (Route Recovery)'),
+          findsOneWidget);
+      expect(
+          find.textContaining('tuyệt đối không bị xóa ngầm'), findsOneWidget);
     });
 
-    testWidgets('Test Offline Removal: Dialog explains tombstone record', (tester) async {
+    testWidgets('Test Offline Removal: Dialog explains tombstone record',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -350,18 +476,22 @@ void main() {
       final offlineBox = sampleActionBoxV2.copyWith(online: false);
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: offlineBox));
+      await tester
+          .pumpWidget(createTestWidget(client: client, actionBox: offlineBox));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('remove_device_tile')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('remove_device_confirm_dialog')), findsOneWidget);
+      expect(find.byKey(const Key('remove_device_confirm_dialog')),
+          findsOneWidget);
       expect(find.textContaining('Tombstone'), findsOneWidget);
       expect(find.textContaining('chặn kết nối lại trái phép'), findsOneWidget);
     });
 
-    testWidgets('Test Export Diagnostics: Exports sanitized JSON excluding secrets and passwords', (tester) async {
+    testWidgets(
+        'Test Export Diagnostics: Exports sanitized JSON excluding secrets and passwords',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -369,7 +499,8 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('export_diagnostics_button')));
@@ -379,7 +510,8 @@ void main() {
 
       final selectableTextFinder = find.byType(SelectableText);
       expect(selectableTextFinder, findsOneWidget);
-      final jsonText = (tester.widget(selectableTextFinder) as SelectableText).data!;
+      final jsonText =
+          (tester.widget(selectableTextFinder) as SelectableText).data!;
 
       expect(jsonText.contains('ab_v2_living'), isTrue);
       expect(jsonText.contains('actionbox_v2'), isTrue);
@@ -392,7 +524,9 @@ void main() {
       expect(jsonText.contains('"audio_pcm"'), isFalse);
     });
 
-    testWidgets('Test Safety Isolation: Single channel config modal contains only channel fields', (tester) async {
+    testWidgets(
+        'Test Safety Isolation: Single channel config modal contains only channel fields',
+        (tester) async {
       tester.view.physicalSize = const Size(500, 2000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
@@ -400,11 +534,12 @@ void main() {
 
       final client = await createTestClient(role: 'admin');
 
-      await tester.pumpWidget(createTestWidget(client: client, actionBox: sampleActionBoxV2));
+      await tester.pumpWidget(
+          createTestWidget(client: client, actionBox: sampleActionBoxV2));
       await tester.pumpAndSettle();
 
       // Check Channel 3 latching badge
-      expect(find.text('Rơ-le chốt'), findsOneWidget);
+      expect(find.text('Rơ-le chốt'), findsNWidgets(3));
 
       // Find "Cấu hình" button on channel 1
       final configButtons = find.text('Cấu hình');
@@ -415,14 +550,31 @@ void main() {
       // Modal bottom sheet should only have channel settings
       final bottomSheet = find.byType(BottomSheet);
       expect(bottomSheet, findsOneWidget);
-      expect(find.descendant(of: bottomSheet, matching: find.text('Cấu hình CH1')), findsOneWidget);
-      expect(find.descendant(of: bottomSheet, matching: find.text('Tên thiết bị (ví dụ: Quạt trần, Đèn chính)')), findsOneWidget);
-      expect(find.descendant(of: bottomSheet, matching: find.text('Lưu thay đổi & Đồng bộ')), findsOneWidget);
+      expect(
+          find.descendant(of: bottomSheet, matching: find.text('Cấu hình CH1')),
+          findsOneWidget);
+      expect(
+          find.descendant(of: bottomSheet, matching: find.text('Tên thiết bị')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: bottomSheet, matching: find.text('Lưu thay đổi & Đồng bộ')),
+          findsOneWidget);
 
       // Board-level dangerous buttons must NOT be inside channel modal
-      expect(find.descendant(of: bottomSheet, matching: find.text('Khởi động lại bo mạch')), findsNothing);
-      expect(find.descendant(of: bottomSheet, matching: find.text('Khôi phục cài đặt gốc (Factory Reset)')), findsNothing);
-      expect(find.descendant(of: bottomSheet, matching: find.text('Gỡ thiết bị khỏi Nhà')), findsNothing);
+      expect(
+          find.descendant(
+              of: bottomSheet, matching: find.text('Khởi động lại bo mạch')),
+          findsNothing);
+      expect(
+          find.descendant(
+              of: bottomSheet,
+              matching: find.text('Khôi phục cài đặt gốc (Factory Reset)')),
+          findsNothing);
+      expect(
+          find.descendant(
+              of: bottomSheet, matching: find.text('Gỡ thiết bị khỏi Nhà')),
+          findsNothing);
     });
   });
 }

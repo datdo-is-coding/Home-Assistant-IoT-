@@ -1,0 +1,20 @@
+[
+  {
+    "role": "subbox",
+    "mac": "28:84:85:35:0B:54",
+    "new_version": "2.1.0-pi4",
+    "new_bytes": 1180320,
+    "new_sha256": "d7459a686ec9518ba115f631076d2e56bb1a32af455ffb45d16c0e47383bb0fe",
+    "written_app_verified": true,
+    "bootloader_nvs_otadata_unchanged": true
+  },
+  {
+    "role": "actionbox",
+    "mac": "28:84:85:33:DD:E8",
+    "new_version": "2.1.0-pi4",
+    "new_bytes": 1353824,
+    "new_sha256": "a1d3a09e825fceff169ffe63e1d17077f294756fa8edc1b38f7620e59c42a905",
+    "written_app_verified": true,
+    "bootloader_nvs_otadata_unchanged": true
+  }
+]

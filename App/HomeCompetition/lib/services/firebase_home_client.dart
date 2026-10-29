@@ -6,6 +6,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'gateway_client.dart';
 
+class _RelayView {
+  _RelayView(this.on, this.logicalId, this.configRevision, this.bootId);
+  final bool on;
+  final Object? logicalId, configRevision, bootId;
+  bool pending = true;
+  int? stateSeq;
+  DateTime expires = DateTime.now().add(const Duration(seconds: 20));
+}
+
 /// Adapts the existing RTDB channel schema to the device/room UI.
 class FirebaseHomeClient extends GatewayClient {
   FirebaseHomeClient(
@@ -30,6 +39,8 @@ class FirebaseHomeClient extends GatewayClient {
   final Map<String, double> _timestamps = {};
   final Map<String, DateTime> _observed = {};
   String? _commissioningGateway;
+  final Map<String, _RelayView> _relayViews = {};
+  final Map<String, Future<Map<String, dynamic>>> _relayQueues = {};
 
   @override
   bool get authenticated => auth.currentUser != null;
@@ -43,7 +54,11 @@ class FirebaseHomeClient extends GatewayClient {
   @override
   bool get usesFirebase => true;
   @override
-  bool get isAdmin => super.isAdmin || user['gateway_configure'] == true;
+  bool get isAdmin =>
+      user['gateway_manage'] == true ||
+      (super.isAdmin && user['gateway_role'] == null);
+  @override
+  bool get canConfigure => isAdmin || user['gateway_configure'] == true;
 
   @override
   Future<void> restoreLocalSession() async {
@@ -69,6 +84,8 @@ class FirebaseHomeClient extends GatewayClient {
     _timestamps.clear();
     _observed.clear();
     _commissioningGateway = null;
+    _relayViews.clear();
+    _relayQueues.clear();
     connected = _transportConnected = _hasSnapshot = false;
     isStale = true;
     error = null;
@@ -117,12 +134,43 @@ class FirebaseHomeClient extends GatewayClient {
     _raw = {};
     _timestamps.clear();
     _observed.clear();
+    _relayViews.clear();
     notifyListeners();
   }
 
   void applyDevices(Object? value, {DateTime? now}) {
     final time = now ?? DateTime.now();
-    _raw = asMap(value);
+    final incoming = asMap(value);
+    for (final entry in incoming.entries) {
+      final previous = asMap(_raw[entry.key]);
+      final next = asMap(entry.value);
+      if (next['core_node_id'] == previous['core_node_id'] &&
+          next['home_id'] == previous['home_id'] &&
+          next['boot_id'] == previous['boot_id'] &&
+          (readNumber(next['config_rev']) ?? 0) <
+              (readNumber(previous['config_rev']) ?? 0)) {
+        final channels = {...asMap(next['channels'])};
+        for (final ch in asMap(previous['channels']).entries) {
+          final old = asMap(ch.value);
+          channels[ch.key] = {
+            ...asMap(channels[ch.key]),
+            for (final key in [
+              'name',
+              'device_type',
+              'aliases',
+              'logical_device_id'
+            ])
+              if (old.containsKey(key)) key: old[key]
+          };
+        }
+        incoming[entry.key] = {
+          ...next,
+          'config_rev': previous['config_rev'],
+          'channels': channels
+        };
+      }
+    }
+    _raw = incoming;
     for (final entry in _raw.entries) {
       final stamp = readNumber(asMap(entry.value)['last_updated']);
       if (stamp != null) {
@@ -148,6 +196,34 @@ class FirebaseHomeClient extends GatewayClient {
     isStale = !connected;
     nodes =
         firebaseNodes(_raw, now: now ?? DateTime.now(), observed: _observed);
+    for (final entry in _relayViews.entries.toList()) {
+      final parts = entry.key.split('::');
+      final node = asMap(nodes[parts[0]]);
+      final channel = asMap(asMap(node['channels'])[parts[1]]);
+      final view = entry.value;
+      final seq = readNumber(channel['state_seq'])?.toInt();
+      if (node['status'] != 'online' ||
+          channel['logical_device_id'] != view.logicalId ||
+          node['config_rev'] != view.configRevision ||
+          node['boot_id'] != view.bootId ||
+          DateTime.now().isAfter(view.expires) ||
+          (!view.pending &&
+              seq != null &&
+              view.stateSeq != null &&
+              (seq > view.stateSeq! ||
+                  (seq == view.stateSeq && channel['state'] == view.on)))) {
+        _relayViews.remove(entry.key);
+        continue;
+      }
+      channel['state'] = view.on;
+      channel['command_pending'] = view.pending;
+      // firebaseNodes owns these maps; replace explicitly rather than mutate _raw.
+      node['channels'] = {...asMap(node['channels']), parts[1]: channel};
+      final relays = List<dynamic>.from(node['relay_state'] as List);
+      relays[int.parse(parts[1].substring(2)) - 1] = view.on;
+      node['relay_state'] = relays;
+      nodes[parts[0]] = node;
+    }
     notifyListeners();
   }
 
@@ -186,6 +262,65 @@ class FirebaseHomeClient extends GatewayClient {
 
   @override
   Future<Map<String, dynamic>> relay(
+      String nodeId, String channel, bool on) async {
+    if (!authenticated || !connected)
+      throw const GatewayException('Firebase đang ngoại tuyến.');
+    final node = asMap(nodes[nodeId]);
+    final ch = asMap(asMap(node['channels'])[channel]);
+    if (!RegExp(r'^ch[123]$').hasMatch(channel) ||
+        node['status'] != 'online' ||
+        ch['state'] is! bool) {
+      throw const GatewayException(
+          'Chưa có trạng thái thiết bị mới để điều khiển.');
+    }
+    final key = '$nodeId::$channel';
+    final session = _session;
+    final view = _RelayView(
+        on, ch['logical_device_id'], node['config_rev'], node['boot_id']);
+    _relayViews[key] = view;
+    _publish();
+    final previous = _relayQueues[key];
+    final operation = () async {
+      if (previous != null) {
+        try {
+          await previous;
+        } catch (_) {}
+      }
+      if (_closed || _session != session)
+        throw const GatewayException('Phiên đăng nhập đã thay đổi.');
+      final current = asMap(nodes[nodeId]);
+      if (asMap(asMap(current['channels'])[channel])['logical_device_id'] !=
+              view.logicalId ||
+          current['config_rev'] != view.configRevision ||
+          current['boot_id'] != view.bootId) {
+        throw const GatewayException(
+            'Cấu hình thiết bị đã thay đổi. Hãy thử lại.');
+      }
+      return _relayRequest(nodeId, channel, on);
+    }();
+    _relayQueues[key] = operation;
+    try {
+      final result = await operation;
+      if (_session == session && identical(_relayViews[key], view)) {
+        if (result['status'] == 'cloud_written') {
+          _relayViews.remove(key);
+        } else {
+          view.pending = false;
+          view.stateSeq = readNumber(result['state_seq'])?.toInt();
+          view.expires = DateTime.now().add(const Duration(seconds: 15));
+        }
+      }
+      return result;
+    } finally {
+      if (identical(_relayQueues[key], operation)) _relayQueues.remove(key);
+      if (_session == session &&
+          identical(_relayViews[key], view) &&
+          view.pending) _relayViews.remove(key);
+      if (_session == session) _publish();
+    }
+  }
+
+  Future<Map<String, dynamic>> _relayRequest(
       String nodeId, String channel, bool on) async {
     _publish();
     if (!authenticated || !connected)
@@ -236,7 +371,8 @@ class FirebaseHomeClient extends GatewayClient {
       return {
         'success': true,
         'status': 'relay_reported',
-        'load_confirmed': false
+        'load_confirmed': false,
+        'state_seq': command['state_seq'],
       };
     }
     // Existing firmware consumes this field; a successful write is not a relay ACK.
@@ -265,6 +401,10 @@ class FirebaseHomeClient extends GatewayClient {
             body != null &&
             _raw[body['device_id']] is Map &&
             asMap(_raw[body['device_id']])['core_node_id'] is int);
+    final infraredRequest =
+        RegExp(r'^/api/v1/ir/(bootstrap|test|receivers/[1-9][0-9]*|remotes(?:/REMOTE-[0-9a-f]{24}(?:/(send|learn|configure))?)?)$')
+                .hasMatch(path) &&
+            const {'GET', 'POST', 'DELETE'}.contains(verb);
     final commissioningRead = verb == 'GET' &&
         body == null &&
         (path == '/api/commissioning/candidates' ||
@@ -282,7 +422,17 @@ class FirebaseHomeClient extends GatewayClient {
             (RegExp(r'^/api/devices/[A-Za-z0-9_:-]+/operations$')
                     .hasMatch(path) &&
                 body['kind'] == 'identify'));
-    if (commissioningRead || commissioningWrite || coreRequest) {
+    final managementWrite = verb == 'POST' &&
+        body != null &&
+        RegExp(r'^/api/devices/(AB|SB)[0-9A-F]{12}/(operations|remove)$')
+            .hasMatch(path) &&
+        const {'reboot', 'factory_reset', 'remove_from_home'}
+            .contains(body['kind']);
+    if (commissioningRead ||
+        commissioningWrite ||
+        coreRequest ||
+        infraredRequest ||
+        managementWrite) {
       return _commissioningRequest(
           path, verb, body, timeout ?? const Duration(seconds: 15));
     }
@@ -410,8 +560,85 @@ class FirebaseHomeClient extends GatewayClient {
           final result = asMap(envelope['body']);
           if (code < 200 || code >= 300 || result['success'] == false) {
             throw GatewayException(
-                '${result['message'] ?? result['error'] ?? 'Không thể ghép nối thiết bị.'}',
+                const {
+                      'offline':
+                          'ActionBox đang mất kết nối. Hãy kiểm tra nguồn và thử lại.',
+                      'config_pending':
+                          'Thiết bị đang đồng bộ cấu hình. Hãy thử lại sau giây lát.',
+                      'ir_subbox_offline':
+                          'SubBox đang ngoại tuyến. Hãy kiểm tra nguồn và mạng.',
+                      'ir_receiver_unavailable':
+                          'SubBox này chưa lắp mắt thu hồng ngoại.',
+                      'ir_expired':
+                          'Lệnh đã hết hạn trước khi phát. Hãy kiểm tra kết nối rồi thử lại.',
+                      'ir_firmware_required':
+                          'SubBox cần bản firmware hỗ trợ hồng ngoại.',
+                      'ir_ack_unknown':
+                          'Chưa nhận được xác nhận phát. Kiểm tra thiết bị trước khi thử lại.',
+                      'ir_previous_unknown':
+                          'Lượt trước chưa rõ kết quả. Kiểm tra thiết bị rồi bấm lại.',
+                      'ir_busy': 'SubBox đang xử lý remote. Vui lòng chờ.',
+                      'ir_learn_timeout':
+                          'Chưa thu được tín hiệu. Hướng remote vào mắt thu và thử lại.',
+                      'ir_invalid_capture':
+                          'Tín hiệu chưa đầy đủ. Đưa remote gần mắt thu và thử lại.',
+                      'ir_hardware':
+                          'Chưa khởi tạo được phần thu hồng ngoại trên SubBox.',
+                      'ir_no_memory':
+                          'SubBox đang thiếu bộ nhớ. Hãy thử lại khi không phát loa.',
+                      'ir_transmit_failed':
+                          'SubBox chưa phát được lệnh hồng ngoại.',
+                      'ir_test_required':
+                          'Hãy thử bộ mã và xác nhận thiết bị có phản ứng trước khi lưu.',
+                      'ir_climate_unsupported':
+                          'Bộ mã này cần học từng lệnh từ remote gốc.',
+                      'ir_temperature_not_learned':
+                          'Chưa học mã cho mức nhiệt độ này.',
+                      'ir_power_not_learned':
+                          'Chưa học mã bật/tắt riêng từ remote.',
+                      'ir_relative_code':
+                          'Đây là mã nhấn nút tương đối. Không thể dùng làm mã bật/tắt riêng hoặc đặt nhiệt độ tuyệt đối.',
+                      'ir_receiver_firmware_required':
+                          'Cần nạp firmware mới hỗ trợ cấu hình mắt thu IR.',
+                      'maintenance_firmware_required':
+                          'Bo cần firmware mới để nhận lệnh quản trị. Các thiết bị khác vẫn dùng bình thường.',
+                      'maintenance_busy':
+                          'Bo đang xử lý một thao tác khác. Vui lòng chờ.',
+                      'maintenance_ack_unknown':
+                          'Chưa xác nhận được kết quả trên bo. Hãy kiểm tra thiết bị trước khi thử lại.',
+                      'maintenance_kind_unsupported':
+                          'Thao tác này chưa được hỗ trợ trên bo Core. Hãy dùng Khôi phục cài đặt gốc để xóa cấu hình ghép nối.',
+                      'children_attached':
+                          'SubBox còn ActionBox đang ghép. Hãy gỡ các ActionBox trước.',
+                      'confirmation_required':
+                          'Cần xác nhận trước khi xóa hoặc reset thiết bị.',
+                      'forbidden':
+                          'Tài khoản chưa có quyền quản trị nhà cho thao tác này.',
+                      'invalid_device_type':
+                          'Loại thiết bị chưa hợp lệ. Hãy chọn lại loại và lưu.',
+                      'invalid_voice_aliases':
+                          'Mỗi kênh có tối đa 8 tên gọi giọng nói, mỗi tên tối đa 120 ký tự.',
+                      'room_belongs_to_subbox':
+                          'Phòng được gán theo SubBox. Hãy giữ phòng hiện tại của ActionBox.',
+                      'ota_in_progress':
+                          'Thiết bị đang cập nhật. Hãy thử lại khi cập nhật xong.',
+                    }[result['error_code'] ?? result['error']] ??
+                    '${result['message'] ?? result['error'] ?? 'Không xử lý được yêu cầu. Hãy thử lại.'}',
                 code);
+          }
+          if (result['profile'] == 'core-v1' &&
+              path == '/api/commissioning/context') {
+            user['gateway_role'] = result['role'];
+            user['gateway_manage'] =
+                asMap(result['capabilities'])['manage_devices'] == true;
+            user['gateway_configure'] =
+                asMap(result['capabilities'])['configure'] == true;
+            user['role'] = user['gateway_manage'] == true
+                ? 'admin'
+                : result['role'] == 'Installer'
+                    ? 'installer'
+                    : 'member';
+            notifyListeners();
           }
           if (result['profile'] == 'core-v1' &&
               (path == '/api/kws/config' ||
@@ -423,6 +650,26 @@ class FirebaseHomeClient extends GatewayClient {
             }
             user['gateway_configure'] = true;
             notifyListeners();
+          }
+          if (path == '/api/device/update' && result['configuration'] is Map) {
+            final configuration = asMap(result['configuration']);
+            final id = configuration['device_id']?.toString();
+            if (id != null && _raw.containsKey(id)) {
+              final raw = asMap(_raw[id]);
+              final channels = {...asMap(raw['channels'])};
+              for (final entry in asMap(configuration['channels']).entries) {
+                channels[entry.key] = {
+                  ...asMap(channels[entry.key]),
+                  ...asMap(entry.value)
+                };
+              }
+              _raw[id] = {
+                ...raw,
+                'config_rev': configuration['config_rev'],
+                'channels': channels
+              };
+              _publish();
+            }
           }
           return result;
         }

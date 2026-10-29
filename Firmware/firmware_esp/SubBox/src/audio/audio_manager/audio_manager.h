@@ -27,7 +27,7 @@ struct ActionBoxAudioChannel {
 
 class AudioManager {
 public:
-    AudioManager(std::shared_ptr<VADInterface> vad, std::shared_ptr<ASREngine> asr);
+    AudioManager(std::shared_ptr<VADInterface> vad, std::shared_ptr<ASREngine> asr, bool defer_pcm = false);
     ~AudioManager();
 
     bool init();
@@ -52,6 +52,7 @@ private:
 
     std::shared_ptr<VADInterface> m_vad;
     std::shared_ptr<ASREngine>    m_asr;
+    const bool m_defer_pcm;
 
     std::map<std::string, ActionBoxAudioChannel> m_channels;
     std::string m_active_source_node_id;
@@ -61,6 +62,8 @@ private:
     bool m_asr_start_pending = false;
     bool m_session_failed = false;
     uint32_t m_session_generation = 0;
+    std::string m_wake_source;
+    uint32_t m_wake_time_ms = 0;
 
     mutable std::mutex m_mutex;
     std::function<void(const std::string&, const std::string&)> m_utterance_callback;

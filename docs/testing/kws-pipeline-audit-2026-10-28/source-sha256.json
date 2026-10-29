@@ -1,0 +1,11 @@
+{
+  "Firmware/firmware_esp/SubBox/src/audio/kws/local_kws.cpp": "95fbc652aef09a7b6f44a5f7c14bb290fd96c5f86fe195cb72fa45259e6e1986",
+  "Firmware/firmware_esp/SubBox/src/audio/audio_manager/audio_manager.cpp": "5360f3eaf7d7db221e6275f4bccbf34397bdd7b847a7c88c91e1b3bb99d0fcfb",
+  "Firmware/firmware_esp/ActionBox_V2/src/audio/voice_capture.cpp": "c83c626613778c729501cc955cb9fab6987a65331cdb78dd8069a544a00aafb4",
+  "Firmware/firmware_esp/common/kws/kws_mfcc.cpp": "ee31091ec7ddbd0cf5468e3d1acc2bf3a0f2efd078bc35455d7ed88854421248",
+  "Firmware/firmware_esp/common/kws/kws_model_quantized.h": "72a274b305369a33a249fb05bd5736514e8d598f457c24b68d150cb5d46c2008",
+  "archive/2026-10-28-cleanup/files/Firmware/firmware_kws/firmware/src/main.cpp": "61fbcee56dcb96f4e649096da6a003f77eee862fc4147e9d67d0f85d9cc72380",
+  "archive/2026-10-28-cleanup/files/Firmware/firmware_kws/firmware/src/mfcc.cpp": "a344230d57baace67b74ac27f56db2c36b34dee5cad6728895383533b8615cda",
+  "archive/2026-10-28-cleanup/files/Firmware/firmware_kws/firmware/include/kws_model_quantized.h": "3ab5ece2d919ef6ccb19e510d67d59e1611e1680243c004c49d900fe3bd1b845",
+  "archive/2026-10-28-cleanup/files/Firmware/firmware_kws/scripts/extract_mfcc.py": "782e2b30f5c83e5bc38d617b9d07742ed952c2ea4f9aa21efac8edc39b43fa60"
+}

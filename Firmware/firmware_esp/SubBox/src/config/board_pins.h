@@ -23,6 +23,10 @@ extern "C" {
 #define BOARD_PIN_SPEAKER_LRC           GPIO_NUM_18
 #define BOARD_PIN_SPEAKER_DOUT          GPIO_NUM_21
 
+#define BOARD_PIN_IR_TX                 GPIO_NUM_40
+#define BOARD_PIN_IR_RX                 GPIO_NUM_39
+#define BOARD_IR_RX_ENABLED             0  // Current prototype has TX only.
+
 #define BOARD_PIN_DEBUG_TX              GPIO_NUM_43
 #define BOARD_PIN_DEBUG_RX              GPIO_NUM_44
 

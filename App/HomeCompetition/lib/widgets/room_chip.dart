@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'soft_3d_decorations.dart';
 
 class RoomChip extends StatelessWidget {
   final String label;
@@ -20,10 +21,6 @@ class RoomChip extends StatelessWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final Color bgColor = isSelected
-        ? (isDark ? Colors.white : const Color(0xFF0F172A))
-        : (isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9));
-
     final Color textColor = isSelected
         ? (isDark ? const Color(0xFF0F172A) : Colors.white)
         : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155));
@@ -36,7 +33,7 @@ class RoomChip extends StatelessWidget {
         ? (isDark ? const Color(0xFF0F172A) : Colors.white)
         : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B));
 
-    return GestureDetector(
+    return SoftBounce(
       onTap: () {
         HapticFeedback.selectionClick();
         onSelected();
@@ -45,15 +42,10 @@ class RoomChip extends StatelessWidget {
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(100),
-          border: Border.all(
-            color: isSelected
-                ? Colors.transparent
-                : (isDark ? const Color(0xFF2A3446) : const Color(0xFFE2E8F0)),
-            width: 1,
-          ),
+        decoration: Soft3DDecorations.pill(
+          isDark: isDark,
+          isSelected: isSelected,
+          radius: 100,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -63,10 +55,11 @@ class RoomChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                letterSpacing: -0.2,
                 color: textColor,
               ),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: 7),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
               decoration: BoxDecoration(

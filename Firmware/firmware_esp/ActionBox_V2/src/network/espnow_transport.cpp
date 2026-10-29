@@ -47,7 +47,7 @@ static void on_espnow_recv(const esp_now_recv_info_t *recv_info, const uint8_t *
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
 static void on_espnow_send(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS && tx_info) {
-        ESP_LOGD(TAG, "ESP-NOW delivery fail to %02X:%02X:%02X:%02X:%02X:%02X",
+        ESP_LOGW(TAG, "ESP-NOW delivery fail to %02X:%02X:%02X:%02X:%02X:%02X",
                  tx_info->des_addr[0], tx_info->des_addr[1], tx_info->des_addr[2],
                  tx_info->des_addr[3], tx_info->des_addr[4], tx_info->des_addr[5]);
     }
@@ -55,7 +55,7 @@ static void on_espnow_send(const wifi_tx_info_t *tx_info, esp_now_send_status_t 
 #else
 static void on_espnow_send(const uint8_t *mac_addr, esp_now_send_status_t status) {
     if (status != ESP_NOW_SEND_SUCCESS && mac_addr) {
-        ESP_LOGD(TAG, "ESP-NOW delivery fail to %02X:%02X:%02X:%02X:%02X:%02X",
+        ESP_LOGW(TAG, "ESP-NOW delivery fail to %02X:%02X:%02X:%02X:%02X:%02X",
                  mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
     }
 }
@@ -258,7 +258,13 @@ esp_err_t espnow_transport_send_to(const uint8_t *dest_mac, const uint8_t *paylo
         esp_now_add_peer(&peer);
     }
 
-    esp_err_t err = esp_now_send(dest_mac, payload, len);
+    esp_err_t err = ESP_OK;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        err = esp_now_send(dest_mac, payload, len);
+        if (err != ESP_ERR_ESPNOW_NO_MEM) break;
+        if (attempt < 2) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    if (err != ESP_OK) ESP_LOGW(TAG, "ESP-NOW enqueue failed: %s", esp_err_to_name(err));
     xSemaphoreGive(s_transport_mutex);
     return err;
 }

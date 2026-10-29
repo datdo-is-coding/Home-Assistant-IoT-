@@ -192,7 +192,8 @@ void MFCCExtractor::extract(const float* audio_in, float* mfcc_out) {
             for (int k = 0; k <= FFT_SIZE / 2; k++) {
                 energy += power_spectrum[k] * mel_filters[m][k];
             }
-            if (energy < 1e-10f) energy = 1e-10f;
+            // Training substitutes NumPy float64 epsilon only for exact zero.
+            if (energy == 0.0f) energy = 2.220446049250313e-16f;
             filter_energies[m] = logf(energy);
         }
 

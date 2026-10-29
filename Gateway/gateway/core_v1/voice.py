@@ -4,6 +4,7 @@ Each SubBox uses a unique Member bearer token, pinned TLS and a server-side
 node-to-user mapping. Source IDs are enrolled radio identities, never names.
 """
 import asyncio
+import json
 import math
 import re
 import time
@@ -57,16 +58,30 @@ class CoreVoice:
         action, target = match.groups()
 
         kinds = {'den': 'light', 'light': 'light', 'quat': 'fan', 'fan': 'fan',
-                 'o cam': 'outlet', 'outlet': 'outlet'}
-        devices = self.registry.rows(
-            "SELECT d.device_id,d.name,d.kind FROM devices d JOIN device_bindings b USING(device_id) "
+                 'o cam': 'outlet', 'outlet': 'outlet', 'dieu hoa':'air_conditioner', 'may lanh':'air_conditioner'}
+        devices = self.targets(user,parent,source)
+        named = [d for d in devices if target in {normalize(n) for n in [d['name'],*d['aliases']]}]
+        matches = named or [d for d in devices if d['kind'] == kinds.get(target)]
+        require(len(matches) == 1, 'voice_ambiguous' if matches else 'voice_no_target', 409)
+        return matches[0]['device_id'], action in ('bat', 'turn on')
+
+    def targets(self,user,parent,source):
+        scope=self.authorize(user,parent,source)
+        devices=self.registry.rows(
+            "SELECT d.device_id,d.name,d.kind,n.node_id,c.number FROM devices d JOIN device_bindings b USING(device_id) "
             "JOIN channels c USING(channel_id) JOIN registered_nodes n USING(node_id) "
             "JOIN node_assignments a USING(node_id) WHERE d.home_id=? AND a.room_id=? "
             "AND a.parent_id=? AND a.active=1 AND b.active=1 AND n.registration='REGISTERED'",
             (scope['home_id'], scope['room_id'], parent))
-        matches = [d for d in devices if normalize(d['name']) == target or d['kind'] == kinds.get(target)]
-        require(len(matches) == 1, 'voice_ambiguous' if matches else 'voice_no_target', 409)
-        return matches[0]['device_id'], action in ('bat', 'turn on')
+        has_labels=self.registry.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_node_labels'").fetchone()
+        for device in devices:
+            labels=self.registry.db.execute('SELECT payload FROM core_node_labels WHERE node_id=?',(device['node_id'],)).fetchone() if has_labels else None
+            metadata=json.loads(labels[0]) if labels else {}
+            if metadata.get('channel_types',{}).get('ch'+str(device['number']))=='air_conditioner':
+                device['kind']='air_conditioner'
+            aliases=metadata.get('channel_aliases',{}).get('ch'+str(device['number']),[])
+            device['aliases']=[a for a in aliases if isinstance(a,str)] if isinstance(aliases,list) else []
+        return devices
 
     def request_key(self, parent, request_id):
         require(isinstance(request_id, str) and re.fullmatch('[a-f0-9]{32}', request_id), 'voice_request_id')
@@ -78,14 +93,17 @@ class CoreVoice:
 
     def result(self, command):
         status = command['status']
+        device=self.registry.db.execute('SELECT name FROM devices WHERE device_id=? AND home_id=?',
+                                        (command['device_id'],command['home_id'])).fetchone()
+        label=device['name'] if device else 'thiết bị'
         if status == 'APPLIED':
-            verify, reply = 'success', 'Đã thực hiện lệnh.'
+            verify, reply = 'success', f"Em đã {'bật' if command['desired'] else 'tắt'} {label}."
         elif status in ('RECEIVED', 'ACCEPTED') and command['expires'] > self.registry.clock():
-            verify, reply = 'pending', 'Đang chờ thiết bị xác nhận.'
+            verify, reply = 'pending', f'Em đang chờ {label} xác nhận.'
         elif status in ('RECEIVED', 'ACCEPTED', 'TIMEOUT'):
-            verify, reply = 'timeout', 'Chưa xác nhận được trạng thái thiết bị.'
+            verify, reply = 'timeout', f'Em chưa nhận được xác nhận từ {label}.'
         else:
-            verify, reply = 'failed', 'Thiết bị chưa thực hiện được lệnh.'
+            verify, reply = 'failed', f'Em chưa xác nhận thực hiện được lệnh với {label}.'
         return dict(type='command_result', verify=verify, voice_reply=reply,
                     command_id=command['command_id'], status=status, follow_up=False)
 
@@ -103,6 +121,10 @@ class CoreVoice:
             except (ConnectionResetError, RuntimeError):
                 pass
 
+    async def execute(self, ws, user, parent, source, text, request_id):
+        command=self.submit(user,parent,source,text,request_id)
+        await self.wait_result(ws,user,parent,source,command)
+
     async def process(self, ws, user, parent, source, request_id, pcm, started):
         try:
             self.authorize(user, parent, source)
@@ -118,23 +140,41 @@ class CoreVoice:
             samples = np.frombuffer(pcm, dtype='<i2').astype(np.float32) / 32768.
 
             async with self.asr_lock:
-                inference = asyncio.create_task(asyncio.to_thread(self.asr.transcribe_with_confidence, samples, 16000))
+                scoped=getattr(self.asr,'transcribe_scoped',None)
+                targets=self.targets(user,parent,source)
+                vocabulary=[name for d in targets for name in [d['name'],*d['aliases']]]
+                inference = asyncio.create_task(asyncio.to_thread(scoped,samples,16000,vocabulary) if scoped else
+                                                asyncio.to_thread(self.asr.transcribe_with_confidence,samples,16000))
                 try:
                     text, confidence = await asyncio.shield(inference)
                 except asyncio.CancelledError:
                     await inference
                     raise
             require(not ws.closed and time.monotonic() - started < self.MAX_AGE, 'expired', 409)
+            require(targets==self.targets(user,parent,source),'configuration_changed',409)
             require(type(confidence) in (int, float) and math.isfinite(confidence) and confidence >= .7,
                     'low_confidence', 409)
             await ws.send_json(dict(type='transcript', text=text, confidence=confidence, accepted=True))
-            command = self.submit(user, parent, source, text, request_id)
-            await self.wait_result(ws, user, parent, source, command)
+            await self.execute(ws,user,parent,source,text,request_id)
         except CoreError as error:
             if not ws.closed:
                 try:
                     await ws.send_json(dict(type='command_result', verify=error.code,
-                                           voice_reply='Chưa thực hiện lệnh. Vui lòng nói lại rõ tên thiết bị.', follow_up=False))
+                                           voice_reply={
+                                               'voice_no_target':'Em chưa tìm thấy thiết bị này trong phòng. Bạn kiểm tra tên gọi trên app nhé.',
+                                               'voice_ambiguous':'Có nhiều thiết bị trùng tên gọi. Bạn nói rõ tên thiết bị nhé.',
+                                               'config_pending':'Thiết bị đang đồng bộ cấu hình mới. Bạn chờ một chút rồi thử lại nhé.',
+                                               'configuration_changed':'Cấu hình vừa thay đổi. Bạn nói lại lệnh giúp mình nhé.',
+                                               'offline':'Thiết bị đang mất kết nối. Bạn kiểm tra nguồn giúp mình nhé.',
+                                               'ir_subbox_offline':'SubBox đang mất kết nối. Bạn kiểm tra nguồn giúp em nhé.',
+                                               'ir_climate_unsupported':'Remote này chưa có mã đặt nhiệt độ. Bạn học mã trên app giúp em nhé.',
+                                               'ir_temperature_not_learned':'Em chưa có mã cho nhiệt độ này. Bạn học mức nhiệt độ đó trên app nhé.',
+                                               'ir_power_not_learned':'Em chưa có mã bật hoặc tắt riêng. Bạn học lệnh đó từ remote trên app nhé.',
+                                               'ir_ack_unknown':'Em chưa nhận được xác nhận phát hồng ngoại. Bạn kiểm tra điều hòa trước khi thử lại nhé.',
+                                               'ir_busy':'Remote đang bận. Bạn thử lại sau một chút nhé.',
+                                               'ir_temperature_unknown':'Em chưa biết nhiệt độ đã đặt. Bạn nói rõ mức nhiệt độ mong muốn nhé.',
+                                               'ir_temperature_range':'Mức nhiệt độ này ngoài phạm vi từ 16 đến 30 độ. Bạn chọn lại giúp em nhé.',
+                                           }.get(error.code,'Em chưa nghe rõ tên thiết bị. Bạn nói lại giúp em nhé.'), follow_up=False))
                 except (ConnectionResetError, RuntimeError):
                     pass
         except (RuntimeError, ValueError, OSError):

@@ -144,6 +144,12 @@ extern "C" void app_main(void) {
     print_banner();
 
     ESP_ERROR_CHECK(device_manager_init());
+    hc_runtime_set_reset_handler([](uint8_t kind){
+        const ResetKind reset=kind==1?ResetKind::REBOOT:ResetKind::FACTORY_RESET;
+        // Keep the encrypted peer until the durable receipt is sent; reboot drops RAM peers.
+        return prepare_reset(reset,"core_admin",nvs_storage_get_owner_epoch())==ESP_OK &&
+               complete_confirmed_reset_core(reset,"core_admin")==ESP_OK;
+    });
 
     ESP_ERROR_CHECK(task_manager_init());
     hc_ota_health_ready();

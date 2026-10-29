@@ -465,6 +465,7 @@ class AudioServer:
         total_frames = 0
         client_mac = None
         installed = {}
+        core_voice = None
 
         async def _bind_client_node(target_node_id: str, owner_epoch: Optional[int] = None) -> bool:
             nonlocal client_node_id, client_owner_epoch
@@ -518,14 +519,29 @@ class AudioServer:
                                 await websocket.close(1008, 'Core speaker revoked')
                                 return
                             if compact_type == 'hello':
-                                if cmd.get('id') != header_node or cmd.get('speaker') is not True or cmd.get('playback_only') is not True:
+                                pi_voice = (cmd.get('playback_only') is False and
+                                            not getattr(self.gateway, 'local_kws_enabled', True) and
+                                            getattr(self.gateway, 'asr', None) is not None)
+                                if cmd.get('id') != header_node or cmd.get('speaker') is not True or (cmd.get('playback_only') is not True and not pi_voice):
                                     await websocket.close(1008, 'Core speaker identity mismatch')
                                     return
                                 if not await _bind_client_node(header_node):
                                     return
                                 self._active_speakers.add(websocket)
+                                websocket.core_token=authenticated_token
+                                caps=cmd.get('infrared',{})
+                                websocket.infrared_capabilities=({'version':2,'tx':caps.get('tx') is True,'rx':caps.get('rx') is True,'rx_supported':caps.get('rx_supported') is True} if isinstance(caps,dict) and caps.get('version')==2 else {})
+                                if pi_voice:
+                                    from core_v1.speaker_voice import SpeakerVoiceSession
+                                    core = self.gateway.firebase_commissioning.core
+                                    core_voice = SpeakerVoiceSession(self, websocket, core, core_speaker['node_id'], header_node, authenticated_token)
+                                    websocket.playback_only = False
+                                    logger.info('Core Pi voice relay registered: %s', header_node)
                                 logger.info('Core playback speaker registered: %s', header_node)
                                 await websocket.send(json.dumps({'t':'hello_ok','id':header_node}))
+                            elif msg_type == 'ir_result' and client_node_id:
+                                infrared=getattr(self.gateway.firebase_commissioning,'infrared',None)
+                                if infrared:infrared.accept(websocket,cmd)
                             elif msg_type == 'playback_complete' and client_node_id:
                                 pending = self._playback_receipts.get(cmd.get('playback_id'))
                                 if pending and pending[0] is websocket and not pending[1].done():
@@ -536,6 +552,8 @@ class AudioServer:
                                         logger.warning('Speaker playback incomplete: %s, received=%r expected=%d, output_ok=%r',
                                                        header_node, cmd.get('received_bytes'), pending[2], cmd.get('success'))
                                     pending[1].set_result(complete)
+                            elif core_voice is not None and msg_type in ('start', 'stop', 'cancel'):
+                                await core_voice.text(cmd)
                             else:
                                 logger.debug('Ignoring non-playback message from Core speaker')
                             continue
@@ -868,6 +886,9 @@ class AudioServer:
                         logger.warning(f"Invalid text frame: {message[:100]}")
 
                 elif isinstance(message, bytes):
+                    if core_voice is not None:
+                        core_voice.audio(message)
+                        continue
                     if not is_authenticated or not client_node_id or not recording:
                         logger.warning(
                             f"Rejected binary audio frame from unauthenticated/unbound/non-recording socket {client_addr} "
@@ -966,6 +987,10 @@ class AudioServer:
                     del self._ws_nodes[nid]
             self._active_speakers = {ws for ws in self._active_speakers if self._is_ws_alive(ws)}
             logger.info(f"WS node still connected: {list(self._ws_nodes.keys())}, active speakers: {len(self._active_speakers)}")
+
+        finally:
+            if core_voice is not None:
+                await core_voice.close()
 
     def has_ws(self, node_id: str) -> bool:
         """Check if node has a stable WS audio connection (relay over WS available)."""

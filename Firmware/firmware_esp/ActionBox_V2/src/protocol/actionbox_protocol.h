@@ -79,11 +79,18 @@ esp_err_t protocol_serialize_fault_alert(uint8_t channel, RelayFault fault_type,
 #define MSG_TYPE_AUDIO_START             0x20
 #define MSG_TYPE_AUDIO_CHUNK             0x21
 #define MSG_TYPE_AUDIO_END               0x22
+#define MSG_TYPE_AUDIO_WAKE              0x24
 
 #define CODEC_RAW_PCM                    0x00
 #define CODEC_IMA_ADPCM                  0x01
 
 #define ESPNOW_AUDIO_MAX_PCM_BYTES       240
+
+typedef struct __attribute__((packed)) {
+    uint8_t msg_type;
+    uint8_t trigger_source;
+    uint32_t timestamp_ms;
+} ActionBoxAudioWakePacket;
 
 typedef struct __attribute__((packed)) {
     uint8_t  msg_type;

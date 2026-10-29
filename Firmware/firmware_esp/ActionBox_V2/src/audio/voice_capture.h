@@ -8,6 +8,12 @@
 extern "C" {
 #endif
 
+typedef enum {
+    WAKE_TRIGGER_HIESP    = 0,
+    WAKE_TRIGGER_BUTTON   = 1,
+    WAKE_TRIGGER_FOLLOWUP = 2
+} VoiceCaptureTrigger;
+
 esp_err_t voice_capture_init(void);
 
 bool voice_capture_is_streaming(void);

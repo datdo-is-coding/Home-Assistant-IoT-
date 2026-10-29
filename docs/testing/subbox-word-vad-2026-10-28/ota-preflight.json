@@ -1,0 +1,15 @@
+{
+  "node": {
+    "node_id": 3476308,
+    "factory_id": "HC-288485350B54",
+    "connectivity": "ONLINE",
+    "firmware": "2.0.3-b1",
+    "boot_id": "13632356330802601459",
+    "config_rev": 1,
+    "reported_rev": 1,
+    "last_seen_age_seconds": 0.232
+  },
+  "previous_sha256": "8e602957a958fb930e0d0c94664102219c21436f5a82f4b1f67ab1446117e0f0",
+  "backup_path": "/home/pi4/.local/state/commercial-ota/pilot/backups/subbox-vad-20261028-091727",
+  "active_ota_jobs": 0
+}

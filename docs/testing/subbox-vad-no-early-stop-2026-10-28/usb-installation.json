@@ -1,0 +1,35 @@
+{
+  "factory_id": "HC-288485350B54",
+  "backup_verified_by_rom_digest": true,
+  "full_backup_sha256": "83520654a5666585fbffdd14600bfb407dda9b82e00a4e8fc80a72920f9b3c05",
+  "old_version": "2.0.4-b1",
+  "old_sha256": "be98ea9efd33876fef7e0b341da754d22898c14b069e6a94c58f5e1e1a8475c9",
+  "active_partition": {
+    "subtype": 16,
+    "offset": 131072,
+    "size": 3080192,
+    "name": "ota_0"
+  },
+  "new_version": "2.0.4-b2",
+  "new_sha256": "d3eb02b06f8e52c308148e76b9c4bb5997248785134fc0e64c97c25293c5e53f",
+  "new_bytes": 1197920,
+  "partition_table_unchanged": true,
+  "app_flash_verified": true,
+  "bootloader_nvs_otadata_unchanged": true,
+  "private_backup_path": "/home/tuan/.codex/device-backups/20261028-subbox-vad-b2-usb",
+  "image_archived_privately": "/home/tuan/.codex/device-backups/20261028-subbox-vad-b2-usb/SubBox-2.0.4-b2.bin",
+  "source_sha256": {
+    "Firmware/firmware_esp/SubBox/src/audio/kws/local_kws.cpp": "46dd00908a8d6938b5311db074a7ced49fddf48b926ef6902a121176f0e1dff5",
+    "Firmware/tests/test_kws_word_vad.py": "ad5b485db20cd862337eefc882386c6e82b3239fa9497950872f83c485bef3eb"
+  },
+  "voice_timing": {
+    "stream_end_ms": 58287,
+    "final_text_ms": 58437,
+    "speaker_busy_ms": 58627,
+    "final_text": "đèn",
+    "premature_cancel_reproduced_after_fix": false,
+    "full_command_recognition_accepted": false
+  },
+  "host_tests_passed": 37,
+  "sanitizer_cases_passed": 16
+}

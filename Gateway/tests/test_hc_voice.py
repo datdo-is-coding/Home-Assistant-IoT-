@@ -66,6 +66,22 @@ class VoiceTests(IsolatedAsyncioTestCase):
         with self.assertRaises(CoreError):
             self.r.ack(self.fixture.action, cmd['command_id'], 'APPLIED', cmd['config_rev'], False)
 
+    async def test_reply_names_configured_device_and_action_only_after_ack(self):
+        f=self.fixture
+        self.r.rename_device(f.owner,self.device['device_id'],'Máy pha cà phê','other')
+        for index,on in enumerate((False,True)):
+            command=self.voice.submit(self.member,f.sub,f.action,
+                ('bật' if on else 'tắt')+' máy pha cà phê',str(index)*32)
+            before=self.voice.result(command)
+            self.assertEqual(before['verify'],'pending')
+            self.assertNotIn('Em đã',before['voice_reply'])
+            self.r.ack(f.action,command['command_id'],'APPLIED',command['config_rev'],on)
+            after=self.voice.result(self.r.get_command(self.member,command['command_id']))
+            self.assertEqual(after['voice_reply'],f"Em đã {'bật' if on else 'tắt'} Máy pha cà phê.")
+        command=self.voice.submit(self.member,f.sub,f.action,'tắt máy pha cà phê','f'*32)
+        self.r.ack(f.action,command['command_id'],'FAILED',command['config_rev'],True)
+        self.assertNotIn('Em đã',self.voice.result(self.r.get_command(self.member,command['command_id']))['voice_reply'])
+
     async def test_old_recording_is_not_dispatched_after_slow_asr(self):
         import time
         self.voice.asr = type('ASR', (), {'transcribe_with_confidence': lambda *args: ('bật đèn', .99)})()

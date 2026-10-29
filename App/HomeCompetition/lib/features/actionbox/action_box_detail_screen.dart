@@ -13,6 +13,7 @@ import '../../models/device_lifecycle.dart';
 import '../../providers/smart_home_providers.dart';
 import '../../services/gateway_client.dart';
 import '../voice/kws_config_screen.dart';
+import '../../widgets/channel_editor_sheet.dart';
 
 class FeatureActionBoxDetailScreen extends ConsumerStatefulWidget {
   final String actionBoxId;
@@ -35,6 +36,25 @@ class _FeatureActionBoxDetailScreenState
   String _operationStatusText = '';
   DeviceOperationState? _currentOpState;
   String? _operationError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAccess();
+  }
+
+  Future<void> _loadAccess() async {
+    final gateway = ref.read(gatewayClientProvider);
+    if (!gateway.usesFirebase) return;
+    try {
+      await gateway.request('/api/commissioning/context');
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted)
+        setState(
+            () => _operationError = 'Không cập nhật được quyền quản trị: $e');
+    }
+  }
 
   @override
   void dispose() {
@@ -109,7 +129,8 @@ class _FeatureActionBoxDetailScreenState
         ab.id,
         kind,
         confirmation: confirmation,
-        idempotencyKey: 'op_${kind.name}_${ab.id}_${DateTime.now().millisecondsSinceEpoch}',
+        idempotencyKey:
+            'op_${kind.name}_${ab.id}_${DateTime.now().millisecondsSinceEpoch}',
       );
 
       setState(() {
@@ -166,10 +187,17 @@ class _FeatureActionBoxDetailScreenState
     });
 
     try {
-      final op = await gateway.removeDeviceFromHome(ab.id, confirmation: true);
+      var op = await gateway.removeDeviceFromHome(ab.id, confirmation: true);
       if (!mounted) return;
 
-      if (op.state == DeviceOperationState.succeeded || op.operationId.isNotEmpty) {
+      if (op.operationId.isNotEmpty &&
+          (op.state == DeviceOperationState.accepted ||
+              op.state == DeviceOperationState.running)) {
+        op = await gateway.pollOperation(op.operationId);
+        if (!mounted) return;
+      }
+
+      if (op.state == DeviceOperationState.succeeded) {
         setState(() {
           _currentOpState = DeviceOperationState.succeeded;
           _operationStatusText = 'Đã gỡ thiết bị thành công!';
@@ -186,6 +214,7 @@ class _FeatureActionBoxDetailScreenState
         }
       } else {
         setState(() {
+          _currentOpState = op.state;
           _operationError = op.errorMessage ?? 'Gỡ thiết bị thất bại';
           _operationStatusText = 'Lỗi gỡ thiết bị';
         });
@@ -357,7 +386,8 @@ class _FeatureActionBoxDetailScreenState
           ),
           FilledButton(
             key: const Key('confirm_network_reset_button'),
-            style: FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
+            style:
+                FilledButton.styleFrom(backgroundColor: Colors.orange.shade800),
             onPressed: () {
               Navigator.pop(ctx);
               _runDeviceOperation(
@@ -399,10 +429,14 @@ class _FeatureActionBoxDetailScreenState
             Text('Thiết bị: ${ab.name} (${ab.boardModel.toUpperCase()})'),
             const SizedBox(height: 8),
             Text(
-              ab.isSubBox
-                  ? 'Xóa Wi-Fi, cấu hình SubBox và danh sách ghép nối. Các ActionBox qua SubBox này sẽ mất kết nối và cần được ghép lại.'
-                  : 'Thao tác này sẽ xóa toàn bộ flash NVS người dùng. Toàn bộ ${ab.channels.length} kênh rơ-le (${channelNames.join(', ')}) sẽ bị ngắt điện về trạng thái an toàn (OFF).',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+              gateway.usesFirebase &&
+                      asMap(gateway.nodes[ab.id])['core_node_id'] != null
+                  ? 'Xóa cấu hình ghép nối và đăng ký trong nhà. Các relay được đưa về OFF; giữ dữ liệu nhà máy và hiệu chuẩn. SubBox chỉ reset sau khi đã gỡ các ActionBox con.'
+                  : ab.isSubBox
+                      ? 'Xóa Wi-Fi, cấu hình SubBox và danh sách ghép nối. Các ActionBox qua SubBox này sẽ mất kết nối và cần được ghép lại.'
+                      : 'Thao tác này sẽ xóa toàn bộ flash NVS người dùng. Toàn bộ ${ab.channels.length} kênh rơ-le (${channelNames.join(', ')}) sẽ bị ngắt điện về trạng thái an toàn (OFF).',
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.red),
             ),
             const SizedBox(height: 10),
             Container(
@@ -414,10 +448,12 @@ class _FeatureActionBoxDetailScreenState
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('✗ SẼ XÓA HOÀN TOÀN: Cấu hình phòng, tên kênh, tuyến SubBox, quyền sở hữu (epoch tăng).',
+                  Text(
+                      '✗ SẼ XÓA HOÀN TOÀN: Cấu hình phòng, tên kênh, tuyến SubBox, quyền sở hữu (epoch tăng).',
                       style: TextStyle(fontSize: 12, color: Colors.red)),
                   SizedBox(height: 4),
-                  Text('✓ ĐƯỢC BẢO TỒN NGUYÊN VẸN: Dữ liệu hiệu chuẩn cảm biến (PZEM/BL0942 calibration) và MAC gốc của phần cứng.',
+                  Text(
+                      '✓ ĐƯỢC BẢO TỒN NGUYÊN VẸN: Dữ liệu hiệu chuẩn cảm biến (PZEM/BL0942 calibration) và MAC gốc của phần cứng.',
                       style: TextStyle(fontSize: 12, color: Colors.green)),
                 ],
               ),
@@ -455,6 +491,8 @@ class _FeatureActionBoxDetailScreenState
       return;
     }
     final isSubbox = ab.isSubBox;
+    final isCore = gateway.usesFirebase &&
+        asMap(gateway.nodes[ab.id])['core_node_id'] != null;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -464,7 +502,8 @@ class _FeatureActionBoxDetailScreenState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Model: ${ab.boardModel.toUpperCase()} · Trạng thái: ${ab.online ? "Trực tuyến" : "Ngoại tuyến"}'),
+            Text(
+                'Model: ${ab.boardModel.toUpperCase()} · Trạng thái: ${ab.online ? "Trực tuyến" : "Ngoại tuyến"}'),
             const SizedBox(height: 10),
             if (isSubbox) ...[
               Container(
@@ -473,17 +512,24 @@ class _FeatureActionBoxDetailScreenState
                   color: Colors.blue.shade50,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Text(
-                  'ℹ LƯU Ý SUBBOX: Các ActionBox con đang kết nối qua SubBox này sẽ được giữ lại trong hệ thống ở trạng thái Chờ khôi phục tuyến (Route Recovery), tuyệt đối không bị xóa ngầm.',
-                  style: TextStyle(fontSize: 12, color: Colors.blueGrey, fontWeight: FontWeight.w600),
+                child: Text(
+                  isCore
+                      ? 'Hãy gỡ các ActionBox con trước khi gỡ SubBox. Hệ thống không tự xóa các bo con.'
+                      : 'ℹ LƯU Ý SUBBOX: Các ActionBox con đang kết nối qua SubBox này sẽ được giữ lại trong hệ thống ở trạng thái Chờ khôi phục tuyến (Route Recovery), tuyệt đối không bị xóa ngầm.',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.blueGrey,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
               const SizedBox(height: 8),
             ],
             Text(
-              ab.online
-                  ? 'Thiết bị sẽ được xóa khỏi bảng đăng ký và thu hồi toàn bộ quyền điều khiển.'
-                  : 'Thiết bị đang ngoại tuyến. Hệ thống sẽ ghi nhận thẻ bài (Tombstone) để chặn kết nối lại trái phép và thu hồi toàn bộ quyền ngay lập tức.',
+              isCore
+                  ? 'Bo cần đang kết nối để xác nhận tắt relay, xóa cấu hình ghép nối rồi gỡ khỏi nhà. Dữ liệu nhà máy và hiệu chuẩn được giữ lại.'
+                  : ab.online
+                      ? 'Thiết bị sẽ được xóa khỏi bảng đăng ký và thu hồi toàn bộ quyền điều khiển.'
+                      : 'Thiết bị đang ngoại tuyến. Hệ thống sẽ ghi nhận thẻ bài (Tombstone) để chặn kết nối lại trái phép và thu hồi toàn bộ quyền ngay lập tức.',
               style: const TextStyle(fontSize: 13, height: 1.4),
             ),
           ],
@@ -549,7 +595,8 @@ class _FeatureActionBoxDetailScreenState
                   ),
                   child: SelectableText(
                     jsonStr,
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                    style:
+                        const TextStyle(fontFamily: 'monospace', fontSize: 11),
                   ),
                 ),
               ],
@@ -568,7 +615,9 @@ class _FeatureActionBoxDetailScreenState
               Clipboard.setData(ClipboardData(text: jsonStr));
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Đã sao chép dữ liệu chẩn đoán vào clipboard')),
+                const SnackBar(
+                    content:
+                        Text('Đã sao chép dữ liệu chẩn đoán vào clipboard')),
               );
             },
           ),
@@ -603,8 +652,8 @@ class _FeatureActionBoxDetailScreenState
         return Scaffold(
           appBar: AppBar(
             title: Text(ab.name,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700)),
+                style:
+                    const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
             actions: [
               IconButton(
                 key: const Key('export_diagnostics_button'),
@@ -618,8 +667,8 @@ class _FeatureActionBoxDetailScreenState
             children: [
               SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -647,8 +696,7 @@ class _FeatureActionBoxDetailScreenState
                               child: Text(
                                 'Bạn đang đăng nhập với quyền Thành viên. Các thao tác bảo trì và khôi phục bo mạch yêu cầu quyền Quản trị viên (Admin).',
                                 style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.amber.shade900),
+                                    fontSize: 12, color: Colors.amber.shade900),
                               ),
                             ),
                           ],
@@ -660,7 +708,8 @@ class _FeatureActionBoxDetailScreenState
                         key: const Key('kws_config_tile'),
                         leading: const Icon(Icons.record_voice_over_outlined),
                         title: const Text('Khẩu lệnh tại SubBox'),
-                        subtitle: const Text('Gán phòng, đèn/quạt và kênh điều khiển'),
+                        subtitle: const Text(
+                            'Gán phòng, đèn/quạt và kênh điều khiển'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
@@ -673,34 +722,35 @@ class _FeatureActionBoxDetailScreenState
 
                     // Hardware Channels Section
                     if (!ab.isSubBox) ...[
-                    Text(
-                      '${ab.channels.length} Kênh phụ tải phần cứng',
-                      style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.3),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Chạm vào kênh để đổi tên, loại tải hoặc gán phòng. (Cấu hình từng kênh không ảnh hưởng đến toàn bo mạch).',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: theme.colorScheme.onSurfaceVariant),
-                    ),
-                    const SizedBox(height: 12),
-
-                    ...ab.channels.map((ch) {
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _ChannelItemCard(
-                          channel: ch,
-                          online: ab.online,
-                          isLatching: ch.channelKey == 'ch3' || ch.index == 2,
-                          onEdit: () => _showEditChannelDialog(context, ref, ab, ch),
-                        ),
-                      );
-                    }),
-
+                      Text(
+                        '${ab.channels.length} Kênh phụ tải phần cứng',
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Chạm vào kênh để đổi tên, loại thiết bị hoặc tên gọi giọng nói. Phòng được gán theo SubBox.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                      const SizedBox(height: 12),
+                      ...ab.channels.map((ch) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _ChannelItemCard(
+                            channel: ch,
+                            online: ab.online,
+                            isLatching: ab.boardModel.contains('v2') ||
+                                ch.channelKey == 'ch3' ||
+                                ch.index == 2,
+                            onEdit: () =>
+                                _showEditChannelDialog(context, ref, ab, ch),
+                          ),
+                        );
+                      }),
                     ],
                     const SizedBox(height: 24),
                     const Divider(),
@@ -723,9 +773,11 @@ class _FeatureActionBoxDetailScreenState
                     ),
                     const SizedBox(height: 16),
 
-                    // Identify Card
-                    _buildIdentifyCard(ab, theme, isDark),
-                    const SizedBox(height: 12),
+                    if (!gateway.usesFirebase ||
+                        asMap(gateway.nodes[ab.id])['core_node_id'] == null) ...[
+                      _buildIdentifyCard(ab, theme, isDark),
+                      const SizedBox(height: 12),
+                    ],
 
                     // Reboot Card
                     _buildActionTile(
@@ -733,22 +785,25 @@ class _FeatureActionBoxDetailScreenState
                       icon: Icons.restart_alt_rounded,
                       iconColor: theme.colorScheme.primary,
                       title: 'Khởi động lại bo mạch',
-                      subtitle: 'Khởi động lại chip ESP32 mà không làm mất cấu hình.',
+                      subtitle:
+                          'Khởi động lại chip ESP32 mà không làm mất cấu hình.',
                       onTap: () => _confirmRebootDialog(ab),
                     ),
                     const SizedBox(height: 12),
 
                     // Network Reset Tile
-                    _buildActionTile(
-                      key: const Key('network_reset_tile'),
-                      icon: Icons.wifi_protected_setup_rounded,
-                      iconColor: Colors.orange.shade700,
-                      title: 'Đặt lại mạng & Khôi phục tuyến',
-                      subtitle: ab.isSubBox
-                          ? 'Xóa Wi-Fi đã lưu và mở thiết lập mạng. Giữ danh sách ActionBox đã ghép nối.'
-                          : 'Xóa liên kết SubBox cũ và quét lại mạng ESP-NOW mới. Cấu hình phụ tải được bảo toàn.',
-                      onTap: () => _confirmNetworkResetDialog(ab),
-                    ),
+                    if (!gateway.usesFirebase ||
+                        asMap(gateway.nodes[ab.id])['core_node_id'] == null)
+                      _buildActionTile(
+                        key: const Key('network_reset_tile'),
+                        icon: Icons.wifi_protected_setup_rounded,
+                        iconColor: Colors.orange.shade700,
+                        title: 'Đặt lại mạng & Khôi phục tuyến',
+                        subtitle: ab.isSubBox
+                            ? 'Xóa Wi-Fi đã lưu và mở thiết lập mạng. Giữ danh sách ActionBox đã ghép nối.'
+                            : 'Xóa liên kết SubBox cũ và quét lại mạng ESP-NOW mới. Cấu hình phụ tải được bảo toàn.',
+                        onTap: () => _confirmNetworkResetDialog(ab),
+                      ),
                     const SizedBox(height: 12),
 
                     // Factory Reset Tile
@@ -757,7 +812,11 @@ class _FeatureActionBoxDetailScreenState
                       icon: Icons.restore_rounded,
                       iconColor: Colors.red.shade700,
                       title: 'Khôi phục cài đặt gốc (Factory Reset)',
-                      subtitle: 'Xóa toàn bộ flash NVS người dùng. Bảo tồn hiệu chuẩn cảm biến công suất (PZEM/BL0942).',
+                      subtitle: gateway.usesFirebase &&
+                              asMap(gateway.nodes[ab.id])['core_node_id'] !=
+                                  null
+                          ? 'Xóa cấu hình ghép nối và đăng ký trong nhà; giữ hiệu chuẩn.'
+                          : 'Xóa toàn bộ flash NVS người dùng. Bảo tồn hiệu chuẩn cảm biến công suất (PZEM/BL0942).',
                       onTap: () => _confirmFactoryResetDialog(ab),
                       isDestructive: true,
                     ),
@@ -769,7 +828,8 @@ class _FeatureActionBoxDetailScreenState
                       icon: Icons.delete_forever_rounded,
                       iconColor: Colors.red.shade900,
                       title: 'Gỡ thiết bị khỏi Nhà',
-                      subtitle: 'Thu hồi toàn bộ quyền truy cập và xóa khỏi danh sách Nhà.',
+                      subtitle:
+                          'Thu hồi toàn bộ quyền truy cập và xóa khỏi danh sách Nhà.',
                       onTap: () => _confirmRemoveDialog(ab),
                       isDestructive: true,
                     ),
@@ -796,7 +856,8 @@ class _FeatureActionBoxDetailScreenState
     );
   }
 
-  Widget _buildHeaderCard(ActionBox ab, ThemeData theme, bool isDark, AppColors colors) {
+  Widget _buildHeaderCard(
+      ActionBox ab, ThemeData theme, bool isDark, AppColors colors) {
     final isSubbox = ab.isSubBox;
     final modelDisplayName = isSubbox
         ? 'SubBox Mesh Router & Audio'
@@ -824,11 +885,15 @@ class _FeatureActionBoxDetailScreenState
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9),
+                  color: isDark
+                      ? const Color(0xFF1E2532)
+                      : const Color(0xFFF1F5F9),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(
-                  isSubbox ? Icons.router_rounded : Icons.developer_board_rounded,
+                  isSubbox
+                      ? Icons.router_rounded
+                      : Icons.developer_board_rounded,
                   size: 24,
                   color: theme.colorScheme.primary,
                 ),
@@ -874,21 +939,20 @@ class _FeatureActionBoxDetailScreenState
           const SizedBox(height: 10),
           Row(
             children: [
-              Icon(Icons.hub_outlined, size: 14, color: theme.colorScheme.onSurfaceVariant),
+              Icon(Icons.hub_outlined,
+                  size: 14, color: theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   routeInfo,
                   style: TextStyle(
-                      fontSize: 11,
-                      color: theme.colorScheme.onSurfaceVariant),
+                      fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
               Text(
                 'FW: ${ab.firmwareVersion}',
                 style: TextStyle(
-                    fontSize: 11,
-                    color: theme.colorScheme.onSurfaceVariant),
+                    fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -938,8 +1002,7 @@ class _FeatureActionBoxDetailScreenState
                       ? 'Đang nhấp nháy đèn LED (${_identifyCountdown}s)...'
                       : 'Nháy LED 15s để nhận diện bo mạch, không ảnh hưởng tải điện.',
                   style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant),
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1003,7 +1066,8 @@ class _FeatureActionBoxDetailScreenState
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(fontSize: 11, color: Colors.grey, height: 1.3),
+                    style: const TextStyle(
+                        fontSize: 11, color: Colors.grey, height: 1.3),
                   ),
                 ],
               ),
@@ -1029,24 +1093,30 @@ class _FeatureActionBoxDetailScreenState
         children: [
           Row(
             children: [
-              const Icon(Icons.touch_app_rounded, size: 18, color: Colors.blueGrey),
+              const Icon(Icons.touch_app_rounded,
+                  size: 18, color: Colors.blueGrey),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Hướng dẫn thao tác nút vật lý ($buttonName)',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          _buildTimingRow('Giữ 3 giây', 'Nhận diện bo mạch (LED nhấp nháy 15s)'),
-          _buildTimingRow('Giữ 5 giây', 'Đặt lại mạng / Quét tuyến ESP-NOW mới (LED nháy vàng)'),
-          _buildTimingRow('Giữ 10 giây', 'Khởi động quy trình khôi phục cài đặt gốc 2 pha an toàn (LED nháy đỏ nhanh, nhả trong 3s để commit)'),
+          _buildTimingRow(
+              'Giữ 3 giây', 'Nhận diện bo mạch (LED nhấp nháy 15s)'),
+          _buildTimingRow('Giữ 5 giây',
+              'Đặt lại mạng / Quét tuyến ESP-NOW mới (LED nháy vàng)'),
+          _buildTimingRow('Giữ 10 giây',
+              'Khởi động quy trình khôi phục cài đặt gốc 2 pha an toàn (LED nháy đỏ nhanh, nhả trong 3s để commit)'),
           const SizedBox(height: 6),
           const Text(
             'Lưu ý: Nút vật lý trên bo mạch thương mại là nút CONFIG, không dùng nút BOOT bất kỳ.',
-            style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey),
+            style: TextStyle(
+                fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey),
           ),
         ],
       ),
@@ -1063,11 +1133,15 @@ class _FeatureActionBoxDetailScreenState
             width: 85,
             child: Text(
               timing,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blueGrey),
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey),
             ),
           ),
           Expanded(
-            child: Text(action, style: const TextStyle(fontSize: 12, height: 1.3)),
+            child:
+                Text(action, style: const TextStyle(fontSize: 12, height: 1.3)),
           ),
         ],
       ),
@@ -1088,9 +1162,11 @@ class _FeatureActionBoxDetailScreenState
             mainAxisSize: MainAxisSize.min,
             children: [
               if (_currentOpState == DeviceOperationState.succeeded)
-                const Icon(Icons.check_circle_rounded, color: Colors.green, size: 48)
+                const Icon(Icons.check_circle_rounded,
+                    color: Colors.green, size: 48)
               else if (_operationError != null)
-                const Icon(Icons.error_outline_rounded, color: Colors.red, size: 48)
+                const Icon(Icons.error_outline_rounded,
+                    color: Colors.red, size: 48)
               else
                 const SizedBox(
                   width: 40,
@@ -1100,7 +1176,8 @@ class _FeatureActionBoxDetailScreenState
               const SizedBox(height: 16),
               Text(
                 _operationTitle,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Text(
@@ -1117,7 +1194,8 @@ class _FeatureActionBoxDetailScreenState
                 ),
               ],
               const SizedBox(height: 20),
-              if (_currentOpState == DeviceOperationState.succeeded || _operationError != null)
+              if (_currentOpState == DeviceOperationState.succeeded ||
+                  _operationError != null)
                 FilledButton(
                   key: const Key('operation_dismiss_button'),
                   onPressed: () {
@@ -1140,86 +1218,26 @@ class _FeatureActionBoxDetailScreenState
     );
   }
 
-  void _showEditChannelDialog(BuildContext context, WidgetRef ref, ActionBox ab, ActionBoxChannel ch) {
-    final nameCtrl = TextEditingController(text: ch.name);
-    final aliasCtrl = TextEditingController(text: ch.name.toLowerCase());
-    var selectedType = ch.type;
-    var selectedRoom = ab.roomId;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Cấu hình ${ch.channelKey.toUpperCase()}',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                      IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Tên thiết bị (ví dụ: Quạt trần, Đèn chính)', border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<DeviceType>(
-                    value: selectedType,
-                    decoration: const InputDecoration(labelText: 'Loại thiết bị', border: OutlineInputBorder()),
-                    items: const [
-                      DropdownMenuItem(value: DeviceType.light, child: Text('💡 Đèn chiếu sáng')),
-                      DropdownMenuItem(value: DeviceType.fan, child: Text('💨 Quạt làm mát')),
-                      DropdownMenuItem(value: DeviceType.socket, child: Text('⚡ Ổ cắm điện')),
-                      DropdownMenuItem(value: DeviceType.airConditioner, child: Text('❄️ Điều hòa nhiệt độ')),
-                      DropdownMenuItem(value: DeviceType.custom, child: Text('🔌 Tải tùy chỉnh')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) setModalState(() => selectedType = val);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: aliasCtrl,
-                    decoration: const InputDecoration(labelText: 'Tên gọi giọng nói (cách nhau bởi dấu phẩy)', border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                      onPressed: () async {
-                        HapticFeedback.mediumImpact();
-                        final aliases = aliasCtrl.text.split(',').map((s) => s.trim().toLowerCase()).where((s) => s.isNotEmpty).toList();
-                        await ref.read(actionBoxRepositoryProvider).updateChannel(
-                              actionBoxId: ab.id,
-                              channelIndex: ch.index,
-                              name: nameCtrl.text.trim(),
-                              type: selectedType,
-                              roomId: selectedRoom,
-                              voiceAliases: aliases,
-                            );
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                      child: const Text('Lưu thay đổi & Đồng bộ'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+  void _showEditChannelDialog(
+      BuildContext context, WidgetRef ref, ActionBox ab, ActionBoxChannel ch) {
+    showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => ChannelEditorSheet(
+            channelLabel: ch.channelKey.toUpperCase(),
+            initialName: ch.name,
+            initialType: ch.type,
+            initialAliases: ch.voiceAliases,
+            onSave: (name, type, aliases) => ref
+                .read(actionBoxRepositoryProvider)
+                .updateChannel(
+                    actionBoxId: ab.id,
+                    channelIndex: ch.index,
+                    name: name,
+                    type: type,
+                    roomId: ab.roomId,
+                    voiceAliases: aliases)));
   }
 }
 
@@ -1258,7 +1276,9 @@ class _ChannelItemCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: channel.isOn && online
                   ? colors.lightWash
-                  : (isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9)),
+                  : (isDark
+                      ? const Color(0xFF1E2532)
+                      : const Color(0xFFF1F5F9)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -1310,12 +1330,13 @@ class _ChannelItemCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  channel.configured
-                      ? 'Đã gán · ${channel.isOn && online ? "Đang bật" : "Đã tắt"}'
-                      : 'Chưa cấu hình thiết bị',
+                  channel.commandPending
+                      ? (channel.isOn ? 'Đang bật…' : 'Đang tắt…')
+                      : channel.configured
+                          ? 'Đã gán · ${channel.isOn && online ? "Đang bật" : "Đã tắt"}'
+                          : 'Chưa cấu hình thiết bị',
                   style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant),
+                      fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
@@ -1323,8 +1344,7 @@ class _ChannelItemCard extends StatelessWidget {
           OutlinedButton(
             onPressed: onEdit,
             style: OutlinedButton.styleFrom(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
             ),
@@ -1336,4 +1356,3 @@ class _ChannelItemCard extends StatelessWidget {
     );
   }
 }
-

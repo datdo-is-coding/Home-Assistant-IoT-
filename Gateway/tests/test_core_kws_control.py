@@ -82,6 +82,7 @@ class CoreKwsTest(unittest.TestCase):
             'device_id':'AB001122334402','room':'Phòng ngủ','ch1_name':'Đèn bàn','ch1_type':'light',
             'ch2_name':'Quạt','ch2_type':'fan','ch3_name':'Đèn phụ','ch3_type':'light'})
         with self.assertRaises(CoreError):cloud.request('account','POST','/api/device/update',{'device_id':'AB001122334402','room':'Bếp'})
+        self.fx.report(seq=2)
         command=cloud.request('account','POST','/api/v1/channels/command',{
             'node_id':self.action,'channel':3,'on':True,'idempotency_key':'manual-3'})
         self.assertEqual(command['status'],'ACCEPTED')

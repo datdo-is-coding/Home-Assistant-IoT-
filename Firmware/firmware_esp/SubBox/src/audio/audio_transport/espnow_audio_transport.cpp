@@ -1,5 +1,6 @@
 #include "espnow_audio_transport.h"
 #include "hc_runtime.h"
+#include "config/subbox_config.h"
 #include "esp_log.h"
 #include "system/subbox_led.h"
 #include "esp_wifi.h"
@@ -62,7 +63,7 @@ void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, co
     bool is_for_us = (memcmp(recv_info->des_addr, s_instance->m_local_mac, 6) == 0);
     if (!is_broadcast && !is_for_us) return;
 
-    bool is_kws_or_audio = (data[0] >= 0x20 && data[0] <= 0x22) || (data[0] == 0x25);
+    bool is_kws_or_audio = (data[0] >= 0x20 && data[0] <= 0x22) || data[0] == 0x24 || data[0] == 0x25;
     if (hc_runtime_enabled() && (is_broadcast || !hc_runtime_trusted_peer(recv_info->src_addr) || !is_kws_or_audio)) return;
 
     bool trusted = hc_runtime_enabled();
@@ -87,7 +88,8 @@ void EspNowAudioTransport::onEspNowRecv(const esp_now_recv_info_t *recv_info, co
         memcpy(item.mac, recv_info->src_addr, 6);
         item.len = len;
         memcpy(item.data, data, len);
-        xQueueSend(s_instance->m_rx_queue, &item, 0);
+        if (xQueueSend(s_instance->m_rx_queue, &item, 0) != pdTRUE)
+            s_instance->m_rx_drops.fetch_add(1);
     }
 }
 
@@ -95,8 +97,11 @@ void EspNowAudioTransport::receiveTask(void* arg) {
     auto* self = static_cast<EspNowAudioTransport*>(arg);
     RxItem item;
     while (true) {
-        if (xQueueReceive(self->m_rx_queue, &item, portMAX_DELAY) == pdTRUE)
+        if (xQueueReceive(self->m_rx_queue, &item, portMAX_DELAY) == pdTRUE) {
+            const auto dropped = self->m_rx_drops.exchange(0);
+            if (dropped) ESP_LOGW(TAG, "Audio receive queue dropped %u frame(s)", (unsigned)dropped);
             self->handleReceivedPacket(item.mac, item.data, item.len);
+        }
     }
 }
 
@@ -115,19 +120,37 @@ void EspNowAudioTransport::handleReceivedPacket(const uint8_t* mac, const uint8_
         return;
     }
     uint8_t msg_type = data[0];
-    bool is_known_type = (msg_type >= 0x20 && msg_type <= 0x22) || (msg_type == '{');
+    const bool is_audio = (msg_type >= 0x20 && msg_type <= 0x22) || msg_type == 0x24;
+    bool is_known_type = is_audio || (msg_type == '{');
     if (!is_known_type) return;
 
     std::string source;
-    if (msg_type >= 0x20 && msg_type <= 0x22 && hc_runtime_enabled()) {
+    if (is_audio && hc_runtime_enabled()) {
         const uint32_t source_id = hc_runtime_peer_node_id(mac);
         if (!source_id || !hc_runtime_registered()) return;
         source = std::to_string(source_id);
-    } else if (msg_type >= 0x20 && msg_type <= 0x22) {
+    } else if (is_audio) {
         std::lock_guard<std::mutex> lock(m_macs_mutex);
-        for (const auto& entry : m_node_macs)
+        for (const auto& entry : m_node_macs) {
             if (entry.second.size() == 6 && memcmp(entry.second.data(), mac, 6) == 0) source = entry.first;
-        if (source.empty()) return;
+        }
+        if (source.empty()) {
+            char fallback_node[32];
+            snprintf(fallback_node, sizeof(fallback_node), "actionbox_%02X%02X%02X", mac[3], mac[4], mac[5]);
+            source = fallback_node;
+        }
+    }
+
+    if (msg_type == 0x24) {
+        if (len != 6 || data[1] > 1) return;
+        AudioPacket pkt = {};
+        pkt.version = AUDIO_PROTOCOL_VERSION;
+        pkt.msg_type = AUDIO_MSG_TYPE_WAKE;
+        snprintf(pkt.source_node_id, sizeof(pkt.source_node_id), "%s", source.c_str());
+        memcpy(&pkt.timestamp_ms, data + 2, sizeof(pkt.timestamp_ms));
+        std::lock_guard<std::mutex> lock(m_callback_mutex);
+        if (m_rx_callback) m_rx_callback(pkt);
+        return;
     }
 
     if (msg_type == 0x20) {
@@ -301,7 +324,7 @@ bool EspNowAudioTransport::init() {
     if (m_running) return true;
     m_rx_queue = xQueueCreate(32, sizeof(RxItem));
     if (!m_rx_queue) return false;
-    if (xTaskCreate(receiveTask, "espnow_rx", 6144, this, 5, &m_rx_task) != pdPASS) {
+    if (xTaskCreate(receiveTask, "espnow_rx", TASK_STACK_AUDIO_RX, this, TASK_PRIO_AUDIO_RX, &m_rx_task) != pdPASS) {
         vQueueDelete(m_rx_queue);
         m_rx_queue = nullptr;
         return false;

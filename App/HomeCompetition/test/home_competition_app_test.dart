@@ -11,6 +11,10 @@ import 'package:home_competition/app/home_competition_app.dart';
 import 'package:home_competition/app/app_router.dart';
 import 'package:home_competition/providers/smart_home_providers.dart';
 import 'package:home_competition/repositories/smart_home_repository.dart';
+import 'package:home_competition/widgets/device_card.dart';
+import 'package:home_competition/widgets/quick_control_sheet.dart';
+import 'package:home_competition/widgets/smart_home_scaffold.dart';
+import 'package:home_competition/features/devices/device_detail_screen.dart';
 
 class _FirebaseUiClient extends GatewayClient {
   _FirebaseUiClient({required super.client}) : super(persistSession: false);
@@ -52,6 +56,108 @@ void main() {
         }));
     await client.loginWithKey(url: 'http://gateway:8000', key: 'test-session');
   });
+
+  testWidgets(
+      'scrolling home does not rebuild an unchanged visible device card',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repo = InMemorySmartHomeRepository();
+    addTearDown(repo.dispose);
+    addTearDown(client.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      gatewayClientProvider.overrideWith((ref) => client),
+      smartHomeRepositoryProvider.overrideWithValue(repo),
+    ], child: const MaterialApp(home: FeatureHomeScreen())));
+    await tester.pumpAndSettle();
+    final tracked =
+        tester.widget<DeviceCard>(find.byType(DeviceCard).first).device.id;
+    var cardBuilds = 0;
+    final previous = debugOnRebuildDirtyWidget;
+    debugOnRebuildDirtyWidget = (element, builtOnce) {
+      if (element.widget case DeviceCard(device: final device)
+          when device.id == tracked) cardBuilds++;
+      previous?.call(element, builtOnce);
+    };
+    try {
+      await tester.timedDrag(find.byKey(const PageStorageKey('home-scroll')),
+          const Offset(0, -60), const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(cardBuilds, 0);
+      expect(
+          (tester.widget<SliverGrid>(find.byType(SliverGrid).first).gridDelegate
+                  as SliverGridDelegateWithFixedCrossAxisCount)
+              .crossAxisCount,
+          2);
+      tester.view.physicalSize = const Size(800, 1000);
+      await tester.pumpAndSettle();
+      expect(
+          (tester.widget<SliverGrid>(find.byType(SliverGrid).first).gridDelegate
+                  as SliverGridDelegateWithFixedCrossAxisCount)
+              .crossAxisCount,
+          3);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugOnRebuildDirtyWidget = previous;
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+  testWidgets('quick controls cover the dock and open settings after closing',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repo = InMemorySmartHomeRepository();
+    addTearDown(repo.dispose);
+    addTearDown(client.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      gatewayClientProvider.overrideWith((ref) => client),
+      smartHomeRepositoryProvider.overrideWithValue(repo),
+    ], child: const HomeCompetitionApp()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DeviceCard).first);
+    await tester.pumpAndSettle();
+    final sheet = find.byType(QuickControlSheet);
+    expect(sheet, findsOneWidget);
+    expect(
+        Navigator.of(tester.element(sheet)),
+        Navigator.of(tester.element(find.byType(SmartHomeScaffold)),
+            rootNavigator: true));
+    await tester
+        .tap(find.descendant(of: sheet, matching: find.text('Cài đặt')));
+    await tester.pumpAndSettle();
+    expect(sheet, findsNothing);
+    expect(find.byType(FeatureDeviceDetailScreen), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('floating dock does not duplicate the phone status-bar inset',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 44, bottom: 24);
+    tester.view.viewPadding = const FakeViewPadding(top: 44, bottom: 24);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
+    final repo = InMemorySmartHomeRepository();
+    addTearDown(repo.dispose);
+    addTearDown(client.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      gatewayClientProvider.overrideWith((ref) => client),
+      smartHomeRepositoryProvider.overrideWithValue(repo),
+    ], child: const HomeCompetitionApp()));
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byType(NavigationBar)).height, 72);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
       'SmartHomeApp launches with calm Apple Home-inspired tabs and responds to interactions',
       (tester) async {
@@ -76,7 +182,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('My Home'), findsOneWidget);
-    expect(find.textContaining('thiết bị'), findsWidgets);
+    expect(find.byType(DeviceCard), findsWidgets);
 
     expect(find.text('Nhà'), findsOneWidget);
     expect(find.text('Thiết bị'), findsOneWidget);
@@ -88,19 +194,18 @@ void main() {
 
     await tester.tap(find.text('Thiết bị'));
     await tester.pumpAndSettle();
-    expect(find.text('Thiết bị trong nhà'), findsOneWidget);
-    expect(find.text('Tìm thiết bị, phòng...'), findsOneWidget);
+    expect(find.text('Thiết bị'), findsNWidgets(2));
+    expect(find.text('Tìm thiết bị'), findsOneWidget);
 
     await tester.tap(find.text('Kịch bản'));
     await tester.pumpAndSettle();
     expect(find.text('Tự động hóa'), findsOneWidget);
-    expect(find.text('Ngữ cảnh một chạm'), findsOneWidget);
+    expect(find.text('Ngữ cảnh'), findsOneWidget);
     expect(find.text('Chào buổi sáng'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.settings_outlined));
     await tester.pumpAndSettle();
-    expect(find.text('Giao diện & Hiển thị'), findsOneWidget);
-    expect(find.text('Chế độ màu (Theme)'), findsOneWidget);
+    expect(find.text('Giao diện'), findsOneWidget);
     expect(find.text('Sáng'), findsOneWidget);
     expect(find.text('Tối'), findsOneWidget);
 
@@ -155,13 +260,21 @@ void main() {
     ], child: const HomeCompetitionApp()));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    expect(find.textContaining('Firebase ·'), findsOneWidget);
-    await tester.longPress(find.byTooltip('Điện năng & Cảnh báo'));
+    expect(find.textContaining('Hệ thống trực tuyến'), findsNothing);
+    final name = find.byKey(const ValueKey('home-connection-name'));
+    expect(name, findsOneWidget);
+    await tester.longPress(name);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    await tester.tap(find.byTooltip('Điện năng & Cảnh báo'));
+    await tester.tap(name);
     await tester.pumpAndSettle();
-    expect(find.text('Điện năng & Cảnh báo'), findsWidgets);
+    expect(find.text('Kết nối'), findsOneWidget);
+    expect(find.text('Đã kết nối Firebase'), findsWidgets);
+    await tester.tap(find.text('Đóng'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Điện năng'));
+    await tester.pumpAndSettle();
+    expect(find.text('Theo thiết bị'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -188,13 +301,13 @@ void main() {
                 matching: find.byType(Scrollable))
             .first)
         .position;
-    homePosition.jumpTo(120);
+    homePosition.jumpTo(homePosition.maxScrollExtent.clamp(0, 120));
     await tester.pump();
     final offset = homePosition.pixels;
     await tester.tap(find.widgetWithText(NavigationDestination, 'Điện năng'));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationDestination), findsNWidgets(5));
-    expect(find.text('Công suất theo thiết bị'), findsOneWidget);
+    expect(find.text('Theo thiết bị'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsWidgets);
     await tester.tap(find.widgetWithText(NavigationDestination, 'Nhà'));
     await tester.pumpAndSettle();

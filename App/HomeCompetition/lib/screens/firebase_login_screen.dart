@@ -1,3 +1,4 @@
+import '../widgets/flagship_backdrop.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -41,7 +42,8 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
             .login(url: '', username: _email.text, password: _password.text);
       }
     } on FirebaseAuthException catch (e) {
-      debugPrint('[AUTH] provider=${google ? "google" : "password"} code=${e.code}');
+      debugPrint(
+          '[AUTH] provider=${google ? "google" : "password"} code=${e.code}');
       if (mounted)
         setState(() => _message = switch (e.code) {
               'invalid-credential' ||
@@ -57,11 +59,15 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
               _ => 'Không đăng nhập được. Kiểm tra kết nối và thử lại.',
             });
     } on PlatformException catch (e) {
-      final apiCode = RegExp(r'ApiException:\s*(\d+)').firstMatch(e.message ?? '')?.group(1);
-      debugPrint('[AUTH] provider=${google ? "google" : "password"} platform=${e.code} api=${apiCode ?? "unknown"}');
-      if (mounted) setState(() => _message = apiCode == '10'
-          ? 'Google từ chối cấu hình ứng dụng (mã 10). Cần kiểm tra SHA-1 của bản cài trong Firebase.'
-          : 'Đăng nhập thất bại (${e.code}${apiCode == null ? "" : "/$apiCode"}).');
+      final apiCode = RegExp(r'ApiException:\s*(\d+)')
+          .firstMatch(e.message ?? '')
+          ?.group(1);
+      debugPrint(
+          '[AUTH] provider=${google ? "google" : "password"} platform=${e.code} api=${apiCode ?? "unknown"}');
+      if (mounted)
+        setState(() => _message = apiCode == '10'
+            ? 'Google từ chối cấu hình ứng dụng (mã 10). Cần kiểm tra SHA-1 của bản cài trong Firebase.'
+            : 'Đăng nhập thất bại (${e.code}${apiCode == null ? "" : "/$apiCode"}).');
     } catch (e) {
       debugPrint('[AUTH] unexpected=${e.runtimeType}');
       if (mounted)
@@ -80,94 +86,101 @@ class _FirebaseLoginScreenState extends State<FirebaseLoginScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(
-            child: Center(
-                child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Form(
-                key: _form,
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Icon(Icons.home_rounded, size: 64),
-                      const SizedBox(height: 16),
-                      Text('HomeCompetition',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineMedium),
-                      const SizedBox(height: 8),
-                      Text(
-                          _register
-                              ? 'Tạo tài khoản Firebase'
-                              : 'Đăng nhập để xem ngôi nhà của bạn',
-                          textAlign: TextAlign.center),
-                      const SizedBox(height: 24),
-                      TextFormField(
-                          controller: _email,
-                          enabled: !_busy,
-                          keyboardType: TextInputType.emailAddress,
-                          autofillHints: const [AutofillHints.email],
-                          decoration: const InputDecoration(labelText: 'Email'),
-                          validator: (v) => v != null && v.trim().contains('@')
-                              ? null
-                              : 'Nhập email hợp lệ'),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                          controller: _password,
-                          enabled: !_busy,
-                          obscureText: _obscure,
-                          autofillHints: [
+  Widget build(BuildContext context) => FlagshipBackdrop(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: SafeArea(
+              child: Center(
+                  child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
+                child: Form(
+                  key: _form,
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Icon(Icons.home_rounded, size: 64),
+                        const SizedBox(height: 16),
+                        Text('HomeCompetition',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineMedium),
+                        const SizedBox(height: 8),
+                        Text(
                             _register
-                                ? AutofillHints.newPassword
-                                : AutofillHints.password
-                          ],
-                          decoration: InputDecoration(
-                              labelText: 'Mật khẩu',
-                              suffixIcon: IconButton(
-                                  tooltip: _obscure
-                                      ? 'Hiện mật khẩu'
-                                      : 'Ẩn mật khẩu',
-                                  onPressed: () =>
-                                      setState(() => _obscure = !_obscure),
-                                  icon: Icon(_obscure
-                                      ? Icons.visibility
-                                      : Icons.visibility_off))),
-                          validator: (v) => v != null && v.length >= 6
-                              ? null
-                              : 'Nhập mật khẩu ít nhất 6 ký tự'),
-                      const SizedBox(height: 16),
-                      if (_message != null)
-                        Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Text(_message!, semanticsLabel: _message)),
-                      FilledButton(
-                          onPressed: _busy ? null : () => _submit(),
-                          child: Text(_busy
-                              ? 'Đang xử lý…'
-                              : _register
-                                  ? 'Đăng ký'
-                                  : 'Đăng nhập')),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                          onPressed: _busy ? null : () => _submit(google: true),
-                          child: const Text('Tiếp tục với Google')),
-                      TextButton(
-                          onPressed: _busy ? null : () => _submit(reset: true),
-                          child: const Text('Quên mật khẩu')),
-                      TextButton(
-                          onPressed: _busy
-                              ? null
-                              : () => setState(() {
-                                    _register = !_register;
-                                    _message = null;
-                                  }),
-                          child: Text(_register
-                              ? 'Đã có tài khoản? Đăng nhập'
-                              : 'Chưa có tài khoản? Đăng ký')),
-                    ]),
-              )),
-        ))),
+                                ? 'Tạo tài khoản mới'
+                                : 'Đăng nhập để xem ngôi nhà của bạn',
+                            textAlign: TextAlign.center),
+                        const SizedBox(height: 24),
+                        TextFormField(
+                            controller: _email,
+                            enabled: !_busy,
+                            keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.email],
+                            decoration:
+                                const InputDecoration(labelText: 'Email'),
+                            validator: (v) =>
+                                v != null && v.trim().contains('@')
+                                    ? null
+                                    : 'Nhập email hợp lệ'),
+                        const SizedBox(height: 16),
+                        TextFormField(
+                            controller: _password,
+                            enabled: !_busy,
+                            obscureText: _obscure,
+                            autofillHints: [
+                              _register
+                                  ? AutofillHints.newPassword
+                                  : AutofillHints.password
+                            ],
+                            decoration: InputDecoration(
+                                labelText: 'Mật khẩu',
+                                suffixIcon: IconButton(
+                                    tooltip: _obscure
+                                        ? 'Hiện mật khẩu'
+                                        : 'Ẩn mật khẩu',
+                                    onPressed: () =>
+                                        setState(() => _obscure = !_obscure),
+                                    icon: Icon(_obscure
+                                        ? Icons.visibility
+                                        : Icons.visibility_off))),
+                            validator: (v) => v != null && v.length >= 6
+                                ? null
+                                : 'Nhập mật khẩu ít nhất 6 ký tự'),
+                        const SizedBox(height: 16),
+                        if (_message != null)
+                          Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Text(_message!, semanticsLabel: _message)),
+                        FilledButton(
+                            onPressed: _busy ? null : () => _submit(),
+                            child: Text(_busy
+                                ? 'Đang xử lý…'
+                                : _register
+                                    ? 'Đăng ký'
+                                    : 'Đăng nhập')),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                            onPressed:
+                                _busy ? null : () => _submit(google: true),
+                            child: const Text('Tiếp tục với Google')),
+                        TextButton(
+                            onPressed:
+                                _busy ? null : () => _submit(reset: true),
+                            child: const Text('Quên mật khẩu')),
+                        TextButton(
+                            onPressed: _busy
+                                ? null
+                                : () => setState(() {
+                                      _register = !_register;
+                                      _message = null;
+                                    }),
+                            child: Text(_register
+                                ? 'Đã có tài khoản? Đăng nhập'
+                                : 'Chưa có tài khoản? Đăng ký')),
+                      ]),
+                )),
+          ))),
+        ),
       );
 }

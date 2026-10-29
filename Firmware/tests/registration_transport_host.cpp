@@ -67,4 +67,33 @@ int main() {
         assert(!rebooted.claimDevice(different,result));
     }
     assert(sends>=6);
+    {
+        EspNowAudioTransport transport;assert(transport.init());
+        core_enabled=true;
+        uint8_t wake[]={0x24,0,0x78,0x56,0x34,0x12};
+        esp_now_recv_info_t info{mac,transport.m_local_mac};
+        const int before=rx_enqueued;
+        transport.onEspNowRecv(&info,wake,sizeof(wake));assert(rx_enqueued==before+1);
+        core_trusted=false;
+        transport.onEspNowRecv(&info,wake,sizeof(wake));assert(rx_enqueued==before+1);
+        core_trusted=true;
+        const uint8_t broadcast[]={255,255,255,255,255,255};info.des_addr=broadcast;
+        transport.onEspNowRecv(&info,wake,sizeof(wake));assert(rx_enqueued==before+1);
+        info.des_addr=transport.m_local_mac;wake[0]=0x23;
+        transport.onEspNowRecv(&info,wake,sizeof(wake));assert(rx_enqueued==before+1);
+        wake[0]=0x24;
+        int received=0;
+        transport.registerRxCallback([&](const AudioPacket& p){
+            ++received;assert(p.msg_type==AUDIO_MSG_TYPE_WAKE && p.payload_len==0);
+            assert(std::string(p.source_node_id)=="3476310" && p.timestamp_ms==0x12345678);
+        });
+        transport.handleReceivedPacket(mac,wake,sizeof(wake));assert(received==1);
+        transport.handleReceivedPacket(mac,wake,5);assert(received==1);
+        wake[1]=2;transport.handleReceivedPacket(mac,wake,sizeof(wake));assert(received==1);
+        wake[1]=0;core_registered=false;
+        transport.handleReceivedPacket(mac,wake,sizeof(wake));assert(received==1);
+        core_registered=true;core_peer_id=0;
+        transport.handleReceivedPacket(mac,wake,sizeof(wake));assert(received==1);
+        core_enabled=false;
+    }
 }

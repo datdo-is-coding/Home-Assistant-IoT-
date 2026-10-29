@@ -374,6 +374,16 @@ void test_power_cut_resume() {
     printf("[TEST 3] PASS: Power-cut resumption recovered all states cleanly.\n");
 }
 
+void test_core_reset_keeps_receipt_transport() {
+    s_mock_espnow_peers=1;
+    const int restarts=s_mock_restart_count;
+    assert(prepare_reset(ResetKind::FACTORY_RESET,"core_receipt",nvs_storage_get_owner_epoch())==ESP_OK);
+    assert(complete_confirmed_reset_core(ResetKind::FACTORY_RESET,"core_receipt")==ESP_OK);
+    assert(s_mock_espnow_peers==1 && "Core reset must retain its encrypted peer until the receipt is sent");
+    assert(s_mock_restart_count==restarts);
+    for(uint8_t ch=1;ch<=3;++ch)assert(relay_get_state(ch)==RELAY_STATE_OFF);
+}
+
 // ============================================================================
 // Test 4: Peer runtime cleared (ActionBox + SubBox)
 // ============================================================================
@@ -636,6 +646,7 @@ int main() {
     test_calibration_survives_factory_reset();
     test_channel3_off_before_reset();
     test_power_cut_resume();
+    test_core_reset_keeps_receipt_transport();
     test_peer_runtime_cleared();
     test_owner_epoch_monotonicity_across_factory_reset();
     test_nvs_migration_legacy_blob();

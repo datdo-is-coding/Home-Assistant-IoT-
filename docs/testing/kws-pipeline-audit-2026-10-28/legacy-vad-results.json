@@ -1,0 +1,26 @@
+[
+  {
+    "actual_speech_ms": 50.0,
+    "recorded_ms": 250.0,
+    "inferences": 1.0,
+    "first_slice_count": 1600.0,
+    "nonzero_start_ms": 425.0,
+    "nonzero_end_ms": 525.0
+  },
+  {
+    "actual_speech_ms": 100.0,
+    "recorded_ms": 300.0,
+    "inferences": 1.0,
+    "first_slice_count": 1600.0,
+    "nonzero_start_ms": 400.0,
+    "nonzero_end_ms": 550.0
+  },
+  {
+    "actual_speech_ms": 200.0,
+    "recorded_ms": 400.0,
+    "inferences": 1.0,
+    "first_slice_count": 1600.0,
+    "nonzero_start_ms": 350.0,
+    "nonzero_end_ms": 600.0
+  }
+]

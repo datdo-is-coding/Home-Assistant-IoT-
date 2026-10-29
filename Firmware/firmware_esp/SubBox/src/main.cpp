@@ -283,15 +283,10 @@ extern "C" void app_main(void) {
         SUBBOX_VAD_MAX_SPEECH_DURATION_MS
     );
 
-    auto local_kws = std::make_shared<LocalKws>();
-    if (!local_kws->init()) subbox_led_set_error(true);
+    auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id, true);
+    if (!asr->init()) subbox_led_set_error(true);
 
-    // The WebSocket client is kept only for downstream TTS playback. Microphone
-    // PCM never reaches it; recognition runs on local_kws above.
-    auto asr = std::make_shared<WsASR>(cfg.ws_gateway_uri, cfg.subbox_id);
-    if (!asr->init()) ESP_LOGE(TAG, "Pi4 playback unavailable; local KWS control continues without spoken replies");
-
-    auto audio_mgr = std::make_shared<AudioManager>(vad, local_kws);
+    auto audio_mgr = std::make_shared<AudioManager>(vad, asr, true);
     audio_mgr->init();
 
     auto transport = std::make_shared<EspNowAudioTransport>();
@@ -394,26 +389,24 @@ extern "C" void app_main(void) {
     auto task_mgr = std::make_shared<TaskManager>(
         audio_mgr, transport, audio_router, tts_mgr,
         context_mgr, registry, command_router, rule_engine,
-        room_mgr, mqtt, kws
+        room_mgr, mqtt, nullptr
     );
     task_mgr->setCoreKws(core_kws);
     if (!task_mgr->init()) subbox_led_set_error(true);
-    asr->registerPlaybackDoneCallback([task_mgr](const std::string& payload) {
-        if (!task_mgr->queueKwsPlaybackDone(payload)) ESP_LOGW(TAG, "KWS playback-done queue full");
-    });
 
     hc_mqtt=mqtt.get();
     hc_runtime_set_application_handler(hc_application);
+    hc_runtime_set_reset_handler([](uint8_t kind){return kind==1 || NVSManager::factoryReset()==ESP_OK;});
     ESP_ERROR_CHECK(hc_runtime_init(true,hc_uplink,nullptr,nullptr));
     mqtt->init();
     hc_ota_health_ready();
 
     auto console = std::make_shared<DevConsole>(
-        local_kws, audio_mgr, context_mgr, registry, command_router, room_mgr
+        asr, audio_mgr, context_mgr, registry, command_router, room_mgr
     );
     console->init();
 
-    ESP_LOGI(TAG, "SubBox fully operational. Local KWS controls ActionBox; Pi4 provides structured replies.");
+    ESP_LOGI(TAG, "SubBox PCM relay operational. Pi4 owns ASR, intent and authenticated command processing.");
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10000));

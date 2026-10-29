@@ -1,7 +1,9 @@
 #include "hc_runtime.h"
 #include "hc_ota.h"
 #include "hc_provisioning.h"
+#include "hc_maintenance.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 #include "nvs.h"
 #include "esp_mac.h"
 #include "esp_random.h"
@@ -42,6 +44,10 @@ static uint64_t channel_generation[3];
 static atomic_int_fast64_t last_gateway;
 static bool handshake_pending=true;
 static hc_application_fn application_handler;
+static _Atomic(hc_reset_fn) reset_handler;
+static uint64_t maintenance_id;
+static uint8_t maintenance_kind,maintenance_state,maintenance_error;
+static int64_t maintenance_restart;
 
 static uint32_t u32(const uint8_t *p) { return (uint32_t)p[0]|((uint32_t)p[1]<<8)|((uint32_t)p[2]<<16)|((uint32_t)p[3]<<24); }
 static void p32(uint8_t *p,uint32_t v) { for(unsigned i=0;i<4;++i) p[i]=(uint8_t)(v>>(8*i)); }
@@ -81,7 +87,15 @@ static void send_ack(const ack_entry *entry) {
     uint8_t payload[10]; p64(payload,entry->id); payload[8]=entry->status; payload[9]=entry->state;
     send_frame(HC_COMMAND_ACK,payload,sizeof(payload),0);
 }
+static void maintenance_ack(uint64_t id,uint8_t state,uint8_t error) {
+    uint8_t payload[10];p64(payload,id);payload[8]=state;payload[9]=error;
+    send_frame(HC_MAINTENANCE_ACK,payload,sizeof(payload),0);
+}
 static void report(void) {
+    if(atomic_load(&reset_handler)) {
+        uint8_t caps[18]={'M',1};strncpy((char *)caps+2,esp_app_get_description()->version,15);
+        send_frame(HC_CAPABILITY_REPORT,caps,sizeof(caps),0);
+    }
     uint8_t payload[32]={0};
     p64(payload,(uint64_t)(esp_timer_get_time()/1000));
     if(is_subbox) { send_frame(HC_HEARTBEAT,payload,8,0); return; }
@@ -171,12 +185,21 @@ static void process(rx_item *item) {
         return;
     }
     if(!registered)return;
-    if((f.type==HC_UNPAIR || f.type==HC_FACTORY_RESET_REQUEST) && replay==HC_NEW){
-        if(!is_subbox && apply_relay)for(uint8_t ch=1;ch<=3;++ch)apply_relay(ch,false);
-        registered=false;
-        if(hc_provisioning_reset()==ESP_OK)esp_restart();
+    if(f.type==HC_MAINTENANCE){
+        if(f.payload_len==9 && f.message_id==maintenance_id && f.payload[0]==maintenance_kind){maintenance_ack(f.message_id,maintenance_state,maintenance_error);return;}
+        if(replay!=HC_NEW || maintenance_restart || !hc_maintenance_valid(&f,revision,(uint64_t)(esp_timer_get_time()/1000))){maintenance_ack(f.message_id,3,1);return;}
+        maintenance_id=f.message_id;maintenance_kind=f.payload[0];maintenance_state=1;maintenance_error=0;
+        maintenance_ack(maintenance_id,1,0);
+        hc_reset_fn reset=atomic_load(&reset_handler);
+        bool safe=reset && reset(maintenance_kind);
+        if(!safe || (maintenance_kind!=1 && hc_provisioning_reset()!=ESP_OK)){
+            maintenance_state=3;maintenance_error=2;maintenance_ack(maintenance_id,3,2);return;
+        }
+        maintenance_state=2;maintenance_ack(maintenance_id,2,0);
+        maintenance_restart=esp_timer_get_time()+300000;
         return;
     }
+    if(maintenance_restart || f.type==HC_UNPAIR || f.type==HC_FACTORY_RESET_REQUEST)return;
     if(f.type==HC_COMMAND && f.payload_len==18 && !is_subbox) {
         for(unsigned i=0;i<32;++i) if(acks[i].id==f.message_id) {
             if(acks[i].channel==f.payload[0] && acks[i].state==f.payload[1] && acks[i].revision==f.config_rev) send_ack(&acks[i]);
@@ -216,6 +239,7 @@ static bool ota_emit(uint8_t type,const uint8_t *data,size_t len) {
     return xQueueSend(tx_queue,&item,0)==pdTRUE;
 }
 void hc_runtime_set_application_handler(hc_application_fn handler) { application_handler=handler; }
+void hc_runtime_set_reset_handler(hc_reset_fn handler) { atomic_store(&reset_handler,handler); }
 bool hc_runtime_emit(uint8_t type,const uint8_t *data,size_t size) {
     return enabled && registered && is_subbox && hc_runtime_online() && type==HC_EVENT_REPORT && ota_emit(type,data,size);
 }
@@ -228,6 +252,7 @@ static void worker(void *arg) {
         if(xQueueReceive(queue,&item,pdMS_TO_TICKS(20))==pdTRUE) process(&item);
         tx_item tx;if(xQueueReceive(tx_queue,&tx,0)==pdTRUE)send_frame(tx.type,tx.data,tx.len,0);
         int64_t now=esp_timer_get_time();
+        if(maintenance_restart && now>=maintenance_restart){maintenance_restart=0;esp_restart();}
         if((!gateway_window.boot || now-last_gateway>15000000) && now-last_hello>1000000) {
             if(!handshake_pending) { esp_fill_random(nonce,sizeof(nonce)); handshake_pending=true; }
             send_frame(HC_HELLO,nonce,sizeof(nonce),0); last_hello=now;

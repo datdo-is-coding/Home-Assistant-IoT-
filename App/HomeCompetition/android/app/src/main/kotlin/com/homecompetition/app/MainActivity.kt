@@ -2,10 +2,14 @@ package com.homecompetition.app
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.android.FlutterSurfaceView
+import android.view.Surface
+import android.view.SurfaceHolder
 import io.flutter.plugin.common.MethodChannel
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.os.Build
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -14,6 +18,52 @@ import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : FlutterActivity() {
     private val alias = "sic-home-session"
+    private var renderSurface: Surface? = null
+
+    override fun onResume() {
+        super.onResume()
+        requestHighRefreshRate()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) requestHighRefreshRate()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requestHighRefreshRate() {
+        val screen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else windowManager.defaultDisplay
+        val current = screen?.mode ?: return
+        val preferred = screen.supportedModes
+            .filter { it.physicalWidth == current.physicalWidth &&
+                it.physicalHeight == current.physicalHeight && it.refreshRate <= 120.5f }
+            .maxByOrNull { it.refreshRate } ?: return
+        val params = window.attributes
+        if (params.preferredDisplayModeId != preferred.modeId || params.preferredRefreshRate != preferred.refreshRate) {
+            params.preferredDisplayModeId = preferred.modeId
+            params.preferredRefreshRate = preferred.refreshRate
+            window.attributes = params
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            renderSurface?.takeIf { it.isValid }?.setFrameRate(
+                preferred.refreshRate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+        }
+    }
+
+    override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
+        super.onFlutterSurfaceViewCreated(flutterSurfaceView)
+        flutterSurfaceView.holder.addCallback(object : SurfaceHolder.Callback {
+            override fun surfaceCreated(holder: SurfaceHolder) {
+                renderSurface = holder.surface
+                requestHighRefreshRate()
+            }
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                renderSurface = holder.surface
+                requestHighRefreshRate()
+            }
+            override fun surfaceDestroyed(holder: SurfaceHolder) { renderSurface = null }
+        })
+    }
 
     private fun sessionKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

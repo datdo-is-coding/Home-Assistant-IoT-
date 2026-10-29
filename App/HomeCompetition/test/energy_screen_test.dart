@@ -47,7 +47,10 @@ void main() {
     ]);
     expect(find.text('150.0 W'), findsOneWidget);
     expect(find.text('2/3 kênh có số đo mới'), findsOneWidget);
-    expect(find.text('Điện năng tích lũy: 6.000 kWh'), findsOneWidget);
+    expect(find.text('6.000 kWh'), findsOneWidget);
+    expect(find.text('1.000 kWh'), findsOneWidget);
+    expect(find.text('3.000 kWh'), findsOneWidget);
+    expect(find.text('0.250 A'), findsNWidgets(2));
     final bars = tester
         .widgetList<LinearProgressIndicator>(
             find.byType(LinearProgressIndicator))
@@ -62,8 +65,8 @@ void main() {
       'empty and unknown measurements stay explicit without invented zero readings',
       (tester) async {
     await show(tester, []);
-    expect(find.text('Chưa có mẫu mới'), findsOneWidget);
-    expect(find.text('Điện năng tích lũy: chưa có mẫu'), findsOneWidget);
+    expect(find.text('— W'), findsOneWidget);
+    expect(find.text('— kWh'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await show(tester, [reading('A')]);

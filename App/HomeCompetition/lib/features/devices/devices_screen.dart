@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../models/room.dart';
@@ -7,6 +6,8 @@ import '../../providers/smart_home_providers.dart';
 import '../../widgets/device_card.dart';
 import '../../widgets/action_box_card.dart';
 import '../../widgets/quick_control_sheet.dart';
+import '../../widgets/soft_3d_decorations.dart';
+import '../../widgets/home_connection_name.dart';
 
 class FeatureDevicesScreen extends ConsumerWidget {
   const FeatureDevicesScreen({super.key});
@@ -14,83 +15,78 @@ class FeatureDevicesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     final roomsAsync = ref.watch(roomsStreamProvider);
     final selectedCategory = ref.watch(deviceFilterCategoryProvider);
     final grouped = ref.watch(groupedFilteredDevicesProvider);
 
     return Scaffold(
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
-            SliverToBoxAdapter(
-              child: ref.watch(actionBoxesStreamProvider).when(
-                data: (boxes) => Column(children: boxes.where((box) => box.isSubBox).map((box) => Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-                  child: ActionBoxCard(actionBox: box, onTap: () => context.push('/actionbox/${box.id}')),
-                )).toList()),
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-            ),
-
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Thiết bị trong nhà',
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Quản lý tất cả thiết bị và cảm biến',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
+                    Row(children: [
+                      const Expanded(
+                          child: Text('Thiết bị',
+                              style: TextStyle(
+                                  fontSize: 30,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.9))),
+                      IconButton(
+                          tooltip: 'Remote hồng ngoại',
+                          onPressed: () => context.push('/infrared'),
+                          icon: const Icon(Icons.settings_remote_rounded)),
+                    ]),
+                    const HomeConnectionName(),
                   ],
                 ),
               ),
             ),
-
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               sliver: SliverToBoxAdapter(
-                child: TextField(
-                  onChanged: (val) => ref.read(searchQueryProvider.notifier).state = val,
-                  decoration: InputDecoration(
-                    hintText: 'Tìm thiết bị, phòng...',
-                    prefixIcon: const Icon(Icons.search_rounded, size: 20),
-                    filled: true,
-                    fillColor: isDark ? const Color(0xFF161B26) : Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(
-                        color: isDark ? const Color(0xFF232B3B) : const Color(0xFFE5E7EB),
-                      ),
+                child: Container(
+                  decoration: Soft3DDecorations.card(
+                    isDark: theme.brightness == Brightness.dark,
+                    radius: 18,
+                  ),
+                  child: TextField(
+                    onChanged: (val) =>
+                        ref.read(searchQueryProvider.notifier).state = val,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: theme.colorScheme.onSurface,
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      borderSide: BorderSide(
-                        color: isDark ? const Color(0xFF232B3B) : const Color(0xFFE5E7EB),
+                    decoration: InputDecoration(
+                      hintText: 'Tìm thiết bị',
+                      hintStyle: TextStyle(
+                        fontSize: 14,
+                        color: theme.colorScheme.onSurfaceVariant
+                            .withValues(alpha: 0.8),
                       ),
+                      prefixIcon: Icon(
+                        Icons.search_rounded,
+                        size: 20,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      filled: false,
+                      contentPadding: const EdgeInsets.symmetric(
+                          vertical: 14, horizontal: 16),
+                      border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                     ),
                   ),
                 ),
               ),
             ),
-
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
               sliver: SliverToBoxAdapter(
@@ -102,40 +98,57 @@ class FeatureDevicesScreen extends ConsumerWidget {
                       _CategoryChip(
                         label: 'Tất cả',
                         isSelected: selectedCategory == 'all',
-                        onTap: () => ref.read(deviceFilterCategoryProvider.notifier).state = 'all',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'all',
                       ),
                       _CategoryChip(
-                        label: '💡 Đèn',
+                        label: 'Đèn',
                         isSelected: selectedCategory == 'light',
-                        onTap: () => ref.read(deviceFilterCategoryProvider.notifier).state = 'light',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'light',
                       ),
                       _CategoryChip(
-                        label: '💨 Quạt',
+                        label: 'Quạt',
                         isSelected: selectedCategory == 'fan',
-                        onTap: () => ref.read(deviceFilterCategoryProvider.notifier).state = 'fan',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'fan',
                       ),
                       _CategoryChip(
-                        label: '⚡ Ổ cắm',
+                        label: 'Ổ cắm',
                         isSelected: selectedCategory == 'socket',
-                        onTap: () => ref.read(deviceFilterCategoryProvider.notifier).state = 'socket',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'socket',
                       ),
                       _CategoryChip(
-                        label: '❄️ Điều hòa',
+                        label: 'Điều hòa',
                         isSelected: selectedCategory == 'airConditioner',
-                        onTap: () => ref.read(deviceFilterCategoryProvider.notifier).state = 'airConditioner',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'airConditioner',
+                      ),
+                      _CategoryChip(
+                        label: 'Khác',
+                        isSelected: selectedCategory == 'custom',
+                        onTap: () => ref
+                            .read(deviceFilterCategoryProvider.notifier)
+                            .state = 'custom',
                       ),
                     ],
                   ),
                 ),
               ),
             ),
-
             if (grouped.isEmpty)
               const SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(vertical: 40),
                   child: Center(
-                    child: Text('Không tìm thấy thiết bị phù hợp', style: TextStyle(color: Colors.grey)),
+                    child: Text('Không tìm thấy thiết bị phù hợp',
+                        style: TextStyle(color: Colors.grey)),
                   ),
                 ),
               )
@@ -147,7 +160,10 @@ class FeatureDevicesScreen extends ConsumerWidget {
                     final roomDevices = grouped[roomId]!;
 
                     final roomName = roomsAsync.when(
-                      data: (rooms) => rooms.firstWhere((r) => r.id == roomId, orElse: () => Room(id: roomId, name: roomId)).name,
+                      data: (rooms) => rooms
+                          .firstWhere((r) => r.id == roomId,
+                              orElse: () => Room(id: roomId, name: roomId))
+                          .name,
                       loading: () => roomId,
                       error: (_, __) => roomId,
                     );
@@ -162,11 +178,14 @@ class FeatureDevicesScreen extends ConsumerWidget {
                             children: [
                               Text(
                                 roomName,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                    fontSize: 16, fontWeight: FontWeight.w700),
                               ),
                               Text(
                                 '${roomDevices.length} thiết bị',
-                                style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant),
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: theme.colorScheme.onSurfaceVariant),
                               ),
                             ],
                           ),
@@ -174,11 +193,16 @@ class FeatureDevicesScreen extends ConsumerWidget {
                           GridView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
-                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: 2,
                               mainAxisSpacing: 12,
                               crossAxisSpacing: 12,
-                              mainAxisExtent: 176,
+                              mainAxisExtent:
+                                  MediaQuery.textScalerOf(context).scale(14) >
+                                          17
+                                      ? 220
+                                      : 180,
                             ),
                             itemCount: roomDevices.length,
                             itemBuilder: (context, idx) {
@@ -187,11 +211,16 @@ class FeatureDevicesScreen extends ConsumerWidget {
                                 device: dev,
                                 onToggle: (isOn) async {
                                   try {
-                                    await ref.read(deviceRepositoryProvider).toggleDevice(dev.id, isOn);
+                                    await ref
+                                        .read(deviceRepositoryProvider)
+                                        .toggleDevice(dev.id, isOn);
                                   } catch (e) {
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Lỗi điều khiển thiết bị: $e')),
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                            content: Text(
+                                                'Lỗi điều khiển thiết bị: $e')),
                                       );
                                     }
                                   }
@@ -202,26 +231,35 @@ class FeatureDevicesScreen extends ConsumerWidget {
                                     device: dev,
                                     onToggle: (isOn) async {
                                       try {
-                                        await ref.read(deviceRepositoryProvider).toggleDevice(dev.id, isOn);
+                                        await ref
+                                            .read(deviceRepositoryProvider)
+                                            .toggleDevice(dev.id, isOn);
                                       } catch (e) {
                                         if (context.mounted) {
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Lỗi điều khiển thiết bị: $e')),
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                                content: Text(
+                                                    'Lỗi điều khiển thiết bị: $e')),
                                           );
                                         }
                                       }
                                     },
                                     onValueChanged: (val) {
-                                      ref.read(deviceRepositoryProvider).setDeviceValue(dev.id, val);
+                                      ref
+                                          .read(deviceRepositoryProvider)
+                                          .setDeviceValue(dev.id, val);
                                     },
                                     onMoreSettings: () {
-                                      Navigator.pop(context);
+                                      Navigator.of(context, rootNavigator: true).pop();
                                       context.push('/devices/${dev.id}');
                                     },
                                   );
                                 },
                                 onFavoriteToggle: () {
-                                  ref.read(deviceRepositoryProvider).toggleFavorite(dev.id);
+                                  ref
+                                      .read(deviceRepositoryProvider)
+                                      .toggleFavorite(dev.id);
                                 },
                               );
                             },
@@ -233,6 +271,33 @@ class FeatureDevicesScreen extends ConsumerWidget {
                   childCount: grouped.keys.length,
                 ),
               ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+              sliver: SliverToBoxAdapter(
+                  child: ref.watch(actionBoxesStreamProvider).when(
+                        data: (boxes) => boxes.isEmpty
+                            ? const SizedBox.shrink()
+                            : ExpansionTile(
+                                tilePadding: EdgeInsets.zero,
+                                title: const Text('Bộ điều khiển',
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600)),
+                                children: boxes
+                                    .map((box) => Padding(
+                                          padding:
+                                              const EdgeInsets.only(bottom: 10),
+                                          child: ActionBoxCard(
+                                              actionBox: box,
+                                              onTap: () => context.push(
+                                                  '/actionbox/${box.id}')),
+                                        ))
+                                    .toList(),
+                              ),
+                        loading: () => const SizedBox.shrink(),
+                        error: (_, __) => const SizedBox.shrink(),
+                      )),
+            ),
           ],
         ),
       ),
@@ -258,18 +323,14 @@ class _CategoryChip extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(right: 8),
-      child: GestureDetector(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTap();
-        },
+      child: SoftBounce(
+        onTap: onTap,
+        pressedScale: 0.93,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? (isDark ? Colors.white : const Color(0xFF0F172A))
-                : (isDark ? const Color(0xFF1E2532) : const Color(0xFFF1F5F9)),
-            borderRadius: BorderRadius.circular(100),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: Soft3DDecorations.pill(
+            isDark: isDark,
+            isSelected: isSelected,
           ),
           child: Text(
             label,

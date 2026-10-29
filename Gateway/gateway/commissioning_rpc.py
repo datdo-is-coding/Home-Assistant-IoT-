@@ -1,5 +1,6 @@
 """Narrow Firebase mailbox adapter for the running Gateway's commissioning flow."""
 from collections import OrderedDict
+import asyncio
 import copy
 import hashlib
 import json
@@ -16,6 +17,7 @@ class CommissioningRpc:
         self.clock = clock
         self._responses = OrderedDict()
         self.core = core
+        self.infrared = None
 
     async def dispatch(self, uid, request_id, envelope):
         """The caller supplies UID from a protected RTDB path, never request data."""
@@ -75,8 +77,19 @@ class CommissioningRpc:
                 try:
                     if method == 'GET' and path == '/api/commissioning/context' and not body:
                         result = response(200, self.core.context(uid) if self.core else {'profile':'legacy'})
+                    elif self.infrared and path.startswith('/api/v1/ir/'):
+                        result = response(200, await self.infrared.request(uid,method,path,body))
+                    elif self.core and (re.fullmatch(r'/api/operations/HCM-[0-9a-f]{24}',path) or re.fullmatch(r'/api/devices/(AB|SB)[0-9A-F]{12}/(operations|remove)',path)):
+                        request_body={**body,'idempotency_key':self._idempotency(uid,request_id,path,body)} if method=='POST' else body
+                        result=response(200,self.core.request(uid,method,path,request_body))
                     elif self.core and (path.startswith('/api/v1/') or path in ('/api/kws/config','/api/device/update')):
-                        result = response(200, self.core.request(uid,method,path,body))
+                        value=self.core.request(uid,method,path,body)
+                        if method=='POST' and path=='/api/v1/channels/command':
+                            deadline=min(time.monotonic()+4.5,time.monotonic()+max(0,(envelope['expires_at']/1000-self.clock())-.3))
+                            while value['status'] in ('ACCEPTED','RECEIVED') and time.monotonic()<deadline:
+                                await asyncio.sleep(.03)
+                                value=self.core.request(uid,'GET','/api/v1/commands/'+value['command_id'],{})
+                        result = response(200, value)
                     elif method == 'GET' and path == '/api/commissioning/candidates' and not body:
                         result = response(200, {'success': True, 'candidates': [
                             candidate.to_api_dict() for candidate in lifecycle.get_candidates(now)]})

@@ -2,11 +2,11 @@ file(GLOB_RECURSE app_sources
     "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/*.c"
 )
+list(REMOVE_ITEM app_sources "${CMAKE_CURRENT_SOURCE_DIR}/audio/kws/local_kws.cpp")
 
 idf_component_register(
     SRCS
         ${app_sources}
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws/kws_mfcc.cpp"
     INCLUDE_DIRS
         "."
         "${CMAKE_CURRENT_SOURCE_DIR}/../../common"
@@ -46,6 +46,7 @@ idf_component_register(
         esp_driver_gpio
         esp_driver_uart
         esp_driver_i2s
+        esp_driver_rmt
         driver
         espressif__mqtt
         espressif__cjson
@@ -59,10 +60,3 @@ idf_component_register(
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=stringop-truncation -Wno-stringop-truncation -Wno-error=missing-field-initializers -Wno-missing-field-initializers)
-
-# Debug optimization exceeded the 250 ms KWS stride on ESP32-S3.
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/audio/kws/local_kws.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../common/kws/kws_mfcc.cpp"
-    PROPERTIES COMPILE_OPTIONS "-O2"
-)

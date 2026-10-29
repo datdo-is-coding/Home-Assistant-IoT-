@@ -9,6 +9,8 @@ extern "C" {
 typedef bool (*hc_send_up_fn)(const uint8_t *data, size_t length);
 typedef bool (*hc_apply_fn)(uint8_t channel, bool on);
 typedef bool (*hc_sample_fn)(uint8_t channel, bool *on, float *amps, bool *valid, uint16_t *fault);
+typedef bool (*hc_reset_fn)(uint8_t kind);
+void hc_runtime_set_reset_handler(hc_reset_fn handler);
 esp_err_t hc_runtime_init(bool subbox, hc_send_up_fn uplink, hc_apply_fn apply, hc_sample_fn sample);
 bool hc_runtime_enabled(void);
 typedef bool (*hc_application_fn)(uint8_t type,const uint8_t *data,size_t size);

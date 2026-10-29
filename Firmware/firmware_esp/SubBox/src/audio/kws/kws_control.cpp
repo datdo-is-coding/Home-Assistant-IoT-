@@ -198,7 +198,7 @@ void KwsControl::resolve(Command command) {
     const char* missing=command.action.empty()?"missing_action":command.device.empty()?"missing_device":command.room.empty()?"missing_room":nullptr;
     if(missing) {
         if(command.follow_up){result(command,"error","incomplete_command");return;}
-        m_pending[command.origin]={command,m_clock()+PLAYBACK_TIMEOUT_MS,"playback"};
+        m_pending[command.origin]={command,m_clock()+5000,"listening"};
         result(command,"incomplete",missing);return;
     }
     const auto* target=binding(command.room,command.device);
@@ -353,7 +353,7 @@ bool KwsControl::handle(const std::string& topic,const std::string& payload) {
         const uint32_t session=kwsUint(root,"session_id"),request=kwsUint(root,"request_id");
         const std::string origin=kwsString(root,"origin_node");
         auto pending=m_pending.find(origin);
-        if(pending!=m_pending.end()&&pending->second.phase=="playback"&&session==m_session&&
+        if(pending!=m_pending.end()&&(pending->second.phase=="playback"||pending->second.phase=="listening")&&session==m_session&&
             request==pending->second.command.request&&session==pending->second.command.session) {
             // LISTEN_FOLLOWUP and the eventual action each need a fresh request ID:
             // ActionBox caches responses by (session, request), and Gateway dedups

@@ -1,0 +1,77 @@
+[
+  {
+    "case": "short100",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "short200",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "short_noise",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "stream_end",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "word_gap",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "brief_gap",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "long_word",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "max_word",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "cancel_restart",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "background",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "packet_boundaries",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "bad_model",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "bad_input",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "init_failure",
+    "passed": true,
+    "diagnostics": ""
+  },
+  {
+    "case": "prefix_then_failure",
+    "passed": true,
+    "diagnostics": ""
+  }
+]

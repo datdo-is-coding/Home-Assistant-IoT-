@@ -79,7 +79,7 @@ bool TaskManager::init() {
         return false;
     }
 
-    if (m_audio_mgr) {
+    if (m_audio_mgr && m_kws) {
         m_audio_mgr->registerUtteranceCallback([this](const std::string& origin, const std::string& text) {
             if (!queueKwsUtterance(origin, text)) ESP_LOGW(TAG, "Local KWS result queue full; utterance dropped");
         });

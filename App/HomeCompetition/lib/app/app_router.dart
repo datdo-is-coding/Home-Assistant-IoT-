@@ -1,3 +1,4 @@
+import '../features/infrared/infrared_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/smart_home_providers.dart';
@@ -20,6 +21,10 @@ final appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
   initialLocation: '/home',
   routes: [
+    GoRoute(
+        path: '/infrared',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) => const InfraredScreen()),
     GoRoute(
       path: '/actionbox/add-device',
       parentNavigatorKey: _rootNavigatorKey,
@@ -111,5 +116,5 @@ Widget _gatewayFeature(Widget child) => Consumer(builder: (context, ref, _) {
               child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
-                      'Chức năng này chưa có dịch vụ xử lý trên Firebase. Thiết bị đã đồng bộ sẽ tự xuất hiện trong danh sách.'))));
+                      'Chức năng này đang được nâng cấp. Thiết bị kết nối sẽ tự xuất hiện trong danh sách.'))));
     });

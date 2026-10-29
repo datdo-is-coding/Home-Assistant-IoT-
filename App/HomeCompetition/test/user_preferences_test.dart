@@ -332,21 +332,13 @@ void main() {
       expect(find.text('Cảnh báo thiết bị mất mạng'), findsNothing);
       expect(find.text('Thông báo cảm biến'), findsNothing);
 
-      // Honest system info card exists
-      await tester.scrollUntilVisible(
-        find.text('Thông báo & Trạng thái hệ thống'),
-        200,
-        scrollable: find.byType(Scrollable).first,
-      );
+      await tester.scrollUntilVisible(find.text('Thông báo'), 150,
+          scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Thông báo'));
       await tester.pumpAndSettle();
-
-      expect(find.text('Thông báo & Trạng thái hệ thống'), findsOneWidget);
-      expect(
-        find.textContaining('Cảnh báo ngắt kết nối và trạng thái thiết bị được hiển thị trực tiếp theo thời gian thực'),
-        findsOneWidget,
-      );
-      expect(find.textContaining('Push Notification'), findsOneWidget);
-      expect(find.byIcon(Icons.info_outline_rounded), findsWidgets);
+      expect(find.textContaining('Chưa hỗ trợ thông báo đẩy'), findsOneWidget);
+      await tester.tap(find.text('Đóng'));
+      await tester.pumpAndSettle();
     });
 
     testWidgets('SettingsScreen allows editing home name and persists changes', (tester) async {

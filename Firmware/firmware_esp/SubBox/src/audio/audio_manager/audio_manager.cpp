@@ -9,9 +9,10 @@
 
 static const char* TAG = "AUDIO_MGR";
 
-AudioManager::AudioManager(std::shared_ptr<VADInterface> vad, std::shared_ptr<ASREngine> asr)
+AudioManager::AudioManager(std::shared_ptr<VADInterface> vad, std::shared_ptr<ASREngine> asr, bool defer_pcm)
     : m_vad(vad),
       m_asr(asr),
+      m_defer_pcm(defer_pcm),
       m_session_active(false),
       m_utterance_callback(nullptr) {
 }
@@ -33,6 +34,7 @@ void AudioManager::reset() {
     m_session_active = false;
     m_stream_end_received = false;
     m_active_source_node_id.clear();
+    m_wake_source.clear();
     for (auto& pair : m_channels) {
         if (pair.second.stream_buffer) {
             pair.second.stream_buffer->clear();
@@ -105,6 +107,17 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::string node_id = packet.source_node_id;
 
+    if (packet.msg_type == AUDIO_MSG_TYPE_WAKE) {
+        const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+        if (!m_session_active && (m_wake_source != node_id || now - m_wake_time_ms >= 5000) &&
+            SoundPlayer::instance().play(SoundType::WAKE)) {
+            m_wake_source = node_id;
+            m_wake_time_ms = now;
+            ESP_LOGI(TAG, "Wake feedback queued for %s", node_id.c_str());
+        }
+        return;
+    }
+
     if (packet.msg_type == AUDIO_MSG_TYPE_STREAM_END) {
         if (m_session_active && m_active_source_node_id == node_id) {
             const auto channel = m_channels.find(node_id);
@@ -134,7 +147,7 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         new_ch.latest_energy = 0;
         new_ch.is_speaking = false;
         new_ch.signal_quality = 1.0f;
-        new_ch.stream_buffer = std::make_shared<AudioRingBuffer>(64 * 1024);
+        new_ch.stream_buffer = std::make_shared<AudioRingBuffer>((m_defer_pcm ? 96 : 64) * 1024);
         new_ch.stream_buffer->init();
 
         it = m_channels.emplace(node_id, std::move(new_ch)).first;
@@ -155,8 +168,11 @@ void AudioManager::ingestAudioPacket(const AudioPacket& packet) {
         m_asr_start_pending = true;
         m_session_failed = false;
         if (m_vad) m_vad->reset();
-        ESP_LOGI(TAG, "🎙️ [STREAM_START] Explicit session lock onto ActionBox: %s (ASR started)", node_id.c_str());
-        SoundPlayer::instance().play(SoundType::WAKE);
+        ESP_LOGI(TAG, "🎙️ [STREAM_START] Capture session locked onto ActionBox: %s", node_id.c_str());
+        const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+        if (m_wake_source != node_id || now - m_wake_time_ms >= 5000)
+            SoundPlayer::instance().play(SoundType::WAKE);
+        m_wake_source.clear();
         return;
     }
 
@@ -227,6 +243,16 @@ void AudioManager::process() {
 
     const auto active_buffer = it->second.stream_buffer;
     const uint32_t generation = m_session_generation;
+    // Receive the complete radio utterance before competing with Wi-Fi uplink.
+    if (m_defer_pcm) {
+        const uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+        if (now - it->second.last_timestamp_ms > 1200) m_session_failed = true;
+        if (!m_stream_end_received && !m_session_failed) return;
+        if (m_session_failed) {
+            m_asr_start_pending = false;
+            active_buffer->clear();
+        }
+    }
     if (m_asr_start_pending) {
         m_asr_start_pending = false;
         const std::string source_node_id = m_active_source_node_id;

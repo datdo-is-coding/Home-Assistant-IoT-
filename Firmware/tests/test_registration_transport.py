@@ -23,7 +23,8 @@ using QueueHandle_t=void*;
 constexpr int pdPASS=1, WIFI_IF_STA=0, WIFI_SECOND_CHAN_NONE=0;
 using wifi_second_chan_t=int;
 inline QueueHandle_t xQueueCreate(int,size_t) {return reinterpret_cast<void*>(1);}
-inline int xQueueSend(void*,const void*,int) {return 1;}
+inline int rx_enqueued=0;
+inline int xQueueSend(void*,const void*,int) {++rx_enqueued;return 1;}
 inline int xQueueReceive(void*,void*,int) {return 0;}
 inline void vQueueDelete(void*) {}
 inline int xTaskCreate(void(*)(void*),const char*,int,void*,int,void**) {return 1;}
@@ -49,11 +50,13 @@ inline void esp_now_unregister_recv_cb() {}
 inline void esp_now_unregister_send_cb() {}
 inline void esp_now_register_recv_cb(void(*)(const esp_now_recv_info_t*,const uint8_t*,int)) {}
 inline void esp_now_register_send_cb(void(*)(const uint8_t*,int)) {}
-inline bool hc_runtime_enabled() {return false;}
-inline bool hc_runtime_trusted_peer(const uint8_t*) {return false;}
+inline bool core_enabled=false,core_trusted=true,core_registered=true;
+inline uint32_t core_peer_id=3476310;
+inline bool hc_runtime_enabled() {return core_enabled;}
+inline bool hc_runtime_trusted_peer(const uint8_t*) {return core_trusted;}
 inline bool hc_runtime_receive_radio(const uint8_t*,const uint8_t*,size_t) {return false;}
-inline uint32_t hc_runtime_peer_node_id(const uint8_t*) {return 0;}
-inline bool hc_runtime_registered() {return false;}
+inline uint32_t hc_runtime_peer_node_id(const uint8_t*) {return core_peer_id;}
+inline bool hc_runtime_registered() {return core_registered;}
 ''')
             for name in ['esp_err.h','esp_log.h','esp_wifi.h','esp_mac.h','esp_timer.h','esp_now.h','hc_runtime.h',
                          'freertos/FreeRTOS.h','freertos/task.h','freertos/queue.h','freertos/semphr.h']:

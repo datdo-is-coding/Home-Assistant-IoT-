@@ -1,0 +1,117 @@
+{
+  "date": "2026-10-29",
+  "app": {
+    "version": "1.5.0",
+    "code": 26,
+    "installed": true,
+    "same_signer": true,
+    "owner_badge_observed": true,
+    "reset_remove_dialogs_opened_cancelled": true,
+    "sha256": "11fa890b794f01f6bfdd18f5d1f54796e46ae85876314f9e2104505df117ebc6",
+    "signer_sha256": "7bccf31712aa03d76bfc27c36fa5e31a84d70fa5daaa73ba4ce6f2e904b1a603",
+    "core_identify_and_network_reset_hidden": true,
+    "final_runtime": {
+      "version": [
+        "versionCode=26 minSdk=24 targetSdk=36",
+        "versionName=1.5.0"
+      ],
+      "process_running": true,
+      "startup_errors": []
+    }
+  },
+  "live": {
+    "main": {
+      "source_matches": true,
+      "mismatches": [],
+      "active": "active"
+    },
+    "radio": {
+      "source_matches": true,
+      "mismatches": [],
+      "active": "active"
+    },
+    "devices": [
+      {
+        "device": "DDF4",
+        "firmware": "2.3.0-control1",
+        "registration": "REGISTERED",
+        "fresh": true,
+        "maintenance_ready": true
+      },
+      {
+        "device": "0B54",
+        "firmware": "2.3.0-control1",
+        "registration": "REGISTERED",
+        "fresh": true,
+        "maintenance_ready": true
+      }
+    ],
+    "receiver_enabled": false
+  },
+  "reboot": {
+    "device": "DDF4",
+    "operation_id": "HCM-d7e37e2e175659eccce989a8",
+    "states": [
+      "accepted",
+      "running",
+      "running",
+      "running",
+      "succeeded"
+    ],
+    "final_state": "succeeded",
+    "boot_changed": true,
+    "registration": "REGISTERED"
+  },
+  "checks": {
+    "gateway_full": {
+      "run": 500,
+      "skipped": 3,
+      "ok": true
+    },
+    "voice_final": {
+      "run": 4,
+      "ok": true
+    },
+    "flutter_full": {
+      "run": 184,
+      "ok": true
+    },
+    "flutter_maintenance_final": {
+      "run": 12,
+      "ok": true
+    },
+    "flutter_analyze": "No issues found",
+    "firmware_host": {
+      "run": 40,
+      "ok": true
+    },
+    "subbox_build": true,
+    "actionbox_build": true
+  },
+  "usb": {
+    "0B54": {
+      "version": "2.3.0-control1",
+      "offset": "0x20000",
+      "app_sha256": "b2a6babf311d17f702025f603782b4b19220b1a2281fadbc903ee1a7b8137ba4"
+    },
+    "DDF4": {
+      "version": "2.3.0-control1",
+      "offset": "0x310000",
+      "app_sha256": "04e662594c0d64a2d5a0095c6b57e183b80cf937d4bd76f186945b814c6e33d4"
+    },
+    "DDF8": {
+      "flashed": false,
+      "ota_deferred_by_user": true
+    }
+  },
+  "not_hardware_tested": [
+    "ir_learning",
+    "absolute_ac_temperature",
+    "ir_voice_speech",
+    "factory_reset",
+    "remove_from_home"
+  ],
+  "physical_receiver_present": false,
+  "images_are_signed_ota_packages": false,
+  "release_hash_check": "all entries OK"
+}

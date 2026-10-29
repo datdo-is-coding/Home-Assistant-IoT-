@@ -76,6 +76,18 @@ class CommissioningRpcTests(unittest.IsolatedAsyncioTestCase):
         response = await self.rpc.dispatch('owner', 'next', self.envelope('next'))
         self.assertEqual(response['body']['candidates'], [])
 
+    async def test_core_control_returns_terminal_ack_in_same_mailbox_round_trip(self):
+        class Core:
+            def __init__(self):self.calls=[]
+            def request(self,uid,method,path,body):
+                self.calls.append((method,path))
+                return {'command_id':'CMD-test','status':'ACCEPTED' if method=='POST' else 'APPLIED'}
+        core=Core();self.rpc.core=core
+        result=await self.rpc.dispatch('owner','fast-control',self.envelope(
+            'fast-control','POST','/api/v1/channels/command',{'node_id':1,'channel':1,'on':True,'idempotency_key':'test'}))
+        self.assertEqual(result['body']['status'],'APPLIED')
+        self.assertEqual(core.calls,[('POST','/api/v1/channels/command'),('GET','/api/v1/commands/CMD-test')])
+
     async def test_get_request_accepts_firebase_omitting_empty_body(self):
         request = self.envelope()
         del request['body']

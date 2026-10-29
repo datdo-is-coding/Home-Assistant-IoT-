@@ -33,21 +33,28 @@ public:
     bool isActive() const;
 
 private:
-    bool inferWindow(uint64_t now_ms);
-    void appendSamples(const int16_t* pcm, size_t samples);
+    // Relayed ActionBox PCM has a higher floor than the legacy direct-mic input.
+    static constexpr float INITIAL_NOISE_RMS = 0.015f;
+    bool processVadFrame(size_t samples);
+    bool finishWord();
+    bool inferWord();
+    void resetWord();
     std::string commandText() const;
 
-    float* m_ring = nullptr;
+    float* m_segment = nullptr;
+    float* m_frame = nullptr;
     float* m_window = nullptr;
     float* m_mfcc = nullptr;
     float* m_pool_scratch = nullptr;
     float* m_dw_scratch = nullptr;
     std::unique_ptr<MFCCExtractor> m_extractor;
 
-    size_t m_head = 0;
-    size_t m_samples_since_step = 0;
-    int m_last_class = -1;
-    uint64_t m_last_class_ms = 0;
+    size_t m_frame_samples = 0;
+    size_t m_segment_samples = 0;
+    size_t m_speech_samples = 0;
+    size_t m_silence_samples = 0;
+    float m_noise_rms = INITIAL_NOISE_RMS;
+    bool m_word_active = false;
 
     KwsCommand m_command;
     std::string m_source_node_id;

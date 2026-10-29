@@ -20,7 +20,8 @@ typedef enum {
     AUDIO_MSG_TYPE_STREAM_START         = 0x20,
     AUDIO_MSG_TYPE_STREAM_CHUNK         = 0x21,
     AUDIO_MSG_TYPE_STREAM_END           = 0x22,
-    AUDIO_MSG_TYPE_DOWNLINK_TTS         = 0x23
+    AUDIO_MSG_TYPE_DOWNLINK_TTS         = 0x23,
+    AUDIO_MSG_TYPE_WAKE                 = 0x24
 } AudioMsgType;
 
 #pragma pack(push, 1)

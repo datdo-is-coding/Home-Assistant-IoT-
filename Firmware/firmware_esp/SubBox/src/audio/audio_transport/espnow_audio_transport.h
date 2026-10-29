@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -54,6 +55,7 @@ private:
     std::vector<TrustedPeer> m_trusted_peers;
     uint8_t m_local_mac[6]{};
     QueueHandle_t m_rx_queue = nullptr;
+    std::atomic<uint32_t> m_rx_drops{0};
     TaskHandle_t m_rx_task = nullptr;
 
     volatile bool m_running;

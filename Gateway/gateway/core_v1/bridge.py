@@ -20,6 +20,7 @@ from .protocol import Frame, MessageType, ReplayWindow
 from .registry import CoreError, canonical, require
 from .provisioning import Provisioning
 from .kws import CoreKws
+from .maintenance import Maintenance
 
 CHANNEL = struct.Struct('<BBfH')
 COMMAND = struct.Struct('<BBQQ')
@@ -41,6 +42,7 @@ class Bridge:
         self.last_grant=0
         self.kws=CoreKws(registry)
         self.last_kws=0
+        self.maintenance=Maintenance(registry)
 
     def key(self,node,typ):
         n=self.registry.one('SELECT registration FROM registered_nodes WHERE node_id=?',(node,))
@@ -131,6 +133,8 @@ class Bridge:
             self.registry.db.execute("UPDATE registered_nodes SET last_seen=?,connectivity='ONLINE' WHERE node_id=?",(self.registry.clock(),node))
         elif f.type==MessageType.EVENT_REPORT:
             self.kws.receive(f)
+        elif f.type in (MessageType.CAPABILITY_REPORT,MessageType.MAINTENANCE_ACK):
+            self.maintenance.receive(f)
         elif f.type in (MessageType.OTA_PROGRESS,MessageType.OTA_CHUNK_ACK,MessageType.OTA_RESULT) and self.ota:
             if f.type==MessageType.OTA_RESULT:
                 require(len(f.payload)==49 and f.payload[48] in (1,2),'invalid_ota_result')
@@ -171,6 +175,7 @@ class Bridge:
                 try: result.append((self.route(node),self.frame(node,MessageType.HEARTBEAT)))
                 except CoreError: pass
         if self.ota: result.extend(self.ota.outgoing(self))
+        result.extend(self.maintenance.outgoing(self))
         if self.registry.clock()-self.last_kws>=2:
             self.last_kws=self.registry.clock()
             for node in self.windows:

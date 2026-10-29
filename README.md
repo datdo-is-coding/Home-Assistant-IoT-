@@ -12,7 +12,8 @@
 | ActionBox 3 relay / 3 BL0942 | `Firmware/firmware_esp/ActionBox_V2/` | `src/main.cpp` |
 | SubBox điều phối / âm thanh | `Firmware/firmware_esp/SubBox/` | `src/main.cpp` |
 | Giao thức/OTA/bảo mật chung | `Firmware/firmware_esp/common/hc_core/` | Component ESP-IDF của cả hai Box |
-| Model/MFCC KWS hiện tại | `Firmware/firmware_esp/common/kws/` | Nhận diện đèn/quạt, khách/ngủ/bếp |
+| Giọng nói đang dùng | `Gateway/gateway/asr_engine.py`, `core_v1/speaker_voice.py` | Pi4 nhận PCM, ASR, lệnh Core và phản hồi; WakeNet ở ActionBox |
+| Model/MFCC KWS đã dừng | `Firmware/firmware_esp/common/kws/` | Giữ lịch sử; không build/chạy LocalKws trên SubBox |
 
 Thông tin đang chạy và các phần chưa nối xong nằm trong
 [trạng thái hệ thống](docs/architecture/current_state.md). Bản phát hành đã giữ ở
@@ -28,7 +29,7 @@ cd App/HomeCompetition
 flutter pub get
 flutter analyze
 flutter test --concurrency=1
-flutter build apk --debug
+flutter build apk --release
 ```
 
 Giữ Android application ID đã đăng ký Firebase. Sau khi đổi nhánh hoặc khôi phục

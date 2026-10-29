@@ -7,6 +7,7 @@ import '../../models/room.dart';
 import '../../providers/smart_home_providers.dart';
 import '../../widgets/device_card.dart';
 import '../../widgets/quick_control_sheet.dart';
+import '../../widgets/soft_3d_decorations.dart';
 
 class RoomDetailScreen extends ConsumerWidget {
   final String roomId;
@@ -49,56 +50,139 @@ class RoomDetailScreen extends ConsumerWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Padding(
-          padding: const EdgeInsets.only(left: 12),
-          child: IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E242B) : Colors.white,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+          padding: const EdgeInsets.only(left: 14),
+          child: Center(
+            child: SoftBounce(
+              onTap: () => context.pop(),
+              pressedScale: 0.90,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                child: Center(
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: isDark
+                            ? const [Color(0xFF242C3C), Color(0xFF161B26)]
+                            : const [Color(0xFFFFFFFF), Color(0xFFEFF3F8)],
+                      ),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF2D384C) : const Color(0xFFE2E8F0),
+                        width: 1.0,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
+                          offset: const Offset(0, 4),
+                          blurRadius: 8,
+                          spreadRadius: -1,
+                        ),
+                        if (!isDark)
+                          BoxShadow(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            offset: const Offset(0, -1),
+                            blurRadius: 2,
+                          ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      size: 16,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                  ),
                 ),
               ),
-              child: Icon(
-                Icons.arrow_back_ios_new_rounded,
-                size: 16,
-                color: theme.colorScheme.onSurface,
-              ),
             ),
-            onPressed: () => context.pop(),
           ),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Tắt toàn bộ thiết bị trong phòng',
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E242B) : Colors.white,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: Tooltip(
+                message: 'Tắt toàn bộ thiết bị trong phòng',
+                child: SoftBounce(
+                  onTap: activeCount == 0
+                      ? null
+                      : () {
+                          HapticFeedback.mediumImpact();
+                          for (final dev in roomDevices) {
+                            if (dev.isOn) {
+                              ref.read(deviceRepositoryProvider).toggleDevice(dev.id, false);
+                            }
+                          }
+                        },
+                  pressedScale: 0.90,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    child: Center(
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: activeCount > 0
+                              ? LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: isDark
+                                      ? const [Color(0xFF3B1E22), Color(0xFF241316)]
+                                      : const [Color(0xFFFEE2E2), Color(0xFFFECACA)],
+                                )
+                              : LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: isDark
+                                      ? const [Color(0xFF242C3C), Color(0xFF161B26)]
+                                      : const [Color(0xFFFFFFFF), Color(0xFFEFF3F8)],
+                                ),
+                          border: Border.all(
+                            color: activeCount > 0
+                                ? const Color(0xFFEF4444).withValues(alpha: isDark ? 0.45 : 0.35)
+                                : (isDark ? const Color(0xFF2D384C) : const Color(0xFFE2E8F0)),
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            if (activeCount > 0)
+                              BoxShadow(
+                                color: const Color(0xFFEF4444).withValues(alpha: isDark ? 0.35 : 0.20),
+                                offset: const Offset(0, 4),
+                                blurRadius: 10,
+                              )
+                            else
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
+                                offset: const Offset(0, 4),
+                                blurRadius: 8,
+                                spreadRadius: -1,
+                              ),
+                            if (!isDark)
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.9),
+                                offset: const Offset(0, -1),
+                                blurRadius: 2,
+                              ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.power_settings_new_rounded,
+                          size: 19,
+                          color: activeCount > 0
+                              ? const Color(0xFFEF4444)
+                              : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              child: Icon(
-                Icons.power_settings_new_rounded,
-                size: 18,
-                color: activeCount > 0 ? const Color(0xFFE53935) : theme.colorScheme.onSurfaceVariant,
-              ),
             ),
-            onPressed: activeCount == 0
-                ? null
-                : () {
-                    HapticFeedback.mediumImpact();
-                    for (final dev in roomDevices) {
-                      if (dev.isOn) {
-                        ref.read(deviceRepositoryProvider).toggleDevice(dev.id, false);
-                      }
-                    }
-                  },
           ),
-          const SizedBox(width: 12),
         ],
       ),
       body: room == null
@@ -116,13 +200,13 @@ class RoomDetailScreen extends ConsumerWidget {
                         Row(
                           children: [
                             Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E242B) : Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
-                                ),
+                              width: 50,
+                              height: 50,
+                              decoration: Soft3DDecorations.iconWell(
+                                isDark: isDark,
+                                isActive: activeCount > 0,
+                                accentColor: theme.colorScheme.primary,
+                                radius: 16,
                               ),
                               child: Icon(
                                 room.icon,
@@ -162,12 +246,9 @@ class RoomDetailScreen extends ConsumerWidget {
                           const SizedBox(height: 16),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                            decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF161A22) : Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.05),
-                              ),
+                            decoration: Soft3DDecorations.card(
+                              isDark: isDark,
+                              radius: 20,
                             ),
                             child: Row(
                               children: [
@@ -197,7 +278,7 @@ class RoomDetailScreen extends ConsumerWidget {
                                     child: Container(
                                       width: 1,
                                       height: 16,
-                                      color: isDark ? Colors.white12 : Colors.black12,
+                                      color: isDark ? const Color(0xFF283446) : const Color(0xFFE2E8F0),
                                     ),
                                   ),
                                 if (room.humidity != null) ...[
@@ -333,7 +414,7 @@ class RoomDetailScreen extends ConsumerWidget {
                     ref.read(deviceRepositoryProvider).setDeviceValue(device.id, val);
                   },
                   onMoreSettings: () {
-                    Navigator.pop(context);
+                    Navigator.of(context, rootNavigator: true).pop();
                     context.push('/devices/${device.id}');
                   },
                 );
