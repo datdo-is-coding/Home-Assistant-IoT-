@@ -1,24 +1,11 @@
-"""
-Discovery Manager — Home Assistant Compatible MQTT Discovery & Zero-Touch Device Pairing
-========================================================================================
-Handles:
-  1. Listening for Home Assistant format discovery configs:
-     `homeassistant/switch/<node_id>/<object_id>/config`
-     `homeassistant/sensor/<node_id>/<object_id>/config`
-  2. Listening for native device announcements:
-     `smarthome/discovery/<node_id>` and `smarthome/hello`
-  3. Managing discovered pending devices for 1-Click pairing on Web UI.
-  4. Publishing Home Assistant discovery topics for all registered nodes in Gateway
-     so external Home Assistant instances can also automatically see all IoT devices.
-"""
-
 import json
 import logging
 import re
 import time
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger("discovery")
+
 
 class DiscoveryManager:
     """Manages Home Assistant style MQTT discovery and device auto-pairing."""
@@ -43,10 +30,11 @@ class DiscoveryManager:
             object_id = parts[3]
 
             if not payload:
-
                 self.discovered_devices.pop(node_id, None)
                 if self.gateway and hasattr(self.gateway, "broadcast_event"):
-                    self.gateway.broadcast_event("discovery_removed", {"node_id": node_id})
+                    self.gateway.broadcast_event(
+                        "discovery_removed", {"node_id": node_id}
+                    )
                 return
 
             if isinstance(payload, dict):
@@ -69,14 +57,17 @@ class DiscoveryManager:
             device_name = dev_info.get("name") or data.get("name") or node_id
             model = dev_info.get("model", "ESP32")
 
-            existing = self.discovered_devices.get(node_id, {
-                "node_id": node_id,
-                "mac": mac,
-                "name": device_name,
-                "model": model,
-                "components": {},
-                "discovered_at": time.time(),
-            })
+            existing = self.discovered_devices.get(
+                node_id,
+                {
+                    "node_id": node_id,
+                    "mac": mac,
+                    "name": device_name,
+                    "model": model,
+                    "components": {},
+                    "discovered_at": time.time(),
+                },
+            )
             existing["components"][object_id] = {
                 "type": component,
                 "name": data.get("name", object_id),
@@ -85,7 +76,9 @@ class DiscoveryManager:
             }
             self.discovered_devices[node_id] = existing
 
-            logger.info(f"✨ HA Discovery: Found device '{node_id}' ({device_name}) with {component}/{object_id}")
+            logger.info(
+                f"✨ HA Discovery: Found device '{node_id}' ({device_name}) with {component}/{object_id}"
+            )
 
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("device_discovered", existing)
@@ -118,10 +111,12 @@ class DiscoveryManager:
                 "channels": data.get("channels", {"ch1": "light", "ch2": "fan"}),
                 "sensors": data.get("sensors", []),
                 "suggested_room": data.get("room"),
-                "discovered_at": time.time()
+                "discovered_at": time.time(),
             }
             self.discovered_devices[node_id] = disc
-            logger.info(f"✨ Native Discovery: Found '{node_id}' [{mac}] IP {disc.get('ip')}")
+            logger.info(
+                f"✨ Native Discovery: Found '{node_id}' [{mac}] IP {disc.get('ip')}"
+            )
 
             if self.gateway and hasattr(self.gateway, "broadcast_event"):
                 self.gateway.broadcast_event("device_discovered", disc)
@@ -141,7 +136,9 @@ class DiscoveryManager:
                 unregistered[nid] = dev
         return unregistered
 
-    async def pair_device(self, node_id: str, room: str, rl1: str = "light", rl2: str = "fan") -> dict:
+    async def pair_device(
+        self, node_id: str, room: str, rl1: str = "light", rl2: str = "fan"
+    ) -> dict:
         """
         1-Click pairing: registers a discovered device into the permanent registry
         and broadcasts HA discovery configs.
@@ -150,7 +147,9 @@ class DiscoveryManager:
             return {"success": False, "error": "Registry not available"}
 
         dev = self.discovered_devices.get(node_id, {})
-        mac = (dev.get("mac") or f"00:00:00:{abs(hash(node_id))%0xFFFFFF:06X}").upper()
+        mac = (
+            dev.get("mac") or f"00:00:00:{abs(hash(node_id)) % 0xFFFFFF:06X}"
+        ).upper()
 
         reg = getattr(self.gateway, "registry", None)
         if reg and mac not in reg.get_pending():
@@ -159,7 +158,7 @@ class DiscoveryManager:
                 "rl": [0, 0],
                 "seen": time.time(),
                 "ip": dev.get("ip"),
-                "node_id": node_id
+                "node_id": node_id,
             }
 
         res = await self.gateway.provision_pending(
@@ -167,12 +166,13 @@ class DiscoveryManager:
         )
 
         if res.get("success"):
-
             self.discovered_devices.pop(node_id, None)
 
             await self.publish_ha_discovery_for_node(res.get("node_id", node_id))
             if hasattr(self.gateway, "broadcast_event"):
-                self.gateway.broadcast_event("device_paired", {"node_id": res.get("node_id")})
+                self.gateway.broadcast_event(
+                    "device_paired", {"node_id": res.get("node_id")}
+                )
 
         return res
 
@@ -181,13 +181,19 @@ class DiscoveryManager:
         Publish standard Home Assistant discovery topics over MQTT
         so that any external Home Assistant instance auto-discovers this node.
         """
-        if not self.gateway or not hasattr(self.gateway, "mqtt") or not self.gateway.mqtt:
+        if (
+            not self.gateway
+            or not hasattr(self.gateway, "mqtt")
+            or not self.gateway.mqtt
+        ):
             return
 
         reg = getattr(self.gateway, "registry", None)
-        if not reg: return
+        if not reg:
+            return
         node = reg.get_all_nodes().get(node_id)
-        if not node: return
+        if not node:
+            return
 
         room = node.get("room", "livingroom")
         mac = node.get("mac", "30:ED:A0:BD:69:D4")
@@ -199,14 +205,20 @@ class DiscoveryManager:
             "model": "ESP32-S3 Voice/Relay Node",
             "manufacturer": "DTV IoT",
             "suggested_area": room,
-            "sw_version": "2.1.0"
+            "sw_version": "2.1.0",
         }
 
         for ch_key, ch_val in channels.items():
-            device_type = ch_val if isinstance(ch_val, str) else ch_val.get("device_type", "light")
-            component = "light" if "light" in device_type or "den" in device_type else "switch"
+            device_type = (
+                ch_val
+                if isinstance(ch_val, str)
+                else ch_val.get("device_type", "light")
+            )
+            component = (
+                "light" if "light" in device_type or "den" in device_type else "switch"
+            )
 
-            m = re.search(r'\d+', ch_key)
+            m = re.search(r"\d+", ch_key)
             ch_num = int(m.group(0)) if m else 1
 
             discovery_topic = f"homeassistant/{component}/{node_id}/{ch_key}/config"
@@ -220,23 +232,32 @@ class DiscoveryManager:
                 "payload_off": json.dumps({"t": "rl", "ch": ch_num, "s": 0}),
                 "state_on": "1",
                 "state_off": "0",
-                "device": dev_block
+                "device": dev_block,
             }
             try:
                 if getattr(self.gateway.mqtt, "client", None):
                     await self.gateway.mqtt.client.publish(
-                        discovery_topic, json.dumps(payload, ensure_ascii=False), qos=1, retain=True
+                        discovery_topic,
+                        json.dumps(payload, ensure_ascii=False),
+                        qos=1,
+                        retain=True,
                     )
                     logger.info(f"📢 Published HA Discovery: {discovery_topic}")
             except Exception as e:
-                logger.warning(f"Failed to publish HA discovery for {node_id}/{ch_key}: {e}")
+                logger.warning(
+                    f"Failed to publish HA discovery for {node_id}/{ch_key}: {e}"
+                )
 
     async def remove_ha_discovery_for_node(self, node_id: str):
         """
         Unpublish Home Assistant discovery topics over MQTT by publishing empty retained messages.
         """
         self.discovered_devices.pop(node_id, None)
-        if not self.gateway or not hasattr(self.gateway, "mqtt") or not self.gateway.mqtt:
+        if (
+            not self.gateway
+            or not hasattr(self.gateway, "mqtt")
+            or not self.gateway.mqtt
+        ):
             return
 
         client = getattr(self.gateway.mqtt, "client", None)
